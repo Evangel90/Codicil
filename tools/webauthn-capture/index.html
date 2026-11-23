@@ -1,0 +1,212 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Codicil Authors -->
+<!--
+  Codicil fixture capture (validation gates V6 and V7).
+  Serve over localhost (WebAuthn needs a secure context):
+    python3 -m http.server 5173 -d tools/webauthn-capture
+  then open http://localhost:5173
+
+  Nothing secret is exported: passkey private keys never leave the
+  authenticator. The JSON contains public keys, signatures and signed data only.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codicil Fixture Capture</title>
+<style>
+  :root { --bg:#0e1116; --panel:#161b22; --line:#2b3240; --text:#e6e9ef; --muted:#97a0b0; --accent:#c9a96e; --ok:#5fb37c; --bad:#e06c6c; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  main { max-width:860px; margin:0 auto; padding:32px 16px 64px; }
+  h1 { font-family: Georgia, "Times New Roman", serif; font-weight:500; font-size:28px; margin:0 0 4px; }
+  h2 { font-size:17px; margin:0 0 8px; }
+  p.lead, .muted { color:var(--muted); }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:20px; margin-top:20px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:12px 0 4px; }
+  input { width:100%; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px; font:13px ui-monospace,Menlo,monospace; }
+  button { background:var(--accent); color:#1a1408; border:0; border-radius:8px; padding:10px 16px; font-weight:600; cursor:pointer; margin:12px 8px 0 0; min-height:44px; }
+  button.secondary { background:transparent; color:var(--text); border:1px solid var(--line); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  button:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  pre { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:12px; overflow:auto; font:12px/1.45 ui-monospace,Menlo,monospace; max-height:360px; white-space:pre-wrap; word-break:break-all; }
+  .status { margin-top:12px; font-size:14px; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  ol { padding-left:20px; color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Codicil fixture capture</h1>
+  <p class="lead">Captures real signatures so the Codicil circuits can be tested against real devices and wallets.
+  Gate <b>V6</b> uses a passkey (Face ID / Touch ID). Gate <b>V7</b> uses a Cardano wallet's <code>signData</code>.</p>
+
+  <section>
+    <h2>Digest to sign (32 bytes, hex)</h2>
+    <p class="muted">This stands in for Codicil's <code>aliveDigest</code>. Keep the default or paste one.</p>
+    <label for="digest">Digest</label>
+    <input id="digest" spellcheck="false" autocomplete="off">
+    <button class="secondary" id="newDigest">New random digest</button>
+  </section>
+
+  <section>
+    <h2>V6 · Passkey (WebAuthn, P-256)</h2>
+    <ol>
+      <li>Create a passkey for this page (only once per browser).</li>
+      <li>Sign the digest. Repeat 3–5 times so we can see whether the data length is stable.</li>
+      <li>Download the JSON and send it back to the agent.</li>
+    </ol>
+    <button id="create">1 · Create passkey</button>
+    <button id="sign" disabled>2 · Sign digest with passkey</button>
+    <div class="status" id="pkStatus" role="status" aria-live="polite"></div>
+  </section>
+
+  <section>
+    <h2>V7 · Cardano wallet (CIP-30 signData)</h2>
+    <p class="muted">Use a <b>test wallet</b> (for example a fresh Lace wallet): the output includes that wallet's address and public key.</p>
+    <button id="cardano">Connect wallet and sign digest</button>
+    <div class="status" id="cardanoStatus" role="status" aria-live="polite"></div>
+  </section>
+
+  <section>
+    <h2>Captured fixtures</h2>
+    <button id="download" disabled>Download JSON</button>
+    <button class="secondary" id="copy" disabled>Copy JSON</button>
+    <button class="secondary" id="clear">Clear</button>
+    <pre id="out" aria-label="Captured fixtures">No captures yet.</pre>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+const unhex = (h) => new Uint8Array((h.match(/../g) || []).map((x) => parseInt(x, 16)));
+const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const fromB64url = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+const rand = (n) => crypto.getRandomValues(new Uint8Array(n));
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+
+const fixtures = { tool: "codicil-fixture-capture/v1", page: location.origin, userAgent: navigator.userAgent, passkey: null, webauthn: [], cip30: [] };
+const render = () => {
+  $("out").textContent = JSON.stringify(fixtures, null, 2);
+  const any = fixtures.webauthn.length + fixtures.cip30.length > 0;
+  $("download").disabled = $("copy").disabled = !any;
+};
+const setStatus = (el, msg, ok) => { el.textContent = msg; el.className = "status " + (ok === undefined ? "" : ok ? "ok" : "bad"); };
+
+const newDigest = () => { $("digest").value = hex(rand(32)); };
+$("newDigest").onclick = newDigest;
+newDigest();
+const digest = () => {
+  const h = $("digest").value.trim().toLowerCase().replace(/^0x/, "");
+  if (!/^[0-9a-f]{64}$/.test(h)) throw new Error("Digest must be exactly 64 hex characters.");
+  return unhex(h);
+};
+
+// P-256 SubjectPublicKeyInfo (DER) ends with 0x04 || X(32) || Y(32).
+const spkiToXY = (spki) => { const b = new Uint8Array(spki); const p = b.slice(-65); if (p[0] !== 4) throw new Error("unexpected key format"); return { x: hex(p.slice(1, 33)), y: hex(p.slice(33)) }; };
+// DER ECDSA signature → fixed 32-byte r and s.
+const derToRS = (der) => {
+  const b = new Uint8Array(der); let i = 2;
+  const read = () => { if (b[i++] !== 2) throw new Error("bad DER"); const len = b[i++]; let v = b.slice(i, i + len); i += len; while (v.length > 32 && v[0] === 0) v = v.slice(1); const out = new Uint8Array(32); out.set(v, 32 - v.length); return out; };
+  return { r: read(), s: read() };
+};
+
+const savedPasskey = store.get("codicil.passkey");
+if (savedPasskey) { fixtures.passkey = JSON.parse(savedPasskey); $("sign").disabled = false; setStatus($("pkStatus"), "Passkey found for this page. You can sign.", true); }
+render();
+
+$("create").onclick = async () => {
+  try {
+    if (!window.PublicKeyCredential) throw new Error("This browser does not support passkeys.");
+    setStatus($("pkStatus"), "Follow your device prompt…");
+    const cred = await navigator.credentials.create({ publicKey: {
+      rp: { name: "Codicil fixture capture", id: location.hostname },
+      user: { id: rand(16), name: "codicil-fixture", displayName: "Codicil fixture" },
+      challenge: rand(32),
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }],  // ES256 = P-256
+      authenticatorSelection: { residentKey: "preferred", userVerification: "required" },
+      timeout: 120000,
+    }});
+    const spki = cred.response.getPublicKey && cred.response.getPublicKey();
+    if (!spki) throw new Error("Browser did not expose the public key (getPublicKey). Try a current Chrome or Safari.");
+    fixtures.passkey = { credentialId: b64url(cred.rawId), rpId: location.hostname, publicKey: spkiToXY(spki), algorithm: cred.response.getPublicKeyAlgorithm?.() };
+    store.set("codicil.passkey", JSON.stringify(fixtures.passkey));
+    $("sign").disabled = false;
+    setStatus($("pkStatus"), "Passkey created. Now sign the digest.", true);
+    render();
+  } catch (e) { setStatus($("pkStatus"), "Could not create passkey: " + e.message, false); }
+};
+
+$("sign").onclick = async () => {
+  try {
+    const d = digest();
+    setStatus($("pkStatus"), "Follow your device prompt…");
+    const a = await navigator.credentials.get({ publicKey: {
+      challenge: d, rpId: location.hostname, userVerification: "required", timeout: 120000,
+      allowCredentials: [{ type: "public-key", id: fromB64url(fixtures.passkey.credentialId) }],
+    }});
+    const r = a.response;
+    const cdj = new Uint8Array(r.clientDataJSON);
+    const auth = new Uint8Array(r.authenticatorData);
+    const { r: sr, s: ss } = derToRS(r.signature);
+    const cdText = new TextDecoder().decode(cdj);
+    const prefix = '{"type":"webauthn.get","challenge":"';
+    // Check locally that the signature verifies over authData || SHA-256(clientDataJSON).
+    const cdHash = new Uint8Array(await crypto.subtle.digest("SHA-256", cdj));
+    const signed = new Uint8Array(auth.length + 32); signed.set(auth); signed.set(cdHash, auth.length);
+    const key = await crypto.subtle.importKey("spki", await (async () => {
+      const p = fixtures.passkey.publicKey; const raw = new Uint8Array(65); raw[0] = 4; raw.set(unhex(p.x), 1); raw.set(unhex(p.y), 33);
+      const k = await crypto.subtle.importKey("raw", raw, { name: "ECDSA", namedCurve: "P-256" }, true, ["verify"]);
+      return crypto.subtle.exportKey("spki", k);
+    })(), { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+    const rs = new Uint8Array(64); rs.set(sr); rs.set(ss, 32);
+    const localVerify = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, rs, signed);
+    const entry = {
+      digest: hex(d),
+      authenticatorData: hex(auth), authenticatorDataLength: auth.length,
+      clientDataJSON: cdText, clientDataJSONHex: hex(cdj), clientDataJSONLength: cdj.length,
+      challengeOffset: cdText.indexOf(b64url(d)),
+      standardPrefix: cdText.startsWith(prefix),
+      signatureDer: hex(r.signature), r: hex(sr), s: hex(ss),
+      localVerify,
+    };
+    fixtures.webauthn.push(entry);
+    render();
+    setStatus($("pkStatus"), `Signed. clientDataJSON is ${entry.clientDataJSONLength} bytes, challenge at offset ${entry.challengeOffset}, local verify ${localVerify ? "OK" : "FAILED"}.`, localVerify);
+    newDigest();
+  } catch (e) { setStatus($("pkStatus"), "Could not sign: " + e.message, false); }
+};
+
+$("cardano").onclick = async () => {
+  try {
+    const wallets = Object.entries(window.cardano || {}).filter(([, w]) => w && typeof w.enable === "function");
+    if (!wallets.length) throw new Error("No CIP-30 wallet found. Install Lace or Eternl, then reload.");
+    const [name, w] = wallets.find(([n]) => n === "lace") || wallets.find(([n]) => n === "eternl") || wallets[0];
+    setStatus($("cardanoStatus"), `Connecting to ${name}…`);
+    const api = await w.enable();
+    const addr = await api.getChangeAddress();
+    const d = digest();
+    setStatus($("cardanoStatus"), `Approve the signing request in ${name}…`);
+    const sig = await api.signData(addr, hex(d));
+    fixtures.cip30.push({ wallet: name, networkId: await api.getNetworkId(), address: addr, payload: hex(d), coseSign1: sig.signature, coseKey: sig.key });
+    render();
+    setStatus($("cardanoStatus"), `Signed with ${name}. COSE_Sign1 is ${sig.signature.length / 2} bytes.`, true);
+    newDigest();
+  } catch (e) { setStatus($("cardanoStatus"), "Wallet signing failed: " + (e.info || e.message || e), false); }
+};
+
+$("download").onclick = () => {
+  const blob = new Blob([JSON.stringify(fixtures, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `codicil-fixtures-${Date.now()}.json`;
+  a.click();
+};
+$("copy").onclick = async () => { try { await navigator.clipboard.writeText(JSON.stringify(fixtures, null, 2)); $("copy").textContent = "Copied"; setTimeout(() => ($("copy").textContent = "Copy JSON"), 1500); } catch { /* clipboard blocked */ } };
+$("clear").onclick = () => { fixtures.webauthn = []; fixtures.cip30 = []; render(); };
+</script>
+</body>
+</html>
