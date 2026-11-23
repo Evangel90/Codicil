@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Codicil Authors
+//
+// Validation gate V7: verify a Cardano wallet's CIP-30 signData signature over
+// our digest inside a circuit.
+//
+// signData returns a COSE_Sign1. The wallet's Ed25519 key signs the CBOR
+// Sig_structure ["Signature1", protected, h'', payload]. For a 57-byte
+// (base) address this is always 119 bytes, with our 32-byte digest at
+// offset 87:
+//
+//   0  84 6a "Signature1"                        array(4), text(10)
+//   12 58 46                                     bstr(70): protected header
+//   14 a2 01 27 67 "address" 58 39 <address 57>  {1: -8 (EdDSA), "address": addr}
+//   84 40                                        external_aad = h''
+//   85 58 20 <digest 32>                         payload
+//
+// It is plain Ed25519 (RFC 8032), which is what ed25519Verify supports.
+
+pragma language_version >= 0.28.0;
+
+import CompactStandardLibrary;
+
+struct Cip30Signature {
+  sigStructure: Bytes<119>;
+  sig: Ed25519Signature;
+}
+
+export ledger verified: Counter;
+
+witness cip30Signature(): Cip30Signature;
+
+circuit isCip30SigStructure(s: Bytes<119>, digest: Bytes<32>): Boolean {
+  // "Signature1" context string + protected header with alg EdDSA and a
+  // 57-byte address: domain separation from any other Ed25519 use of the key.
+  const head = Bytes [0x84, 0x6a, ...pad(10, "Signature1"), 0x58, 0x46,
+                      0xa2, 0x01, 0x27, 0x67, ...pad(7, "address"), 0x58, 0x39];
+  return slice<27>(s, 0) == head
+      && slice<3>(s, 84) == Bytes [0x40, 0x58, 0x20]
+      && slice<32>(s, 87) == digest;
+}
+
+export circuit verifyCip30(digest: Bytes<32>, pk: Curve25519Point): [] {
+  const w = cip30Signature();
+  assert(isCip30SigStructure(w.sigStructure, digest), "not a CIP-30 signature over this digest");
+  assert(ed25519Verify<119>(w.sigStructure, w.sig, pk), "bad wallet signature");
+  verified.increment(1);
+}
