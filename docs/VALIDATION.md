@@ -14,7 +14,7 @@ simulator tests in `test/`.
 |---|---|---|---|
 | V1 | Toolchain 0.36.1 / runtime 0.21.x | **PASS** | 2026-11-23 |
 | V2 | Spike compiles (`--skip-zk`) | **PASS**: 0 errors, both contracts | 2026-11-23 |
-| V3 | Spike tests pass | **PASS**: 28/28, every call also checked against its ZK circuit | 2026-11-23 |
+| V3 | Spike tests pass | **PASS**: 36/36, every call also checked against its ZK circuit | 2026-11-23 |
 | V4 | Proving cost per circuit | **PASS**: keys for all 9 circuits (sizes below) | 2026-11-23 |
 | V5 | 2–3 P-256 checks in one circuit | **PASS**: simulator + constraint check + keys for 1/2/3 checks | 2026-11-23 |
 | V6 | WebAuthn binding | PENDING (needs a browser passkey fixture) | |
@@ -22,8 +22,8 @@ simulator tests in `test/`.
 | V8 | Merkle membership | **PASS** (simulator): depth-10 will tree; outsiders rejected | 2026-11-23 |
 | V9 | Division | **PASS**: no `/` in Compact; witness quotient + in-circuit check | 2026-11-23 |
 | V10 | Unshielded token flow | **PASS** (simulator); Preprod PENDING (V14) | 2026-11-23 |
-| V11 | Shielded payout | PENDING | |
-| V12 | Cross-contract call | PENDING (Phase 5) | |
+| V11 | Shielded payout | **PASS** (simulator): recipient hidden; amount still derivable (D8) | 2026-11-23 |
+| V12 | Cross-contract call | **PASS** (simulator): escrow → vault hook, 2 proofs per tx; Preprod PENDING | 2026-11-23 |
 | V13 | Events visible | **PASS** (simulator); indexer PENDING (V14) | 2026-11-23 |
 | V14 | End-to-end on Preprod | PENDING | |
 | V15 | Curve25519 Montgomery ⇄ Edwards | **PASS** | 2026-11-23 |
@@ -128,6 +128,55 @@ simulator tests in `test/`.
 - `claim` calls `sendUnshielded(tokenColor, q, right(UserAddress))`. The call's
   `claimedUnshieldedSpends` effect pays exactly `q` to the heir's chosen address.
 - **Still to do:** a real Preprod run (V14).
+
+## V11: Shielded payout (simulator)
+
+- **Contract:** `contracts/shielded_payout.compact`. `fund(coin)` calls `receiveShielded` and stores
+  the coin with `Cell.writeCoin`. `payShielded(recipient, amount)` calls
+  `sendShielded(pot, left(recipient), amount)` and writes the change back with `writeCoin`.
+- **Compiler finding:** passing the recipient to `sendShielded` needs `disclose()`. The disclosure
+  checker says what is revealed: *"a link between a coin spend and the coin with the commitment
+  given by a hash of the witness value"*. That is the new coin's commitment, not the key.
+- **Tests** (`test/shielded.test.ts`, 4/4 PASS, all constraint-checked):
+  - A partial payout spends the pot (1 nullifier), creates the heir coin + change (2 outputs), and
+    returns the change to the contract (1 receive). A full payout empties the pot.
+  - **The recipient key never appears in the public transcript.** A positive control shows the
+    same byte search does find the disclosed coin nonce, so the result is meaningful.
+  - **Leak, documented:** a contract-held shielded coin lives in a public `Cell`, so its value is
+    public, and `old pot − new pot` reveals the amount paid.
+- **Keys** (full compile, 12.8 s): `fund` 22 MB prover, `payShielded` 45 MB prover. Both are
+  much lighter than the signature circuits.
+- **Wallet note (stdlib docs):** `sendShielded` does not create coin ciphertexts, so only the
+  *submitter's own wallet* learns of a coin sent to its key. In Codicil the heir submits their
+  own claim to their own `ZswapCoinPublicKey`, so this fits. Confirm on Preprod in V14.
+- **Verdict:** PASS on the mechanics. Privacy is better than unshielded (the recipient address is
+  hidden), but the amount is not hidden. See D8.
+
+## V12: Cross-contract call (simulator)
+
+- **Contracts:** the vault exports `isReleasedForContract(): Boolean`. It asserts
+  `kernel.caller()` is `some(left(contract))` ("callable by contracts only") and returns
+  `phase == released`. `contracts/inheritable_escrow.compact` declares
+  `contract CodicilVault { circuit isReleasedForContract(): Boolean; }`, stores the vault in a
+  ledger field, and gates `withdrawToBeneficiary` on the call.
+- **Compile:** both compiled on the first try; the escrow's `declaredInterfaces` records the
+  vault interface. Escrow keys (full compile, 4.1 s): `deposit` 0.2 MB, `withdrawToBeneficiary`
+  11 MB prover.
+- **Harness:** `test/chain.ts` is an in-memory multi-contract chain adapted from the compiler's
+  test-center `TestChain`. It acts as state + module provider, installs verifier keys for
+  caller/callee key agreement, and constraint-checks **every** circuit in the call tree.
+- **Tests** (`test/escrow.test.ts`, 4/4 PASS):
+  - Withdrawal is blocked while the vault is armed (`vault not released`).
+  - After release it pays the beneficiary, and the transaction contains two checked proofs
+    (vault `isReleasedForContract`, then escrow `withdrawToBeneficiary`, in completion order).
+  - A wrong beneficiary secret is rejected.
+  - A direct user call to the hook is rejected (`callable by contracts only`), because a root
+    call sees `kernel.caller() = none`.
+- **Debugging notes:**
+  - (1) Generated `Contract` constructors validate that every declared witness is a
+    function, even for circuits that never call it, so non-beneficiary callers get a throwing stub.
+  - (2) `callProofDataTrace` is in completion order (the callee first).
+- **Remaining:** Preprod transaction (V14).
 
 ## V13: Events (simulator)
 

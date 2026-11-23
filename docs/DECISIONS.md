@@ -49,3 +49,13 @@ The JavaScript that the compiler generates can, in principle, accept a call that
 circuit would reject. To rule this out, the test harness runs `@midnightntwrk/zkir-v3`'s
 `check` on every successful call, as the Compact compiler's own tests do. It costs well under a
 second for the whole suite.
+
+## D8: Payouts: shielded where the wallet flow allows, amount leak declared (2026-11-23)
+
+V11 shows a contract-held shielded coin can pay an heir without publishing the heir's key, which
+beats unshielded payouts, where the recipient address is public. But a contract's coin lives in
+public ledger state, so the paid amount is still derivable from the change.
+**Plan:** use shielded payouts in v1 if V14 confirms the heir's wallet sees the coin; otherwise
+use unshielded payouts to a fresh address. Either way the README states that per-heir *amounts*
+are not hidden today. Roadmap ideas: pay every heir from separate pre-split coins, or batch
+claims so amounts cannot be attributed.
