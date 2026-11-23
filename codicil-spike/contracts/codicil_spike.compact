@@ -172,6 +172,15 @@ export circuit finalizeRelease(): [] {
   emit(Misc { name: pad(32, "codicil:released:v1"), payload: default<Bytes<256>> });
 }
 
+// Hook for other contracts (gate V12): "has this vault been released?".
+// kernel.caller() is only reliable when the caller is a contract, so direct
+// user calls are rejected.
+export circuit isReleasedForContract(): Boolean {
+  const caller = kernel.caller();
+  assert(caller.is_some && caller.value.is_left, "callable by contracts only");
+  return phase == Phase.released;
+}
+
 // An heir proves, without revealing which leaf, that they are in the will and
 // hold the key committed in their leaf, then receives their share.
 export circuit claim(recipient: UserAddress): [] {

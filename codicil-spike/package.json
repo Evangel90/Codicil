@@ -6,8 +6,8 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "compile": "compact compile --skip-zk contracts/codicil_spike.compact contracts/managed/codicil_spike && compact compile --skip-zk contracts/p256_multi.compact contracts/managed/p256_multi",
-    "compile:full": "compact compile contracts/codicil_spike.compact contracts/managed/codicil_spike && compact compile contracts/p256_multi.compact contracts/managed/p256_multi",
+    "compile": "compact compile --skip-zk contracts/codicil_spike.compact contracts/managed/codicil_spike && compact compile --skip-zk contracts/p256_multi.compact contracts/managed/p256_multi && compact compile --skip-zk contracts/inheritable_escrow.compact contracts/managed/inheritable_escrow",
+    "compile:full": "compact compile contracts/codicil_spike.compact contracts/managed/codicil_spike && compact compile contracts/p256_multi.compact contracts/managed/p256_multi && compact compile contracts/inheritable_escrow.compact contracts/managed/inheritable_escrow",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
