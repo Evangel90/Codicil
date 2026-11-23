@@ -21,15 +21,19 @@ jobs:
       run:
         working-directory: codicil-spike
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: codicil-spike/package-lock.json
 
       - name: Install Compact toolchain
+        env:
+          # `compact update` queries the GitHub API; authenticate to avoid
+          # the shared-runner rate limit.
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           curl --proto '=https' --tlsv1.2 -LsSf \
             "https://github.com/midnightntwrk/compact/releases/download/compact-v${COMPACT_CLI_VERSION}/compact-installer.sh" | sh
