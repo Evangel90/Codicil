@@ -1,80 +1,147 @@
-# Phase 0 — Validation log
+# Phase 0: validation log
 
-Every gate from the build plan, with the command run, the result and any fallback taken.
-Results are recorded as they happen and never back-filled. **PENDING** means not run yet.
+This file records every gate from the build plan: the command run, the result and any fallback
+taken. Results are written down as they happen and never back-filled. **PENDING** means the
+gate has not been run yet.
 
-Spike: [`codicil-spike/`](../codicil-spike) — `contracts/codicil_spike.compact`,
-`contracts/p256_multi.compact`, and the simulator tests in `test/`.
+The spike lives in [`codicil-spike/`](../codicil-spike). It contains
+`contracts/codicil_spike.compact` (vault), `contracts/p256_multi.compact` (V5) and the
+simulator tests in `test/`.
+
+**Machine:** Apple M5 Pro, 15 cores, 24 GB RAM, macOS (Darwin 25.6), Node v26.3.0.
 
 | # | Gate | Status | Date |
 |---|---|---|---|
-| V1 | Toolchain 0.36.1 / runtime 0.21.x | **BLOCKED**: compiler not installed yet | 2026-11-23 |
-| V2 | Spike compiles (`--skip-zk`) | PENDING (needs V1) | |
-| V3 | Spike tests pass | PARTIAL: 8/8 compiler-independent tests pass; 18 contract tests need V2 | 2026-11-23 |
-| V4 | Proving cost per circuit | PENDING (needs V1) | |
-| V5 | 2–3 P-256 checks in one circuit | PENDING: contract + tests written (`p256_multi`) | |
+| V1 | Toolchain 0.36.1 / runtime 0.21.x | **PASS** | 2026-11-23 |
+| V2 | Spike compiles (`--skip-zk`) | **PASS**: 0 errors, both contracts | 2026-11-23 |
+| V3 | Spike tests pass | **PASS**: 28/28, every call also checked against its ZK circuit | 2026-11-23 |
+| V4 | Proving cost per circuit | **PASS**: keys for all 9 circuits (sizes below) | 2026-11-23 |
+| V5 | 2–3 P-256 checks in one circuit | **PASS**: simulator + constraint check + keys for 1/2/3 checks | 2026-11-23 |
 | V6 | WebAuthn binding | PENDING (needs a browser passkey fixture) | |
 | V7 | Cardano CIP-30 `signData` | PENDING (needs a Lace/Eternl capture) | |
-| V8 | Merkle membership | PARTIAL: off-chain tree folds correctly; in-circuit claim tests written | 2026-11-23 |
-| V9 | Division | DESIGN DECIDED: no `/` in Compact; witness quotient + check (see below) | 2026-11-23 |
-| V10 | Unshielded token flow | PENDING: simulator tests written; Preprod later | |
+| V8 | Merkle membership | **PASS** (simulator): depth-10 will tree; outsiders rejected | 2026-11-23 |
+| V9 | Division | **PASS**: no `/` in Compact; witness quotient + in-circuit check | 2026-11-23 |
+| V10 | Unshielded token flow | **PASS** (simulator); Preprod PENDING (V14) | 2026-11-23 |
 | V11 | Shielded payout | PENDING | |
 | V12 | Cross-contract call | PENDING (Phase 5) | |
-| V13 | Events visible | PENDING: simulator test written; indexer check later | |
+| V13 | Events visible | **PASS** (simulator); indexer PENDING (V14) | 2026-11-23 |
 | V14 | End-to-end on Preprod | PENDING | |
 | V15 | Curve25519 Montgomery ⇄ Edwards | **PASS** | 2026-11-23 |
 
 ---
 
-## V1 — Toolchain
+## V1: Toolchain
 
 - **Date:** 2026-11-23
-- **Found:** `compact` was not on the machine. Node v26.3.0, npm 11.16.0.
-- **Latest releases (GitHub `midnightntwrk/compact`):** `compactc-v0.36.1` (2026-11-11),
-  CLI `compact-v0.5.3`. **npm:** `@midnight-ntwrk/compact-runtime@0.21.0`,
-  `compact-js@3.0.2`, `midnight-js-contracts@5.0.1`, `zkir-v3@3.2.1`.
-- **Result:** BLOCKED. The coding agent's sandbox is not permitted to install or run the
-  compiler. The human installs it with:
-  ```sh
-  curl --proto '=https' --tlsv1.2 -LsSf \
-    https://github.com/midnightntwrk/compact/releases/download/compact-v0.5.3/compact-installer.sh | sh
-  compact update 0.36.1
-  compact compile --version   # expect 0.36.1
-  ```
-- **Spike pins:** `@midnight-ntwrk/compact-runtime` **0.21.0** (exact).
+- **Install:** `compact-installer.sh` from release `compact-v0.5.3` → `compact update 0.36.1`
+- **Output:** `compact 0.5.3`; `compact compile --version` → `0.36.1 (7fa3a117c 2026-11-11)`;
+  `--language-version` → `0.28.0`; `--runtime-version` → `0.21.0`.
+- **npm:** `@midnight-ntwrk/compact-runtime@0.21.0` (pinned exactly),
+  `@midnightntwrk/zkir-v3@3.2.1`, `@midnightntwrk/onchain-runtime-v4@4.0.2`.
+- **Result:** PASS. The generated `contract-info.json` records compiler 0.36.1 / language
+  0.28.0 / runtime 0.21.0.
 
-## V3 — Spike tests (partial)
+## V2: Spike compiles
 
-- **Command:** `npx vitest run test/merkle.test.ts test/curve25519.test.ts`
-- **Result:** 8/8 pass (Merkle fold × 6 trees + negative case; Curve25519 × 2).
-- The remaining suites (`codicil.test.ts`: 18 tests, `p256_multi.test.ts`: 2 tests) import
-  compiler output and run once V2 passes.
+- **Command:** `npm run compile`, which runs `compact compile --skip-zk` for both contracts.
+- **Result:** PASS on the first attempt, with zero errors and zero warnings. A clean compile of
+  both contracts takes under 1 s.
 
-## V8 — Merkle membership (off-chain half)
+## V3: Spike tests
 
-- Stdlib source (`compiler/standard-library.compact`) shows
-  `merkleTreePathRootNoLeafHash` folds `degradeToTransient(leaf)` up the path with
-  `transientHash<Vector<2, Field>>([left, right])`, where `goes_left` puts the running digest on
-  the left.
-- `test/crypto.ts › WillTree` builds a depth-10 tree with exactly that hash; empty subtrees use
-  precomputed zero hashes, so building a 3-heir tree costs ~13 hashes instead of 1,023.
-- `test/merkle.test.ts` re-folds every path with the stdlib algorithm. **PASS** for 1, 2, 3, 8
-  and 33 leaves. Foreign leaves and tampered leaves do not reach the root.
+- **Command:** `npm run compile && npm test`
+- **Result:** PASS, 28/28 across 4 files (`codicil` 18, `p256_multi` 2, `merkle` 6,
+  `curve25519` 2). Wall time is about 1.2 s.
+- **Debugging note:** the first run went 25/28. All three failures came from one bug in the
+  test harness, not the contract: the harness passed the constructor's `ContractState` to
+  `ledger()`, which expects its `ChargedState` (`.data`). Fixed in `test/harness.ts`.
+- **ZK constraint checks:** every successful simulated call is also checked against that
+  circuit's compiled `.zkir` with `@midnightntwrk/zkir-v3`'s `check`. This is the same method
+  the Compact compiler's own test harness uses. A passing test therefore means a proof for that
+  exact call can be generated, not just that the JavaScript ran.
+- **Negative control:** proof data checked against the wrong circuit is rejected, and so is
+  proof data with a tampered input byte. This confirms the check is not a no-op.
 
-## V9 — Division
+## V4: Proving cost
 
-- The Compact reference (*Binary arithmetic expressions*) lists only `+`, `-` and `*`.
-  **No native division.**
-- Approach: the `payoutDivision` witness returns `(q, r)`; `claim` asserts
-  `q * 10000 + r == snapshot * bps` and `r < 10000`. Test `rejects a witness that lies about
-  the payout quotient` checks that a dishonest witness is caught.
+- **Command:** `npm run compile:full`, which runs `compact compile` without `--skip-zk`.
+- **Key generation time:** vault (6 circuits) 87.5 s wall; `p256_multi` (3 circuits)
+  122.0 s wall.
 
-## V15 — Curve25519 conversion
+| Circuit | zkir | prover key | verifier key |
+|---|---:|---:|---:|
+| `checkInEd25519` | 34 KB | 276 MB | 3.3 KB |
+| `checkInPasskey` | 16 KB | 224 MB | 2.7 KB |
+| `claim` | 17 KB | 108 MB | 2.6 KB |
+| `deposit` | 2 KB | 0.2 MB | 1.3 KB |
+| `finalizeRelease` | 3 KB | 0.2 MB | 1.3 KB |
+| `triggerTimeout` | 2 KB | 0.2 MB | 1.3 KB |
+| `verify1` (1× P-256) | 8 KB | 164 MB | 2.0 KB |
+| `verify2` (2× P-256) | 17 KB | 164 MB | 2.0 KB |
+| `verify3` (3× P-256) | 25 KB | 328 MB | 2.0 KB |
+
+- **Reading:** prover-key size tracks circuit size, rounded up to a power of two. The crypto
+  circuits (P-256, Ed25519 + SHA-512, Curve25519 scalar multiplication) are by far the heaviest.
+  Plain state transitions cost almost nothing.
+- **Follow-up:** proving *time* on the proof server is measured in V14. Large prover keys matter
+  for the frontend: keys are fetched per circuit, so the UI must show a "downloading keys"
+  progress state.
+
+## V5: Multiple P-256 checks per circuit
+
+- **Result:** PASS. `verify1/2/3` compile, generate keys, pass the simulator and pass the
+  constraint check. If any one signature is bad, the whole call is rejected (`bad signature 2`).
+- **Measurement:** 2 checks fit in the same circuit size class as 1 (both 164 MB prover keys).
+  3 checks double it (328 MB).
+- **Decision:** guardian votes stay **one per transaction**, counted with nullifiers, as the
+  brief already planned. That keeps each guardian's proof small. A 2-signature circuit is
+  affordable if we later need owner + co-signer in one transaction.
+
+## V8: Merkle membership
+
+- The stdlib source (`compiler/standard-library.compact`) shows how
+  `merkleTreePathRootNoLeafHash` works. It starts from `degradeToTransient(leaf)` and hashes up
+  the path with `transientHash<Vector<2, Field>>([left, right])`. When `goes_left` is true, the
+  running digest goes on the left.
+- `test/crypto.ts › WillTree` builds a depth-10 tree with exactly that hash. Empty subtrees use
+  precomputed zero hashes, so a 3-heir tree costs about 13 hashes instead of 1,023.
+- **Off-chain:** `test/merkle.test.ts` re-folds every path. Trees of 1, 2, 3, 8 and 33 leaves
+  all reach the root; foreign and tampered leaves do not.
+- **In-circuit:** in `codicil.test.ts`, heirs claim with a Merkle path + key proof. A
+  well-formed leaf from another tree is rejected (`not in will`). Someone who knows the leaf but
+  not the heir's key is rejected (`not the heir`).
+
+## V9: Division
+
+- The Compact reference (*Binary arithmetic expressions*) lists only `+`, `-` and `*`, so
+  there is **no native division**.
+- Approach: the `payoutDivision` witness returns `(q, r)`, and `claim` asserts
+  `q * 10000 + r == snapshot * bps` and `r < 10000`.
+- **Tests:** 3333 bps of 1,000,001 pays exactly 333,300. A witness that inflates `q` by 1 is
+  rejected (`bad payout math`). Across 3 heirs (5000/3333/1667 bps), the total paid is at most
+  the snapshot, and the rounding dust left over is less than the number of heirs.
+
+## V10: Unshielded token flow (simulator)
+
+- `deposit` calls `receiveUnshielded(tokenColor, amount)`. The call's effects show the expected
+  unshielded input (600 for a 600 deposit).
+- `claim` calls `sendUnshielded(tokenColor, q, right(UserAddress))`. The call's
+  `claimedUnshieldedSpends` effect pays exactly `q` to the heir's chosen address.
+- **Still to do:** a real Preprod run (V14).
+
+## V13: Events (simulator)
+
+- `finalizeRelease` emits `Misc { name: "codicil:released:v1", … }`. The test finds exactly one
+  event and the name bytes in its payload.
+- **Still to do:** read the event from the indexer on Preprod (V14).
+
+## V15: Curve25519 conversion
 
 - **Command:** `npx vitest run test/curve25519.test.ts`
-- **Result:** **PASS** (2/2). Edwards → Montgomery `u = (1+y)/(1-y)` matches noble
-  `toMontgomery` for 20 random keys. Montgomery → Edwards recovers the identical point
-  (given the x sign bit) and the runtime accepts it (`isValidCurve25519Point`). X25519 shared
-  secrets agree either way.
-- **Note:** X25519 keys carry no x sign bit, so an heir importing a bare X25519 key must also
-  supply one bit (or we try both and match the commitment).
+- **Result:** PASS (2/2).
+  - Edwards → Montgomery `u = (1+y)/(1-y)` matches noble's `toMontgomery` for 20 random keys.
+  - Montgomery → Edwards recovers the identical point, given the x sign bit, and the runtime
+    accepts it (`isValidCurve25519Point`).
+  - X25519 shared secrets agree whichever form is used.
+- **Note:** X25519 keys carry no x sign bit. An heir importing a bare X25519 key must also supply
+  one bit, or the app tries both and matches against the commitment.

@@ -35,3 +35,17 @@ would remove the first leak. This is stated honestly in the README.
 `aliveDigest = H("codicil:alive:v1", vaultAddress, nextDeadline, nonce)`. Binding the
 address stops a signature for one vault being replayed on another. The nonce stops a
 signature being replayed on the same vault.
+
+## D6: One guardian vote per transaction (2026-11-23)
+
+V5 shows 2 P-256 checks fit in the same circuit size as 1, but 3 double the prover key
+(164 MB → 328 MB). Guardians therefore vote one per transaction, counted with nullifiers.
+This keeps every guardian's proof as small as possible, and the threshold k is not limited
+by circuit size.
+
+## D7: Simulator tests also check the ZK circuit (2026-11-23)
+
+The JavaScript that the compiler generates can, in principle, accept a call that the ZK
+circuit would reject. To rule this out, the test harness runs `@midnightntwrk/zkir-v3`'s
+`check` on every successful call, as the Compact compiler's own tests do. It costs well under a
+second for the whole suite.
