@@ -1,0 +1,26 @@
+{
+  "name": "codicil-spike",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Phase 0 validation spike for Codicil (Midnight / Compact 0.36.1)",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "compile": "compact compile --skip-zk contracts/codicil_spike.compact contracts/managed/codicil_spike && compact compile --skip-zk contracts/p256_multi.compact contracts/managed/p256_multi",
+    "compile:full": "compact compile contracts/codicil_spike.compact contracts/managed/codicil_spike && compact compile contracts/p256_multi.compact contracts/managed/p256_multi",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-runtime": "0.21.0"
+  },
+  "devDependencies": {
+    "@midnightntwrk/onchain-runtime-v4": "4.0.2",
+    "@midnightntwrk/zkir-v3": "3.2.1",
+    "@noble/curves": "2.4.0",
+    "@noble/hashes": "2.4.0",
+    "@types/node": "^24.0.0",
+    "typescript": "~6.0.2",
+    "vitest": "^4.1.11"
+  }
+}
