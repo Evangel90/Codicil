@@ -1,0 +1,114 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Codicil Authors
+//
+// Validation gate V6: verify a real WebAuthn (passkey, Face ID / Touch ID)
+// assertion inside a circuit.
+//
+// A passkey signs SHA-256(authenticatorData || SHA-256(clientDataJSON)). For
+// the signature to prove "the owner approved THIS digest", the circuit must
+// rebuild that message itself and check that:
+//   - clientDataJSON starts with {"type":"webauthn.get","challenge":"
+//     followed by base64url(digest), decoded here in-circuit;
+//   - authenticatorData is for our relying party (rpIdHash) with the
+//     user-present and user-verified flags set.
+//
+// Chrome randomly appends a 109-byte "other_keys_can_be_added_here" member
+// to clientDataJSON (observed in 2 of 5 real captures), so both lengths are
+// accepted: 134 bytes (standard form for our origin) and 243 bytes (Chrome
+// variant). Circuits need fixed sizes, so the witness supplies the bytes
+// zero-padded to 243.
+
+pragma language_version >= 0.28.0;
+
+import CompactStandardLibrary;
+
+export struct WebAuthnAssertion {
+  authenticatorData: Bytes<37>;   // rpIdHash(32) || flags(1) || signCount(4)
+  clientData: Bytes<243>;         // clientDataJSON, zero-padded to 243 bytes
+  longForm: Boolean;              // true: 243-byte Chrome variant; false: 134 bytes
+  sig: Secp256r1EcdsaSignature;
+}
+
+export ledger verified: Counter;
+
+witness webauthnAssertion(): WebAuthnAssertion;
+
+// Value of one base64url character (RFC 4648 §5), as a Field.
+circuit b64urlValue(c: Uint<8>): Field {
+  const upper = c >= 65 && c <= 90;    // A-Z → 0..25
+  const lower = c >= 97 && c <= 122;   // a-z → 26..51
+  const digit = c >= 48 && c <= 57;    // 0-9 → 52..61
+  assert(upper || lower || digit || c == 45 || c == 95, "bad challenge encoding");
+  const f = c as Field;
+  return upper ? f - 65
+       : lower ? f - 71
+       : digit ? f + 4
+       : c == 45 ? 62 as Field
+       : 63 as Field;
+}
+
+// The 43 base64url characters at clientData[36..79] must decode to `digest`.
+// Every 4 characters carry 3 bytes; the final 3 characters carry the last 2
+// bytes followed by 2 zero bits.
+circuit challengeMatches(chars: Bytes<43>, digest: Bytes<32>): Boolean {
+  for (const g of 0..10) {
+    const sextets = b64urlValue(chars[4 * g]) * 262144
+                  + b64urlValue(chars[4 * g + 1]) * 4096
+                  + b64urlValue(chars[4 * g + 2]) * 64
+                  + b64urlValue(chars[4 * g + 3]);
+    const bytes = (digest[3 * g] as Field) * 65536
+                + (digest[3 * g + 1] as Field) * 256
+                + (digest[3 * g + 2] as Field);
+    assert(sextets == bytes, "challenge mismatch");
+  }
+  const tail = b64urlValue(chars[40]) * 4096 + b64urlValue(chars[41]) * 64 + b64urlValue(chars[42]);
+  return tail == (digest[30] as Field) * 1024 + (digest[31] as Field) * 4;
+}
+
+// Strip the high bits of the flags byte one at a time (no bitwise operators in
+// Compact), then test UV (bit 2) and UP (bit 0).
+circuit userPresentAndVerified(flags: Uint<8>): Boolean {
+  const b7 = flags >= 128;
+  const r7 = ((flags as Field) - (b7 ? 128 : 0) as Field) as Uint<8>;
+  const b6 = r7 >= 64;
+  const r6 = ((r7 as Field) - (b6 ? 64 : 0) as Field) as Uint<8>;
+  const b5 = r6 >= 32;
+  const r5 = ((r6 as Field) - (b5 ? 32 : 0) as Field) as Uint<8>;
+  const b4 = r5 >= 16;
+  const r4 = ((r5 as Field) - (b4 ? 16 : 0) as Field) as Uint<8>;
+  const b3 = r4 >= 8;
+  const r3 = ((r4 as Field) - (b3 ? 8 : 0) as Field) as Uint<8>;
+  const uv = r3 >= 4;
+  const r2 = ((r3 as Field) - (uv ? 4 : 0) as Field) as Uint<8>;
+  const up = r2 == 1 || r2 == 3;
+  return uv && up;
+}
+
+// The 32-byte message the passkey signed, rebuilt from the assertion.
+circuit webauthnMessage(a: WebAuthnAssertion, digest: Bytes<32>, rpIdHash: Bytes<32>): Bytes<32> {
+  assert(slice<36>(a.clientData, 0) == pad(36, "{\"type\":\"webauthn.get\",\"challenge\":\""), "bad client data");
+  assert(challengeMatches(slice<43>(a.clientData, 36), digest), "challenge mismatch");
+  assert(a.longForm || slice<109>(a.clientData, 134) == default<Bytes<109>>, "bad client data");
+  assert(slice<32>(a.authenticatorData, 0) == rpIdHash, "wrong relying party");
+  assert(userPresentAndVerified(a.authenticatorData[32]), "user not verified");
+
+  const cdShort = persistentHash<Bytes<134>>(slice<134>(a.clientData, 0));
+  const cdLong = persistentHash<Bytes<243>>(a.clientData);
+  const cdHash = a.longForm ? cdLong : cdShort;
+  return persistentHash<Bytes<69>>(Bytes [...a.authenticatorData, ...cdHash]);
+}
+
+// Spike entry point: verify a passkey approval of `digest` for `pk`.
+// In the vault, digest = aliveDigest(...) and pk/rpIdHash come from the
+// owner's committed passkey.
+export circuit verifyPasskey(digest: Bytes<32>, rpIdHash: Bytes<32>, pk: Secp256r1Point): [] {
+  const a = webauthnAssertion();
+  const msg = webauthnMessage(a, digest, rpIdHash);
+  assert(secp256r1EcdsaVerify(msg, a.sig, pk), "bad passkey signature");
+  verified.increment(1);
+}
+
+// Exposed for tests: confirms persistentHash<Bytes<N>> is plain SHA-256.
+export pure circuit sha256of134(x: Bytes<134>): Bytes<32> {
+  return persistentHash<Bytes<134>>(x);
+}
