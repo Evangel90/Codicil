@@ -14,11 +14,11 @@ simulator tests in `test/`.
 |---|---|---|---|
 | V1 | Toolchain 0.36.1 / runtime 0.21.x | **PASS** | 2026-11-23 |
 | V2 | Spike compiles (`--skip-zk`) | **PASS**: 0 errors, both contracts | 2026-11-23 |
-| V3 | Spike tests pass | **PASS**: 36/36, every call also checked against its ZK circuit | 2026-11-23 |
+| V3 | Spike tests pass | **PASS**: 60/60, every call also checked against its ZK circuit | 2026-11-24 |
 | V4 | Proving cost per circuit | **PASS**: keys for all 9 circuits (sizes below) | 2026-11-23 |
 | V5 | 2–3 P-256 checks in one circuit | **PASS**: simulator + constraint check + keys for 1/2/3 checks | 2026-11-23 |
-| V6 | WebAuthn binding | PENDING (needs a browser passkey fixture) | |
-| V7 | Cardano CIP-30 `signData` | PENDING (needs a Lace/Eternl capture) | |
+| V6 | WebAuthn binding | **PASS**: 4 real Touch ID assertions (Chrome) verified in-circuit, both clientDataJSON forms | 2026-11-24 |
+| V7 | Cardano CIP-30 `signData` | **PASS**: COSE_Sign1 is plain Ed25519; verified in-circuit (real captures checked locally) | 2026-11-24 |
 | V8 | Merkle membership | **PASS** (simulator): depth-10 will tree; outsiders rejected | 2026-11-23 |
 | V9 | Division | **PASS**: no `/` in Compact; witness quotient + in-circuit check | 2026-11-23 |
 | V10 | Unshielded token flow | **PASS** (simulator); Preprod PENDING (V14) | 2026-11-23 |
@@ -79,6 +79,8 @@ simulator tests in `test/`.
 | `verify1` (1× P-256) | 8 KB | 164 MB | 2.0 KB |
 | `verify2` (2× P-256) | 17 KB | 164 MB | 2.0 KB |
 | `verify3` (3× P-256) | 25 KB | 328 MB | 2.0 KB |
+| `verifyPasskey` (WebAuthn, V6) | 270 KB | 470 MB | 2.7 KB |
+| `verifyCip30` (COSE Ed25519, V7) | — | 227 MB | 2.6 KB |
 
 - **Reading:** prover-key size tracks circuit size, rounded up to a power of two. The crypto
   circuits (P-256, Ed25519 + SHA-512, Curve25519 scalar multiplication) are by far the heaviest.
@@ -96,6 +98,58 @@ simulator tests in `test/`.
 - **Decision:** guardian votes stay **one per transaction**, counted with nullifiers, as the
   brief already planned. That keeps each guardian's proof small. A 2-signature circuit is
   affordable if we later need owner + co-signer in one transaction.
+
+## V6: WebAuthn binding
+
+Captured with `tools/webauthn-capture` (Chrome 157, macOS, Touch ID, origin `http://localhost:5173`);
+fixture in `codicil-spike/test/fixtures/webauthn-chrome-macos.json`. Circuit: `contracts/webauthn.compact`.
+
+What a passkey signs is `SHA-256(authenticatorData ‖ SHA-256(clientDataJSON))`. The circuit rebuilds
+it and checks:
+
+- `clientDataJSON` begins with `{"type":"webauthn.get","challenge":"` (36 bytes) followed by 43
+  base64url characters that decode, in-circuit, to the digest being approved;
+- `authenticatorData` starts with our `rpIdHash`, and the flags have **UP and UV** set (Face ID /
+  Touch ID was actually used, not just a tap);
+- `secp256r1EcdsaVerify` passes for the committed passkey.
+
+**Finding: Chrome's random extra key.** 2 of 5 real captures were 243 bytes instead of 134: Chrome
+appends `,"other_keys_can_be_added_here":"do not compare clientDataJSON against a template…"` (109 bytes)
+at random. Retrying is not an option at a ~40% rate, so the circuit accepts both forms: the witness
+pads to 243 bytes, a `longForm` flag selects which SHA-256 to use, and the short form must have
+all-zero padding. Lying about the form breaks the signature check (tested).
+
+`persistentHash<Bytes<N>>` is confirmed to be plain SHA-256 (tested against `@noble/hashes`).
+
+Tests (16): 4 real assertions (two of each form); a different digest, a different relying party,
+a flipped origin byte, a false `longForm`, non-zero padding and a different key are all rejected;
+edge-case challenges (all-zero, all-`0xff`, `-`/`_` characters) decode correctly; a signature
+without UV is rejected. Cost: 470 MB prover key, 46 s compile; the most expensive circuit so far.
+
+**Constraint for Phase 1:** the origin length is fixed per deployment (it changes the 134/243
+lengths), so the vault is compiled for the production origin. Safari and Android captures are still
+worth collecting before launch.
+
+## V7: Cardano CIP-30 `signData`
+
+Circuit: `contracts/cip30.compact`. Captured with a Nightly wallet (3 signatures).
+
+`signData` returns a COSE_Sign1 whose Ed25519 signature covers the CBOR
+`Sig_structure = ["Signature1", protected, h'', payload]`. With a base address (57 bytes) this is
+always **119 bytes with the digest at offset 87**. It is plain RFC 8032 Ed25519, so
+`ed25519Verify<119>` verifies it directly; no Blake2b or CBOR parsing is needed in-circuit. The circuit
+pins the context string and protected-header bytes for domain separation.
+
+All 3 real captures verified with `@noble/curves` and in the circuit. They are **not committed**
+(the capture contains a personal mainnet address); the test verifies them only when the local
+file exists, and CI uses synthetic signatures with the identical byte layout.
+
+Tests (8): wallet-format signature verifies; a different digest, a different key, and a valid
+Ed25519 signature over a non-CIP-30 message are rejected. Cost: 227 MB prover key, 17 s compile.
+
+**Compiler bug found:** exporting a struct with a `Curve25519Point` or `Secp256r1Point` field crashes
+compactc 0.36.1 (`print-typescript.ss`). Workaround: don't export the struct. A minimal reproduction
+is ready to report upstream.
 
 ## V8: Merkle membership
 
