@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: Apache-2.0
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  COMPACT_VERSION: 0.36.1
+  COMPACT_CLI_VERSION: 0.5.3
+
+jobs:
+  spike:
+    name: Compile & test (codicil-spike)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: codicil-spike
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: codicil-spike/package-lock.json
+
+      - name: Install Compact toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            "https://github.com/midnightntwrk/compact/releases/download/compact-v${COMPACT_CLI_VERSION}/compact-installer.sh" | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/compact" update "$COMPACT_VERSION"
+          "$HOME/.local/bin/compact" compile --version
+
+      - run: npm ci
+      - name: Compile contracts (--skip-zk)
+        run: npm run compile
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Simulator tests (with ZK constraint checks)
+        run: npm test
