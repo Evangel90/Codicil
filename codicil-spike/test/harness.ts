@@ -33,6 +33,8 @@ export interface CallResult<R> {
   result: R;
   events: LogEvent[];
   effects: Effects;
+  /** The public transcript of this call: exactly what goes on-chain besides the proof. */
+  publicTranscript: unknown;
 }
 
 export class Simulator<PS> {
@@ -85,18 +87,27 @@ export class Simulator<PS> {
       time: opts.time,
     });
     const out = await circuit(ctx, ...args);
-    if (this.proofDir) {
-      const trace = out.context.callProofDataTrace;
-      await checkProofData(this.proofDir, circuitId, trace[trace.length - 1] as any);
-    }
+    const trace = out.context.callProofDataTrace;
+    const proofData = trace[trace.length - 1];
+    if (this.proofDir) await checkProofData(this.proofDir, circuitId, proofData as any);
     const qc = out.context.callContext.currentQueryContext;
     this.state = qc.state;
-    return { result: out.result as R, events: out.context.events, effects: qc.effects };
+    return {
+      result: out.result as R,
+      events: out.context.events,
+      effects: qc.effects,
+      publicTranscript: proofData.publicTranscript,
+    };
   }
 }
 
 /** Concatenate every byte atom inside an emitted event's encoded payload. */
 export function eventBytes(ev: LogEvent): Uint8Array {
+  return collectBytes(ev.data);
+}
+
+/** Concatenate every Uint8Array found anywhere inside a (nested) JS value. */
+export function collectBytes(value: unknown): Uint8Array {
   const chunks: Uint8Array[] = [];
   const walk = (v: unknown): void => {
     if (v instanceof Uint8Array) chunks.push(v);
@@ -104,7 +115,7 @@ export function eventBytes(ev: LogEvent): Uint8Array {
     else if (v instanceof Map) v.forEach((val, key) => { walk(key); walk(val); });
     else if (v && typeof v === 'object') Object.values(v).forEach(walk);
   };
-  walk(ev.data);
+  walk(value);
   const out = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
   let o = 0;
   for (const c of chunks) { out.set(c, o); o += c.length; }
@@ -112,7 +123,10 @@ export function eventBytes(ev: LogEvent): Uint8Array {
 }
 
 export function containsAscii(haystack: Uint8Array, needle: string): boolean {
-  const n = new TextEncoder().encode(needle);
+  return containsBytes(haystack, new TextEncoder().encode(needle));
+}
+
+export function containsBytes(haystack: Uint8Array, n: Uint8Array): boolean {
   outer: for (let i = 0; i + n.length <= haystack.length; i++) {
     for (let j = 0; j < n.length; j++) if (haystack[i + j] !== n[j]) continue outer;
     return true;

@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Codicil Authors
+//
+// Validation gate V11: can a contract hold a shielded coin and pay an heir
+// with sendShielded to a ZswapCoinPublicKey? And what stays private?
+
+pragma language_version >= 0.28.0;
+
+import CompactStandardLibrary;
+
+// The coin the contract owns. A Cell of QualifiedShieldedCoinInfo is public
+// ledger state: its value is visible to everyone.
+export ledger pot: QualifiedShieldedCoinInfo;
+export ledger funded: Boolean;
+
+export circuit fund(coin: ShieldedCoinInfo): [] {
+  assert(!funded, "already funded");
+  const c = disclose(coin);
+  receiveShielded(c);
+  pot.writeCoin(c, right<ZswapCoinPublicKey, ContractAddress>(kernel.self()));
+  funded = true;
+}
+
+// Pay `amount` to a shielded recipient. In Codicil the recipient is the heir's
+// own wallet key (ownPublicKey()), so the heir's wallet learns of the coin.
+//
+// What the disclose() below admits (per the compiler's disclosure checker):
+// "a link between a coin spend and the coin with the commitment given by a
+// hash of" the recipient, i.e. the new coin's commitment. The recipient key
+// itself is never published.
+export circuit payShielded(recipient: ZswapCoinPublicKey, amount: Uint<128>): [] {
+  assert(funded, "no funds");
+  const to = left<ZswapCoinPublicKey, ContractAddress>(disclose(recipient));
+  const res = sendShielded(pot, to, disclose(amount));
+  if (res.change.is_some) {
+    pot.writeCoin(res.change.value, right<ZswapCoinPublicKey, ContractAddress>(kernel.self()));
+  } else {
+    pot.resetToDefault();
+    funded = false;
+  }
+}
