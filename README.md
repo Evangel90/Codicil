@@ -14,12 +14,12 @@ passkey) or a **Cardano wallet**, verified inside a ZK circuit. If they stop, or
 guardians or a trusted attestor report their death, heirs can claim their share privately once the
 owner has had a chance to veto.
 
-> **Status (Wave 3, in progress):** the vault contract and SDK are built and tested. That covers
-> passkey and wallet check-ins, multi-heir wills with tranches and backup heirs, hidden k-of-n
-> guardians, the attestation trigger and the cross-contract hook: 126 tests, every call checked
-> against its ZK circuit. The web app and the Preprod deployment are next. See
-> [What changed this Wave](#what-changed-this-wave).
-> Demo video, deck and live demo: *coming with the app*.
+> **Status (Wave 3, in progress):** the vault contract, SDK and web app are built and tested. That
+> covers passkey and wallet check-ins, multi-heir wills with tranches and backup heirs, hidden k-of-n
+> guardians, the attestation trigger and the cross-contract hook: 132 tests, every contract call
+> checked against its ZK circuit, plus browser tests that check in with Chrome's real WebAuthn. The
+> Preprod deployment is next. See [What changed this Wave](#what-changed-this-wave).
+> Demo video and deck: *coming*.
 
 ## Judge quickstart
 
@@ -32,8 +32,26 @@ curl --proto '=https' --tlsv1.2 -LsSf \
 compact update 0.36.1
 npm ci
 npm run compile     # compiles the Compact contracts (--skip-zk: seconds, not minutes)
-npm test            # contracts + SDK, about 5 s
+npm test            # contracts, SDK and app, about 10 s
+npm run dev         # the web app at http://localhost:5173
 ```
+
+### Try the demo
+
+`npm run dev`, then open **http://localhost:5173** (use exactly this address: passkeys are bound to
+the site they were made on, and the vault was compiled for it). The demo runs the **real vault
+contract in your browser** on a simulated chain with a clock you can fast-forward. Only proof
+generation and network fees are skipped.
+
+1. **Seal a vault** with Face ID / Touch ID (or a demo key if your device has neither).
+2. **I'm alive**: your passkey signs the check-in, and the circuit verifies the signature, the
+   website and the Face ID flag.
+3. Switch to **Dr. Mensah**, then **Sarah Lin**, and report a death: two of three guardians start a
+   7-day countdown. Switch back to the owner and cancel it.
+4. **Skip to the deadline**, start the countdown, skip the challenge window, **release**.
+5. Switch to **Ben** and claim 30%. Try **Kofi** (backup heir: must wait 30 days) and **Cleo** (her
+   share unlocks on her 18th birthday).
+6. Open the **Privacy lens** at any point: the will beside the public ledger.
 
 `npm run compile:full` also generates the proving keys (several minutes; sizes in
 [docs/VALIDATION.md](docs/VALIDATION.md)).
@@ -152,6 +170,8 @@ this call can be generated", not just "the JavaScript ran".
 | [`webauthn-real.test.ts`](contracts/test/webauthn-real.test.ts) | Real Touch ID assertions verified by the vault's own WebAuthn module |
 | [`errors.test.ts`](contracts/test/errors.test.ts) | Every contract error has a friendly UI message and is documented |
 | [`sdk/test`](sdk/test) | Passkey/wallet format conversion, will builder, witnesses |
+| [`app/test`](app/test/demo.test.ts) | The whole demo story through the app's own store: check-ins, veto, guardian rounds, release, claims, tranche, backup |
+| [`app/e2e`](app/e2e/demo.spec.ts) | In Chrome: create a passkey (virtual authenticator), check in through the real WebAuthn API, guardians, release, claim, privacy lens. `npm run e2e` |
 
 The property tests already found one design flaw, now fixed ([D9](docs/DECISIONS.md)).
 
@@ -171,9 +191,8 @@ Design decisions: [docs/DECISIONS.md](docs/DECISIONS.md). Error catalogue: [docs
 
 ## Roadmap
 
-1. Web app: create a vault, check in with Face ID, heir claim page, a "privacy lens" showing what
-   is public, plus a demo mode.
-2. End-to-end deployment on Preprod.
+1. End-to-end deployment on Preprod, with the app talking to Lace and the proof server.
+2. In the app: writing your own will, and heir key hand-off (QR code or printed card).
 3. Owner-signed updates to guardians and the attestor; a recovery key.
 4. Stretch: unlinkable check-ins, a sealed digital legacy (encrypted letters with keys split among
    guardians), and executor disclosures for courts and tax authorities.
@@ -185,7 +204,10 @@ Design decisions: [docs/DECISIONS.md](docs/DECISIONS.md). Error catalogue: [docs
   attestation trigger, veto, release, multi-heir claims with tranches and backup heirs, a payout cap,
   and the cross-contract hook.
 - TypeScript SDK with witnesses, will builder, passkey/wallet conversion and an error catalogue.
-- 126 tests with ZK constraint checks, including property tests. CI on every push.
+- Web app with a demo that runs the real contract in the browser: Face ID check-ins, guardian
+  reports, veto, release, claims and a privacy lens. Dark and light themes, works on phones.
+- 132 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
+  CI on every push.
 - A threat model mapping each threat to the test that covers it.
 
 ## License and attribution

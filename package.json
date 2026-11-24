@@ -5,17 +5,26 @@
   "description": "Codicil: a private inheritance vault (dead man's switch) on Midnight",
   "license": "Apache-2.0",
   "type": "module",
-  "workspaces": ["contracts", "sdk"],
+  "workspaces": [
+    "contracts",
+    "sdk",
+    "app"
+  ],
   "scripts": {
     "compile": "npm run compile -w @codicil/contracts",
     "compile:full": "npm run compile:full -w @codicil/contracts",
     "typecheck": "npm run typecheck --workspaces",
-    "test": "npm test --workspaces"
+    "test": "npm test -w @codicil/contracts -w @codicil/sdk -w @codicil/app",
+    "dev": "npm run dev -w @codicil/app",
+    "build": "npm run build -w @codicil/app",
+    "e2e": "npm run build -w @codicil/app && npm run e2e -w @codicil/app"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "typescript": "~6.0.2",
     "vitest": "^4.1.11"
   },
-  "engines": { "node": ">=22" }
+  "engines": {
+    "node": ">=22"
+  }
 }
