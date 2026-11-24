@@ -36,7 +36,7 @@ export function LensView({ s }: { s: Snapshot }) {
               <li key={h.profile.id} className={`lens-row${lit('will')}`} {...on('will')}>
                 <span className="private">{h.profile.name}</span>
                 <span className="private">{Number(h.shareBps) / 100}%</span>
-                <span className="private small">{h.unlockAt ? `from ${fmtDate(h.unlockAt)}` : 'on release'}{h.profile.id === 'ada' ? ', backup Kofi' : ''}</span>
+                <span className="private small">{h.unlockAt ? `from ${fmtDate(h.unlockAt)}` : 'on release'}{h.profile.id === 'ada' && s.heirs.find((x) => x.profile.id === 'kofi')!.named ? ', backup Kofi' : ''}</span>
                 <span className="hash small" aria-label={`Entry ${i + 1} hash`}>leaf {s.leafHashes[i]?.slice(0, 6)}…</span>
               </li>
             ))}

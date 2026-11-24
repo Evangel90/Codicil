@@ -60,6 +60,17 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
   await finish(page, /Check-in recorded/);
   await expect(page.getByText('Checked in', { exact: true })).toBeVisible();
 
+  // Change the will: Ada 40%, Ben 40%. Re-sealed with the passkey.
+  await page.getByRole('button', { name: 'Change the will' }).click();
+  await page.getByLabel(/^Ada/).fill('40');
+  await page.getByLabel(/^Ben/).fill('60');
+  await expect(page.getByRole('alert')).toContainText('more than 100%');
+  await expect(page.getByRole('button', { name: /Seal the new will/ })).toBeDisabled();
+  await page.getByLabel(/^Ben/).fill('40');
+  await page.getByRole('button', { name: /Seal the new will/ }).click();
+  await finish(page, /new will is sealed/);
+  await expect(page.getByRole('cell', { name: '40%' })).toHaveCount(2);
+
   // Two guardians report; the owner cancels.
   const actor = page.getByLabel('Act as');
   await actor.selectOption({ label: 'Dr. Mensah, family doctor' });
@@ -80,10 +91,10 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
   await page.getByRole('button', { name: 'Release the will' }).click();
   await finish(page, /released/);
 
-  // Ben claims 30%.
+  // Ben claims his new 40%.
   await actor.selectOption({ label: 'Ben, son' });
-  await page.getByRole('button', { name: /Claim 7,500 demo tokens/ }).click();
-  await finish(page, /7,500 demo tokens sent/);
+  await page.getByRole('button', { name: /Claim 10,000 demo tokens/ }).click();
+  await finish(page, /10,000 demo tokens sent/);
 
   // The privacy lens shows one nullifier and no names on the public side.
   await page.getByRole('button', { name: 'Privacy lens' }).click();

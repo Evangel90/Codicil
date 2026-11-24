@@ -106,3 +106,32 @@ describe('demo store', () => {
   });
 });
 
+
+describe('will updates', () => {
+  it('explains an over-allocated will in plain words', async () => {
+    await fails(demo.updateWill({ ada: 6000n, ben: 4000n, cleo: 1000n, kofiBackup: true }), /^Shares add up to more than 100%\.$/);
+    expect(s().willVersion).toBe(0n);
+  });
+
+  it('re-seals a new will; old shares and removed backups stop working', async () => {
+    const oldRoot = s().chain.willRoot;
+    await ok(demo.updateWill({ ada: 4000n, ben: 4000n, cleo: 2000n, kofiBackup: false }));
+    expect(s().chain.willRoot).not.toBe(oldRoot);
+    expect(s().willVersion).toBe(1n);
+    expect(s().heirs.find((h) => h.profile.id === 'kofi')!.named).toBe(false);
+
+    demo.advanceTo(s().deadline);
+    await ok(demo.startCountdown('Ben'));
+    demo.advance(CHALLENGE);
+    await ok(demo.release('Ben'));
+    await ok(demo.claim('ben'));
+    expect(s().estatePaid).toBe(10_000n);   // 40% of 25,000 under the new will
+    demo.advance(CLAIM_WINDOW);
+    await fails(demo.claim('kofi'), /backup|not/i);
+  });
+
+  it('cannot change the will after the deadline', async () => {
+    demo.advanceTo(s().deadline);
+    await fails(demo.updateWill({ ada: 5000n, ben: 4000n, cleo: 1000n, kofiBackup: true }), /deadline has passed/i);
+  });
+});

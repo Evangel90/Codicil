@@ -13,6 +13,7 @@ import {
   buildWill,
   checkInDigest,
   claimPackage,
+  contractErrorCode,
   explainError,
   guardianLeaf,
   guardianSecrets,
@@ -22,6 +23,7 @@ import {
   payoutFor,
   rpIdHash,
   vaultId,
+  willUpdateDigest,
   withPasskeyApproval,
   type CodicilPrivateState,
   type GuardianSet,
@@ -109,6 +111,15 @@ export interface HeirView {
   unlockAt: number;
   claimed: boolean;
   amount: bigint;
+  /** False for a backup heir the owner has since removed. */
+  named: boolean;
+}
+
+export interface WillDraft {
+  ada: bigint;
+  ben: bigint;
+  cleo: bigint;
+  kofiBackup: boolean;
 }
 
 export interface Snapshot {
@@ -143,6 +154,19 @@ export interface Snapshot {
   votedThisRound: number[];
   activity: Activity[];
   tx?: Tx;
+}
+
+/** A problem with what the person entered; its message is shown as is. */
+class InputError extends Error {
+  override name = 'InputError';
+}
+
+/** Plain-language message for anything an action can throw. */
+function describeFailure(e: unknown): string {
+  if (contractErrorCode(e)) return explainError(e);
+  if (e instanceof Error && e.name === 'InputError') return e.message.charAt(0).toUpperCase() + e.message.slice(1) + '.';
+  if (e instanceof Error && e.name === 'NotAllowedError') return 'The passkey request was cancelled or timed out. Nothing was changed.';
+  return explainError(e);
 }
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
@@ -194,13 +218,7 @@ class DemoStore {
     const heirKeys = Object.fromEntries(
       HEIRS.map((h) => [h.id, { key: newHeirKey(), salt: newSalt() }]),
     ) as World['heirKeys'];
-    const open = (id: HeirProfile['id']) => ({ pk: heirKeys[id].key.pk, salt: heirKeys[id].salt });
-    const will = buildWill([
-      { heir: open('ada'), backup: open('kofi'), shareBps: 5000n },
-      { heir: open('ben'), shareBps: 3000n },
-      // Cleo is a minor: her share unlocks on her 18th birthday.
-      { heir: open('cleo'), shareBps: 2000n, unlockAt: BigInt(now + 400 * DAY) },
-    ]);
+    const will = this.willFor({ heirKeys }, { ada: 5000n, ben: 3000n, cleo: 2000n, kofiBackup: true }, BigInt(now + 400 * DAY));
     const guardianSecretsList = GUARDIANS.map(() => newGuardianSecret());
     const guardianSet = buildGuardianSet(guardianSecretsList.map(guardianLeaf), 2);
     const ownerSalt = newSalt();
@@ -238,6 +256,17 @@ class DemoStore {
     this.tx = undefined;
     this.actor = { kind: 'owner' };
     this.emit();
+  }
+
+  /** The will entries for a set of shares, with fresh salts. */
+  private willFor(w: Pick<World, 'heirKeys'>, d: WillDraft, cleoUnlock: bigint): Will {
+    const open = (id: HeirProfile['id']) => ({ pk: w.heirKeys[id].key.pk, salt: w.heirKeys[id].salt });
+    return buildWill([
+      { heir: open('ada'), backup: d.kofiBackup ? open('kofi') : undefined, shareBps: d.ada },
+      { heir: open('ben'), shareBps: d.ben },
+      // Cleo is a minor: her share unlocks on her 18th birthday.
+      { heir: open('cleo'), shareBps: d.cleo, unlockAt: cleoUnlock },
+    ]);
   }
 
   setActor(actor: Actor) {
@@ -290,7 +319,8 @@ class DemoStore {
       this.emit();
       return true;
     } catch (e) {
-      this.tx = { ...this.tx!, status: 'error', message: explainError(e), endedAt: performance.now() };
+      if (!contractErrorCode(e)) console.warn('[codicil demo]', e);
+      this.tx = { ...this.tx!, status: 'error', message: describeFailure(e), endedAt: performance.now() };
       this.emit();
       return false;
     }
@@ -313,6 +343,29 @@ class DemoStore {
       return wasPending
         ? `Countdown cancelled. Your next deadline is ${fmtDate(Number(next))}.`
         : `Check-in recorded. Your next deadline is ${fmtDate(Number(next))}.`;
+    });
+  }
+
+  updateWill(draft: WillDraft) {
+    return this.run('Seal the new will', ['prepare', 'approve', 'circuit', 'record'], async (stage) => {
+      const w = this.world!;
+      let will: Will;
+      try {
+        will = this.willFor(w, draft, w.will.leaves[2].unlockAt);
+      } catch (e) {
+        throw new InputError(e instanceof Error ? e.message : String(e));
+      }
+      const digest = willUpdateDigest(w.chain.address, will.root, w.chain.ledger.nonce);
+      await stage('approve');
+      const assertion = await approveWithPasskey(w.passkey, digest);
+      await stage('circuit');
+      const state = withPasskeyApproval({ passkey: { pk: w.passkey.pk, salt: w.ownerSalt } }, digest, assertion);
+      await w.chain.call('updateWillPasskey', state, will.root);
+      w.will = will;
+      this.log(OWNER_NAME, 'Updated the will', [
+        'A new will root (one 32-byte number)', 'Will version +1',
+      ], ['Who gets what, and what changed', 'That a backup heir was ' + (draft.kofiBackup ? 'kept' : 'removed')]);
+      return 'Your new will is sealed. The old one can no longer be claimed against.';
     });
   }
 
@@ -430,6 +483,7 @@ class DemoStore {
           unlockAt: Number(leaf.unlockAt),
           claimed: w.claimed.has(profile.leaf),
           amount: payoutFor(snapshotBase, leaf.shareBps),
+          named: !profile.backup || leaf.backupKeyCommit.some((b) => b !== 0),
         };
       }),
       leafHashes: leaves.map((leaf) => hex(pureCircuits.heirLeafHash(leaf))),

@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Codicil Authors
 
+import { useState } from 'react';
 import { Phase } from '@codicil/contracts/vault';
 import { duration, PhaseBadge } from '../components/ui.js';
 import { demo, fmtDate, OWNER_NAME, type Snapshot } from '../demo/store.js';
 import { Timeline } from './Timeline.js';
+import { WillEditor } from './WillEditor.js';
 
 export function OwnerView({ s }: { s: Snapshot }) {
   const left = s.deadline - s.now;
   const busy = s.tx?.status === 'running';
   const viaDevice = s.passkey?.kind === 'device';
+  const [editing, setEditing] = useState(false);
+  const canEdit = s.phase === Phase.armed && s.now < s.deadline;
+  const kofi = s.heirs.find((h) => h.profile.id === 'kofi')!;
 
   return (
     <div className="owner stack" style={{ ['--gap' as string]: '28px' }}>
@@ -56,7 +61,7 @@ export function OwnerView({ s }: { s: Snapshot }) {
 
       <section className="facts" aria-label="Vault summary">
         <div><span className="muted small">Estate</span><strong>{s.estate.toLocaleString()} demo tokens</strong></div>
-        <div><span className="muted small">Heirs</span><strong>3, plus 1 backup</strong></div>
+        <div><span className="muted small">Heirs</span><strong>3{kofi.named ? ', plus 1 backup' : ''}</strong></div>
         <div><span className="muted small">Guardian reports this round</span><strong>{s.guardianVotes.toString()} of {s.guardianThreshold.toString()} needed</strong></div>
         <div><span className="muted small">Check-ins</span><strong>{s.nonce.toString()}</strong></div>
       </section>
@@ -68,15 +73,24 @@ export function OwnerView({ s }: { s: Snapshot }) {
       )}
 
       <section aria-labelledby="will-title" className="stack">
-        <h2 id="will-title">Your will</h2>
-        <p className="muted small">Only you can read this. It lives on your device; the chain holds a single sealed number.</p>
+        <div className="will-head">
+          <h2 id="will-title">Your will</h2>
+          {canEdit && !editing && (
+            <button type="button" className="btn btn-quiet" onClick={() => setEditing(true)}>Change the will</button>
+          )}
+        </div>
+        <p className="muted small">
+          Only you can read this. It lives on your device; the chain holds a single sealed number
+          {s.willVersion > 0n ? ` (version ${(s.willVersion + 1n).toString()})` : ''}.
+        </p>
+        {editing && canEdit ? <WillEditor s={s} onDone={() => setEditing(false)} /> : (
         <table className="will">
           <thead><tr><th>Heir</th><th>Share</th><th>Available</th></tr></thead>
           <tbody>
             {s.heirs.filter((h) => !h.profile.backup).map((h) => (
               <tr key={h.profile.id}>
                 <td className="private">{h.profile.name} <span className="muted small">{h.profile.relation}</span>
-                  {h.profile.id === 'ada' && <div className="muted small">Backup: Kofi, if Ada does not claim within 30 days</div>}
+                  {h.profile.id === 'ada' && kofi.named && <div className="muted small">Backup: Kofi, if Ada does not claim within 30 days</div>}
                 </td>
                 <td className="private">{Number(h.shareBps) / 100}%</td>
                 <td className="private">{h.unlockAt ? `From ${fmtDate(h.unlockAt)}` : 'On release'}</td>
@@ -84,6 +98,7 @@ export function OwnerView({ s }: { s: Snapshot }) {
             ))}
           </tbody>
         </table>
+        )}
       </section>
 
       <Timeline items={s.activity} title={`${OWNER_NAME}'s vault activity`} />

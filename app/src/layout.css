@@ -79,6 +79,17 @@ table.will { width: 100%; border-collapse: collapse; }
 .will td.private { font-size: 1.05rem; }
 #will-title, #timeline-title { font-size: 1.6rem; color: var(--vellum); }
 
+/* ─── Will editor ─────────────────────────────────────────── */
+.will-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 16px; }
+.will-editor { display: grid; gap: 12px; padding: 20px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--ink-2); max-width: 640px; }
+.edit-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.edit-row label .private { font-size: 1.1rem; }
+.pct-input { display: inline-flex; align-items: center; gap: 6px; }
+.pct-input input { width: 5.5em; min-height: 44px; padding: 8px 10px; text-align: right; font: inherit; font-variant-numeric: tabular-nums; color: var(--text); background: var(--ink); border: 1px solid var(--line); border-radius: var(--r-sm); }
+.pct-input input[aria-invalid='true'] { border-color: var(--danger); }
+.edit-check { display: flex; gap: 10px; align-items: flex-start; font-size: 0.92rem; color: var(--text-2); padding-left: 2px; }
+.edit-check input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--brass); }
+
 /* ─── Timeline ────────────────────────────────────────────── */
 .timeline ol { list-style: none; padding: 0; margin: 16px 0 0; }
 .timeline > ol > li { padding: 16px 0; border-bottom: 1px solid var(--line); }

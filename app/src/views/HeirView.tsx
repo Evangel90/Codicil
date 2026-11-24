@@ -13,7 +13,13 @@ export function HeirView({ s, id }: { s: Snapshot; id: HeirProfile['id'] }) {
   const backupOpensAt = s.releasedAt + CLAIM_WINDOW;
 
   let status: { title: string; body: string; canClaim: boolean };
-  if (!released) {
+  if (!me.named) {
+    status = {
+      title: 'You are no longer in this will',
+      body: `${OWNER_NAME.split(' ')[0]} removed the backup heir in a later version. Your key cannot claim anything.`,
+      canClaim: false,
+    };
+  } else if (!released) {
     status = {
       title: 'Nothing to claim yet',
       body: `${OWNER_NAME}'s vault is ${s.phase === Phase.pending ? 'in its countdown' : 'active'}. Your share can only be claimed after the will is released. Until then, nobody else can see that you are in it.`,
