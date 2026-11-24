@@ -14,8 +14,40 @@ env:
   COMPACT_CLI_VERSION: 0.5.3
 
 jobs:
+  codicil:
+    name: Compile & test (contracts + sdk)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Compact toolchain
+        env:
+          # `compact update` queries the GitHub API; authenticate to avoid
+          # the shared-runner rate limit.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            "https://github.com/midnightntwrk/compact/releases/download/compact-v${COMPACT_CLI_VERSION}/compact-installer.sh" | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/compact" update "$COMPACT_VERSION"
+          "$HOME/.local/bin/compact" compile --version
+
+      - run: npm ci
+      - name: Compile contracts (--skip-zk)
+        run: npm run compile
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Tests (simulator with ZK constraint checks, property tests, SDK)
+        run: npm test
+
   spike:
-    name: Compile & test (codicil-spike)
+    name: Phase 0 spike (codicil-spike)
     runs-on: ubuntu-latest
     defaults:
       run:
