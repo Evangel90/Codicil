@@ -89,6 +89,20 @@ simulator tests in `test/`.
   for the frontend: keys are fetched per circuit, so the UI must show a "downloading keys"
   progress state.
 
+### Vault (Phase 1), full compile on 2026-11-24
+
+`contracts/src/codicil_vault.compact`: 10 circuits, 143 s on the same machine.
+
+| Circuit | zkir | prover key |
+|---|---:|---:|
+| `checkInPasskey` / `updateWillPasskey` (WebAuthn: SHA-256 ×3 + P-256) | 287 / 283 KB | 448 MB each |
+| `checkInEd25519` / `updateWillEd25519` (CIP-30: Ed25519 over 119 bytes) | 58 / 54 KB | 276 MB each |
+| `claim` / `claimAsBackup` (Merkle depth 10, Curve25519 key proof, payout) | 20 / 22 KB | 108 MB each |
+| `deposit`, `triggerTimeout`, `finalizeRelease`, `isReleasedForContract` | 2–3 KB | ≤ 0.2 MB |
+
+The passkey circuits are the heaviest. The proof server loads only the key for the circuit being
+proven, so a check-in needs at most 448 MB of key material.
+
 ## V5: Multiple P-256 checks per circuit
 
 - **Result:** PASS. `verify1/2/3` compile, generate keys, pass the simulator and pass the
