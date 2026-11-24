@@ -197,3 +197,16 @@ body { margin: 0; min-height: 100vh; }
 @media (prefers-reduced-motion: reduce) {
   .ox *, .ox *::before, .ox *::after { animation: none !important; transition: none !important; }
 }
+
+/* ───────── next-up guide ───────── */
+.next-dot { display: inline-block; width: 6px; height: 6px; margin-left: 7px; border-radius: 50%; background: var(--o-signal); vertical-align: middle; animation: o-pulse 2s var(--o-ease) infinite; color: var(--o-signal); }
+.seg button[aria-pressed="true"] .next-dot { background: var(--o-invert); }
+.nextbar { border-top: 1px solid var(--o-line); }
+.nextbar-row { display: flex; align-items: center; gap: 10px 16px; min-height: 52px; padding-top: 8px; padding-bottom: 8px; flex-wrap: wrap; }
+.nextbar .dot { color: var(--o-signal); }
+.nextbar.tone-attention { background: color-mix(in srgb, var(--o-signal) 5%, var(--o-bg-1)); }
+.nextbar.tone-done .dot { color: var(--o-armed); }
+.nextbar-text { flex: 1 1 260px; min-width: 0; font-size: 14px; }
+.nextbar .eyebrow-inline { color: var(--o-signal); }
+.nextbar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.bad-ring { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--o-danger) 50%, transparent); color: var(--o-danger); flex: none; }

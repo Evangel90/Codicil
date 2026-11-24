@@ -9,6 +9,7 @@ import { HashChip } from '../components/ui.js';
 import { fmtShort, type Snapshot } from '../demo/store.js';
 import { WillEditor } from './WillEditor.js';
 import { HeirLetters } from './HeirLetters.js';
+import { PlanSummary } from './PlanSummary.js';
 
 export function WillView({ s }: { s: Snapshot }) {
   const [editing, setEditing] = useState(false);
@@ -58,6 +59,8 @@ export function WillView({ s }: { s: Snapshot }) {
           </p>
         </div>
       )}
+
+      <PlanSummary setup={s.setup!} now={s.now} title="Your rules, in plain words" />
 
       <HeirLetters s={s} />
     </div>

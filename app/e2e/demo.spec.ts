@@ -67,6 +67,8 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
   await page.getByRole('button', { name: /Go to my vault/ }).click({ timeout: 30_000 });
   await expect(page.getByRole('heading', { name: 'Your next check-in is due in' })).toBeVisible();
 
+  await expect(page.getByRole('status').filter({ hasText: /^Next/ })).toContainText('Amara is checking in');
+
   // Proof of life through Chrome's WebAuthn and the in-circuit verifier.
   await page.getByRole('button', { name: /I'm alive/ }).click();
   await finish(page, /Check-in recorded/);
@@ -124,10 +126,23 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
 
   // Ben claims his new 40% to a fresh address.
   await actAs.getByRole('button', { name: 'Heir' }).click();
+  await page.getByRole('group', { name: 'Which heir' }).getByRole('button', { name: /^Ben/ }).click();
   await expect(page.getByRole('heading', { name: 'Your share is ready when you are.' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Claim my share' })).toBeHidden();   // needs his letter first
+  await page.getByLabel('Letter text').fill('not a letter');
+  await page.getByRole('button', { name: 'Check the letter' }).click();
+  await expect(page.getByRole('alert')).toContainText('not a Codicil heir letter');
+  await page.getByRole('button', { name: /Use the letter Amara gave me/ }).click();
+  await expect(page.getByRole('heading', { name: 'Your letter checks out.' })).toBeVisible();
   await page.getByRole('button', { name: 'Claim my share' }).click();
   await finish(page, /10,000 demo tokens sent/);
   await expect(page.getByRole('heading', { name: 'Thank you, Ben.' })).toBeVisible();
+
+  // The public inspector: what anyone can learn, in plain words.
+  await actAs.getByRole('button', { name: 'Anyone' }).click();
+  await expect(page.getByRole('heading', { name: 'What anyone can learn.' })).toBeVisible();
+  await expect(page.locator('.inspect-rows')).toContainText('1 one-time stamp');
+  await expect(page.locator('.inspect-rows')).not.toContainText(/Ada|Ben|Cleo|Kofi|Mensah|Sarah|Tomás|Amara/);
 
   // The privacy lens: one nullifier, and no names on the public side.
   await page.getByRole('button', { name: 'Privacy Lens' }).click();

@@ -64,3 +64,10 @@ export class MerkleTree {
     return { leaf: this.leaves[index], path };
   }
 }
+
+/** The root a Merkle path leads to; equal to the on-chain root when the leaf is in the tree. */
+export function rootFromPath(p: MerklePath): bigint {
+  let h = degradeToTransient(p.leaf);
+  for (const { sibling, goes_left } of p.path) h = goes_left ? node(h, sibling.field) : node(sibling.field, h);
+  return h;
+}

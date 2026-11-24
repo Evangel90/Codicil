@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { sampleContractAddress } from '@midnight-ntwrk/compact-runtime';
 import {
   buildWill,
+  checkHeirLetter,
   claimPackage,
   decodeHeirLetter,
   encodeHeirLetter,
@@ -58,5 +59,27 @@ describe('heir letters', () => {
     const will = sampleWill();
     const letter = { vault: sampleContractAddress(), ...claimPackage(will, 1) };
     expect(decodeHeirLetter(`  ${encodeHeirLetter(letter)}\n`)).toEqual(letter);
+  });
+});
+
+describe("checking a letter on the heir's device", () => {
+  it('confirms a current letter and which key it belongs to', () => {
+    const ada = open(), kofi = open(), ben = open();
+    const will = buildWill([{ heir: ada, backup: kofi, shareBps: 6000n }, { heir: ben, shareBps: 4000n }]);
+    const vault = sampleContractAddress();
+    const letter = decodeHeirLetter(encodeHeirLetter({ vault, ...claimPackage(will, 0) }));
+    expect(checkHeirLetter(letter, { vault, willRoot: will.root, key: ada })).toEqual({ vaultMatches: true, inCurrentWill: true, role: 'heir' });
+    expect(checkHeirLetter(letter, { vault, willRoot: will.root, key: kofi }).role).toBe('backup');
+    expect(checkHeirLetter(letter, { vault, willRoot: will.root, key: ben }).role).toBe('none');
+  });
+
+  it('spots a letter from an older will or another vault', () => {
+    const ben = open();
+    const old = buildWill([{ heir: ben, shareBps: 3000n }, { heir: open(), shareBps: 7000n }]);
+    const now = buildWill([{ heir: ben, shareBps: 4000n }, { heir: open(), shareBps: 6000n }]);
+    const vault = sampleContractAddress();
+    const letter = decodeHeirLetter(encodeHeirLetter({ vault, ...claimPackage(old, 0) }));
+    expect(checkHeirLetter(letter, { vault, willRoot: now.root }).inCurrentWill).toBe(false);
+    expect(checkHeirLetter(letter, { vault: sampleContractAddress(), willRoot: old.root }).vaultMatches).toBe(false);
   });
 });

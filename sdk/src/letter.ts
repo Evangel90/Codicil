@@ -22,8 +22,8 @@
 
 import { pureCircuits, type HeirLeaf } from '@codicil/contracts/vault';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
-import { DEPTH, type MerklePath } from './merkle.js';
-import type { ClaimPackage } from './will.js';
+import { DEPTH, rootFromPath, type MerklePath } from './merkle.js';
+import { keyCommitment, type ClaimPackage, type KeyCommitmentOpening } from './will.js';
 
 export const LETTER_PREFIX = 'codicil:claim:v1:';
 const VERSION = 1;
@@ -111,4 +111,34 @@ export function decodeHeirLetter(text: string): HeirLetter {
 /** Short fingerprint to compare a letter against the will it came from. */
 export function letterFingerprint(letter: HeirLetter): string {
   return bytesToHex(letter.path.leaf).slice(0, 8);
+}
+
+export interface LetterCheck {
+  /** The letter is for this vault. */
+  vaultMatches: boolean;
+  /** Its entry is in the will the chain holds now (its path leads to the current root). */
+  inCurrentWill: boolean;
+  /** Which part of the entry the given key opens, if a key was given. */
+  role?: 'heir' | 'backup' | 'none';
+}
+
+const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/**
+ * Checks a letter on the heir's own device, against public data only: the
+ * vault address and the will root on the ledger. Nothing is sent anywhere.
+ */
+export function checkHeirLetter(
+  letter: HeirLetter,
+  current: { vault: string; willRoot: bigint; key?: KeyCommitmentOpening },
+): LetterCheck {
+  const check: LetterCheck = {
+    vaultMatches: letter.vault.toLowerCase() === current.vault.toLowerCase(),
+    inCurrentWill: rootFromPath(letter.path) === current.willRoot,
+  };
+  if (current.key) {
+    const c = keyCommitment(current.key);
+    check.role = sameBytes(c, letter.leaf.heirKeyCommit) ? 'heir' : sameBytes(c, letter.leaf.backupKeyCommit) ? 'backup' : 'none';
+  }
+  return check;
 }

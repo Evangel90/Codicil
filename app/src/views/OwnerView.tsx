@@ -9,6 +9,7 @@ import { Phase } from '@codicil/contracts/vault';
 import { Countdown, duration, FACE_ID, HashChip, Icon, PHASE } from '../components/ui.js';
 import { days, demo, fmtDate, fmtShort, OWNER_FIRST, TOKEN, type Snapshot } from '../demo/store.js';
 import { Activity } from './Activity.js';
+import { calendarFile, downloadCalendar, remindersFor } from '../demo/ics.js';
 import type { Tab } from './Demo.js';
 
 const greeting = () => {
@@ -137,6 +138,18 @@ export function OwnerView({ s, openTab }: { s: Snapshot; openTab: (t: Tab) => vo
               <span className="alive-note">
                 One touch with {s.passkey?.kind === 'device' ? 'Face ID' : 'your demo key'}. Your deadline moves to {days(setup.every)} days from now, and nobody can tell it was you.
               </span>
+            </div>
+          )}
+          {s.phase === Phase.armed && !overdue && (
+            <div className="remind">
+              <button
+                type="button"
+                className="linkish"
+                onClick={() => downloadCalendar(calendarFile(remindersFor(s.deadline, s.now), s.now, `${location.origin}/#/demo`))}
+              >
+                Add check-in reminders to my calendar
+              </button>
+              <span className="small muted">7 days and 1 day before {fmtShort(s.deadline)}. Made on this device: no server learns your deadline, and the entries only say “Check in”.</span>
             </div>
           )}
           {s.phase === Phase.pending && (

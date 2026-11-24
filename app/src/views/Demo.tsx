@@ -7,13 +7,15 @@
 import { useEffect, useState } from 'react';
 import { Phase } from '@codicil/contracts/vault';
 import { Brand, Icon, ICONS, Segmented, ThemeToggle, Toast, TxSheet } from '../components/ui.js';
-import { DAY, days, demo, GUARDIANS, HEIRS, OWNER_FIRST, OWNER_NAME, useDemo, type Actor, type Snapshot } from '../demo/store.js';
+import { CLAIM_WINDOW, DAY, demo, GUARDIANS, HEIRS, OWNER_FIRST, useDemo, type Actor, type Snapshot } from '../demo/store.js';
+import { nextUp, sameActor, type NextUp } from '../demo/guide.js';
 import { Wizard } from './Wizard.js';
 import { OwnerView } from './OwnerView.js';
 import { WillView } from './WillView.js';
 import { HeirView } from './HeirView.js';
 import { GuardianView } from './GuardianView.js';
 import { LensView } from './LensView.js';
+import { InspectView } from './InspectView.js';
 
 export type Tab = 'vault' | 'will' | 'lens';
 
@@ -21,7 +23,7 @@ const upper = (t: number) =>
   new Date(t * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase();
 
 function Nav({ s, tab, setTab }: { s: Snapshot; tab: Tab; setTab: (t: Tab) => void }) {
-  const first = s.actor.kind === 'owner' ? 'Vault' : s.actor.kind === 'heir' ? 'Your share' : 'Guardian';
+  const first = s.actor.kind === 'owner' ? 'Vault' : s.actor.kind === 'heir' ? 'Your share' : s.actor.kind === 'guardian' ? 'Guardian' : 'Inspect';
   const items: [Tab, string][] = [['vault', first], ...(s.actor.kind === 'owner' ? [['will', 'Will'] as [Tab, string]] : []), ['lens', 'Privacy Lens']];
   return (
     <nav className="pillnav" aria-label="Sections">
@@ -34,12 +36,25 @@ function Nav({ s, tab, setTab }: { s: Snapshot; tab: Tab; setTab: (t: Tab) => vo
   );
 }
 
-function ActAs({ s }: { s: Snapshot }) {
+const actorName = (a: Actor) =>
+  a.kind === 'owner' ? OWNER_FIRST : a.kind === 'public' ? 'Anyone'
+    : a.kind === 'heir' ? HEIRS.find((h) => h.id === a.id)!.name : GUARDIANS[a.id].name;
+
+/** A label with a pulsing dot when it's this person's turn. */
+const turn = (label: string, next: boolean) => (
+  <>{label}{next && <span className="next-dot" aria-hidden="true" />}{next && <span className="sr-only"> (next)</span>}</>
+);
+
+function ActAs({ s, up }: { s: Snapshot; up: NextUp }) {
   const role = s.actor.kind;
+  const isNext = (a: Actor) => up.who.some((w) => sameActor(w, a));
+  const roleNext = (k: Actor['kind']) => up.who.some((w) => w.kind === k);
   const people = role === 'heir'
-    ? HEIRS.map((h) => ({ value: h.id as string, label: h.name }))
-    : role === 'guardian' ? GUARDIANS.map((g) => ({ value: String(g.id), label: g.name })) : [];
+    ? HEIRS.map((h) => ({ value: h.id as string, label: turn(h.name, isNext({ kind: 'heir', id: h.id })) }))
+    : role === 'guardian' ? GUARDIANS.map((g) => ({ value: String(g.id), label: turn(g.name, isNext({ kind: 'guardian', id: g.id })) })) : [];
   const person = s.actor.kind === 'heir' ? s.actor.id : s.actor.kind === 'guardian' ? String(s.actor.id) : '';
+  const firstOf = (k: Actor['kind']): Actor => up.who.find((w) => w.kind === k)
+    ?? (k === 'owner' ? { kind: 'owner' } : k === 'heir' ? { kind: 'heir', id: 'ben' } : k === 'guardian' ? { kind: 'guardian', id: 0 } : { kind: 'public' });
   return (
     <div className="actas">
       <span className="eyebrow">Act as</span>
@@ -47,8 +62,10 @@ function ActAs({ s }: { s: Snapshot }) {
         label="Act as"
         size="sm"
         value={role}
-        options={[{ value: 'owner', label: OWNER_FIRST }, { value: 'heir', label: 'Heir' }, { value: 'guardian', label: 'Guardian' }]}
-        onChange={(k) => demo.setActor(k === 'owner' ? { kind: 'owner' } : k === 'heir' ? { kind: 'heir', id: 'ben' } : { kind: 'guardian', id: 0 })}
+        options={([['owner', OWNER_FIRST], ['heir', 'Heir'], ['guardian', 'Guardian'], ['public', 'Anyone']] as const).map(([value, label]) => ({
+          value, label: turn(label, roleNext(value) && role !== value),
+        }))}
+        onChange={(k) => demo.setActor(firstOf(k))}
       />
       {people.length > 0 && (
         <Segmented<string>
@@ -64,18 +81,23 @@ function ActAs({ s }: { s: Snapshot }) {
 }
 
 function DemoBar({ s, onReset }: { s: Snapshot; onReset: () => void }) {
+  const up = nextUp(s);
   const jumps: { label: string; to: number }[] = [{ label: '+1 day', to: s.now + DAY }];
   if (s.phase === Phase.armed && s.now < s.deadline) jumps.push({ label: 'Skip to deadline', to: s.deadline });
   if (s.phase === Phase.pending && s.now < s.pendingUntil) jumps.push({ label: 'Skip challenge window', to: s.pendingUntil });
-  const cleo = s.heirs.find((h) => h.profile.id === 'cleo');
-  if (s.phase === Phase.released && cleo && s.now < cleo.unlockAt) jumps.push({ label: "Skip to Cleo's unlock date", to: cleo.unlockAt });
+  const waits = [s.releasedAt + CLAIM_WINDOW, ...s.heirs.filter((h) => !h.claimed).map((h) => h.unlockAt)].filter((t) => t > s.now).sort((a, b) => a - b);
+  const cleo = s.heirs.find((h) => h.profile.id === 'cleo')!;
+  if (s.phase === Phase.released && waits.length) {
+    const t = waits[0];
+    jumps.push({ label: t === cleo.unlockAt ? "Skip to Cleo's unlock date" : 'Skip to the backup date', to: t });
+  }
   const day = Math.floor((s.now - s.deployedAt) / DAY) + 1;
   return (
     <div className="demobar" aria-label="Demo controls" role="region">
       <div className="wrap demobar-row">
         <span className="eyebrow demo-word">Demo</span>
         <span className="mono demo-date" aria-label={`Demo date: day ${day}`}>DAY {day} · {upper(s.now)}</span>
-        <ActAs s={s} />
+        <ActAs s={s} up={up} />
         <span className="grow" />
         <div className="demo-jumps">
           {jumps.map((j) => (
@@ -86,40 +108,38 @@ function DemoBar({ s, onReset }: { s: Snapshot; onReset: () => void }) {
           <button type="button" className="btn btn-ghost btn-sm" onClick={onReset}>Reset</button>
         </div>
       </div>
-      <PublicAction s={s} />
+      <NextBar s={s} up={up} />
     </div>
   );
 }
 
-/** What anyone can do right now to move the vault forward. */
-function PublicAction({ s }: { s: Snapshot }) {
-  const who = s.actor.kind === 'owner' ? OWNER_NAME
-    : s.actor.kind === 'heir' ? HEIRS.find((h) => h.id === (s.actor as { id: string }).id)!.name : 'A guardian';
-  let action: { tone: string; text: string; button: string; run: () => void } | undefined;
-  if (s.phase === Phase.armed && s.now >= s.deadline) {
-    action = {
-      tone: 'pending',
-      text: `${OWNER_FIRST} missed the check-in due ${upper(s.deadline)}. Anyone can start the switch, which gives ${OWNER_FIRST} ${days(s.setup!.window)} days to cancel.`,
-      button: 'Start the switch',
-      run: () => void demo.startCountdown(who),
-    };
-  } else if (s.phase === Phase.pending && s.now >= s.pendingUntil) {
-    action = {
-      tone: 'released',
-      text: `The challenge window ended ${upper(s.pendingUntil)} and nobody cancelled. Anyone can release the will.`,
-      button: 'Release the will',
-      run: () => void demo.release(who),
-    };
-  }
-  if (!action) return null;
+/** Where the story is, whose turn it is, and what anyone can do right now. */
+function NextBar({ s, up }: { s: Snapshot; up: NextUp }) {
+  const who = s.actor.kind === 'public' ? 'Someone' : actorName(s.actor);
+  const busy = s.tx?.status === 'running';
+  const others = up.who.filter((w) => !sameActor(w, s.actor) && w.kind !== 'public').slice(0, 3);
   return (
-    <div className={`public-action tone-${action.tone}`}>
-      <div className="wrap public-action-row">
-        <span className="dot pulse" aria-hidden="true" />
-        <span className="public-action-text"><span className="mono eyebrow-inline">Anyone</span> {action.text}</span>
-        <button type="button" className="btn btn-primary btn-sm" disabled={s.tx?.status === 'running'} onClick={action.run}>
-          {action.button} <span className="arw" aria-hidden="true">→</span>
-        </button>
+    <div className={`nextbar tone-${up.tone}`} role="status" aria-live="polite">
+      <div className="wrap nextbar-row">
+        <span className={`dot ${up.tone === 'attention' ? 'pulse' : ''}`} aria-hidden="true" />
+        <span className="nextbar-text"><span className="mono eyebrow-inline">Next</span> {up.text}</span>
+        <span className="nextbar-actions">
+          {up.action === 'startSwitch' && (
+            <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void demo.startCountdown(who)}>
+              Start the switch <span className="arw" aria-hidden="true">→</span>
+            </button>
+          )}
+          {up.action === 'release' && (
+            <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void demo.release(who)}>
+              Release the will <span className="arw" aria-hidden="true">→</span>
+            </button>
+          )}
+          {!up.action && others.map((a) => (
+            <button key={actorName(a)} type="button" className="btn btn-secondary btn-sm" onClick={() => demo.setActor(a)}>
+              Act as {actorName(a)}
+            </button>
+          ))}
+        </span>
       </div>
     </div>
   );
@@ -162,7 +182,8 @@ export function Demo() {
             : tab === 'will' && s.actor.kind === 'owner' ? <WillView s={s} />
             : s.actor.kind === 'owner' ? <OwnerView s={s} openTab={setTab} />
             : s.actor.kind === 'heir' ? <HeirView s={s} id={s.actor.id} />
-            : <GuardianView s={s} id={s.actor.id} />}
+            : s.actor.kind === 'guardian' ? <GuardianView s={s} id={s.actor.id} />
+            : <InspectView s={s} />}
         </main>
       )}
       {inApp && (

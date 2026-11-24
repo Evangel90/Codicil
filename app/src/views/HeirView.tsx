@@ -7,13 +7,13 @@ import { useState } from 'react';
 import { Phase } from '@codicil/contracts/vault';
 import { sampleUserAddress } from '@midnight-ntwrk/compact-runtime';
 import { duration, Icon, ICONS, Logo } from '../components/ui.js';
+import { LetterBox } from './LetterBox.js';
 import { CLAIM_WINDOW, demo, fmtDate, fmtShort, OWNER_FIRST, TOKEN, type HeirProfile, type Snapshot } from '../demo/store.js';
 
 type Status = 'removed' | 'locked' | 'pending' | 'waiting' | 'claimable' | 'claimed';
 
 export function HeirView({ s, id }: { s: Snapshot; id: HeirProfile['id'] }) {
   const me = s.heirs.find((h) => h.profile.id === id)!;
-  const primary = s.heirs.find((h) => !h.profile.backup && h.profile.leaf === me.profile.leaf)!;
   const [to, setTo] = useState(() => sampleUserAddress());
   const busy = s.tx?.status === 'running';
   const released = s.phase === Phase.released;
@@ -30,7 +30,9 @@ export function HeirView({ s, id }: { s: Snapshot; id: HeirProfile['id'] }) {
   else if (s.now < opensAt || leafTaken) status = 'waiting';
   else status = 'claimable';
 
-  const shareText = `${Number(primary.shareBps) / 100}%`;
+  // The heir knows their share only from the letter they hold.
+  const letterOk = !!me.letter && me.letter.vaultMatches && me.letter.inCurrentWill && me.letter.role !== 'none';
+  const shareText = me.letter ? `${Number(me.letter.shareBps) / 100}%` : '';
   const copy: Record<Status, [string, string]> = {
     removed: ['You are no longer in this will.', `${OWNER_FIRST} removed the backup heir in a later version of the will. Your key can no longer claim anything, and nobody else can tell you were ever in it.`],
     locked: ['You are named in a will.', 'Someone who cares about you included you in their will. It’s sealed, which means they are active and well. There’s nothing you need to do.'],
@@ -93,7 +95,13 @@ export function HeirView({ s, id }: { s: Snapshot; id: HeirProfile['id'] }) {
         </>
       )}
 
-      {status === 'claimable' && (
+      {status !== 'removed' && status !== 'claimed' && <LetterBox s={s} me={me} />}
+
+      {status === 'claimable' && !letterOk && (
+        <p className="small muted claim-gate">Load a valid letter above to claim. It is what tells your device which entry in the will is yours.</p>
+      )}
+
+      {status === 'claimable' && letterOk && (
         <section className="card claim fade-in" aria-labelledby="claim-h">
           <div className="claim-top">
             <span id="claim-h">Your share · {shareText}</span>

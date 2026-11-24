@@ -13,6 +13,7 @@ import { Phase, pureCircuits, type HeirLeaf } from '@codicil/contracts/vault';
 import {
   buildGuardianSet,
   buildWill,
+  checkHeirLetter,
   checkInDigest,
   claimPackage,
   contractErrorCode,
@@ -20,6 +21,7 @@ import {
   encodeHeirLetter,
   explainError,
   guardianLeaf,
+  letterFingerprint,
   guardianSecrets,
   newGuardianSecret,
   newHeirKey,
@@ -39,7 +41,7 @@ import { approveWithPasskey, type OwnerPasskey } from './passkey.js';
 
 export const DAY = 86_400;
 export const CHECK_IN_EVERY = 30 * DAY;
-export const CHALLENGE = 7 * DAY;
+export const CHALLENGE = 14 * DAY;
 export const CLAIM_WINDOW = 30 * DAY;
 export const ESTATE = 25_000n;
 export const TOKEN = 'demo tokens';
@@ -73,7 +75,8 @@ export const GUARDIANS = [
 export type Actor =
   | { kind: 'owner' }
   | { kind: 'heir'; id: HeirProfile['id'] }
-  | { kind: 'guardian'; id: number };
+  | { kind: 'guardian'; id: number }
+  | { kind: 'public' };
 
 // ─── Setup ──────────────────────────────────────────────────────────────────
 export interface WillDraft {
@@ -150,6 +153,18 @@ export interface HeirView {
   named: boolean;
   /** Last 4 hex digits of the heir's public key. */
   keyEnd: string;
+  /** The letter this person holds on their device, as checked there. */
+  letter?: HeldLetter;
+}
+
+export interface HeldLetter {
+  text: string;
+  fingerprint: string;
+  shareBps: bigint;
+  unlockAt: number;
+  vaultMatches: boolean;
+  inCurrentWill: boolean;
+  role: 'heir' | 'backup' | 'none';
 }
 
 export interface Snapshot {
@@ -227,6 +242,8 @@ interface World extends Keys {
   deployedAt: number;
   lastCheckIn: number;
   claimed: Map<number, string>;   // leaf → nullifier hex
+  /** Letters each heir has loaded on their own device. */
+  held: Map<HeirProfile['id'], string>;
   votedRound: Map<number, bigint>;
 }
 
@@ -318,7 +335,7 @@ class DemoStore {
       attestorKeyCommit: new Uint8Array(32),
     }, now);
     this.world = {
-      ...k, chain, passkey, setup, will, guardianSet, deployedAt: now, lastCheckIn: now, claimed: new Map(), votedRound: new Map(),
+      ...k, chain, passkey, setup, will, guardianSet, deployedAt: now, lastCheckIn: now, claimed: new Map(), votedRound: new Map(), held: new Map(),
     };
     this.activity = [{
       at: now, who: OWNER_NAME, what: 'Vault deployed and will sealed', tone: 'plain',
@@ -495,6 +512,30 @@ class DemoStore {
     return encodeHeirLetter({ vault: w.chain.address, ...claimPackage(w.will, h.leaf) });
   }
 
+  /**
+   * An heir loads a letter on their device (pasted, scanned, or the one the
+   * owner gave them). Returns a plain-language problem if it can't be read.
+   */
+  holdLetter(heirId: HeirProfile['id'], text?: string): string | undefined {
+    const w = this.world;
+    if (!w) return 'There is no vault yet.';
+    const t = (text ?? this.letterFor(heirId)).trim();
+    try {
+      decodeHeirLetter(t);
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      return m.charAt(0).toUpperCase() + m.slice(1) + '.';
+    }
+    w.held.set(heirId, t);
+    this.emit();
+    return undefined;
+  }
+
+  forgetLetter(heirId: HeirProfile['id']) {
+    this.world?.held.delete(heirId);
+    this.emit();
+  }
+
   updateWill(draft: WillDraft) {
     return this.run('Sealing the new will', ['prepare', 'approve', 'circuit', 'proof', 'record'], async (stage) => {
       const w = this.world!;
@@ -565,7 +606,10 @@ class DemoStore {
     });
   }
 
-  /** `to` is a 64-hex unshielded address; a fresh one is made if omitted. */
+  /**
+   * `to` is a 64-hex unshielded address; a fresh one is made if omitted. The
+   * claim uses the letter the heir holds (or, in tests, the current one).
+   */
   claim(heirId: HeirProfile['id'], to: string = sampleUserAddress()) {
     const h = HEIRS.find((x) => x.id === heirId)!;
     return this.run('Claiming your share', ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
@@ -574,7 +618,7 @@ class DemoStore {
       await stage('circuit');
       const k = w.heirKeys[heirId];
       // The heir works only from the letter they were given and their own key.
-      const letter = decodeHeirLetter(this.letterFor(heirId));
+      const letter = decodeHeirLetter(w.held.get(heirId) ?? this.letterFor(heirId));
       const state: CodicilPrivateState = { claimant: { leaf: letter.leaf, path: letter.path, key: k.key, keySalt: k.salt } };
       const out = await w.chain.call(h.backup ? 'claimAsBackup' : 'claim', state, { bytes: encodeUserAddress(to.toLowerCase()) });
       const paid = out.payouts.reduce((a, [, v]) => a + v, 0n);
@@ -585,6 +629,18 @@ class DemoStore {
       ], [`That it was ${h.name}`, 'Which entry in the will', 'The heir key']);
       return `${paid.toLocaleString()} ${TOKEN} sent to ${to.slice(0, 6)}…${to.slice(-4)}.`;
     });
+  }
+
+  private heldLetter(w: World, id: HeirProfile['id']): HeldLetter | undefined {
+    const text = w.held.get(id);
+    if (!text) return undefined;
+    const letter = decodeHeirLetter(text);
+    const k = w.heirKeys[id];
+    const check = checkHeirLetter(letter, { vault: w.chain.address, willRoot: w.chain.ledger.willRoot, key: { pk: k.key.pk, salt: k.salt } });
+    return {
+      text, fingerprint: letterFingerprint(letter), shareBps: letter.leaf.shareBps, unlockAt: Number(letter.leaf.unlockAt),
+      vaultMatches: check.vaultMatches, inCurrentWill: check.inCurrentWill, role: check.role ?? 'none',
+    };
   }
 
   // ─── Snapshot ─────────────────────────────────────────────────────────────
@@ -640,6 +696,7 @@ class DemoStore {
           amount: payoutFor(snapshotBase, leaf.shareBps),
           named: !profile.backup || leaf.backupKeyCommit.some((b) => b !== 0),
           keyEnd: w.heirKeys[profile.id].key.pk.x.toString(16).slice(-4),
+          letter: this.heldLetter(w, profile.id),
         };
       }),
       leafHashes: leaves.map((leaf) => hex(pureCircuits.heirLeafHash(leaf))),

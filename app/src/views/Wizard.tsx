@@ -7,6 +7,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { HashChip, Icon, ICONS, FACE_ID, Logo, Segmented } from '../components/ui.js';
 import { DAY, days, defaultSetup, demo, fmtShort, GUARDIANS, HEIRS, OWNER_NAME, type Snapshot, type VaultSetup } from '../demo/store.js';
+import { PRESETS, presetFor } from '../demo/guide.js';
+import { PlanSummary } from './PlanSummary.js';
 import { createDemoPasskey, createDevicePasskey, passkeySupport, type OwnerPasskey, type PasskeySupport } from '../demo/passkey.js';
 
 const LABELS = ['Passkey', 'Heirs', 'Shares & dates', 'Guardians', 'Timers', 'Review', 'Deploy'];
@@ -219,6 +221,20 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
           {step === 4 && (
             <div className="card wiz-card">
               <fieldset>
+                <legend>Start from a preset</legend>
+                <div className="presets" role="group" aria-label="Presets">
+                  {PRESETS.map((p) => (
+                    <button key={p.id} type="button" className="preset" aria-pressed={presetFor(setup) === p.id} onClick={() => patch(p.values)}>
+                      <span className="preset-name">{p.name}</span>
+                      <span className="small">{p.tagline}</span>
+                      <span className="mono preset-values">{days(p.values.every)}d · {days(p.values.window)}d · {p.values.threshold} of {GUARDIANS.length}</span>
+                      <span className="small muted">{p.forWhom}</span>
+                    </button>
+                  ))}
+                </div>
+                <span className="small muted">A preset sets the timers below and the guardian threshold. Everything stays editable.</span>
+              </fieldset>
+              <fieldset>
                 <legend>How often will you check in?</legend>
                 <Segmented<number>
                   label="Check-in interval"
@@ -259,6 +275,8 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
               ))}
             </div>
           )}
+
+          {step === 5 && <PlanSummary setup={setup} now={Math.floor(Date.now() / 1000)} />}
 
           {step === 6 && (
             <div className="card deploy">
