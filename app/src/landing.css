@@ -1,0 +1,174 @@
+/* Landing: the Obsidian 3D scroll story. Dynamic values are set inline. */
+
+.lx {
+  position: relative;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--o-bg);
+  color: var(--o-text);
+}
+
+/* ── Layers behind the story ── */
+.lx-glow {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--o-glow), transparent);
+  pointer-events: none;
+}
+.lx-canvas-host, .lx-vignette, .lx-grain { position: absolute; inset: 0; pointer-events: none; }
+.lx-canvas-host .lx-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.lx-nogl {
+  position: absolute; left: 50%; top: 50%;
+  width: 520px; height: 520px; margin: -260px 0 0 -260px;
+  background-image: radial-gradient(var(--o-text-3) 1px, transparent 1.5px);
+  background-size: 12px 12px;
+  -webkit-mask-image: radial-gradient(circle, #000 35%, transparent 68%);
+  mask-image: radial-gradient(circle, #000 35%, transparent 68%);
+  pointer-events: none;
+}
+.lx-vignette { background: radial-gradient(ellipse 85% 75% at 50% 45%, transparent 55%, var(--o-bg) 125%); }
+.lx-grain { width: 100%; height: 100%; mix-blend-mode: overlay; }
+
+/* ── Scroller and the sticky stage ── */
+.lx-scroller {
+  position: absolute; inset: 0;
+  overflow-y: auto; overflow-x: hidden;
+  scrollbar-width: none;
+  outline: none;
+}
+.lx-scroller::-webkit-scrollbar { display: none; }
+.ox .lx-scroller:focus-visible { outline: 1.5px solid var(--o-signal); outline-offset: -3px; }
+.lx-stage { position: sticky; top: 0; height: 100%; overflow: hidden; }
+.lx-spacer { height: 800%; }
+
+/* ── Type ── */
+.lx-mask { display: block; overflow: hidden; padding: 0.04em 0.08em 0.18em 0.04em; margin: 0 0 -0.1em -0.04em; }
+.lx-h2 .lx-mask { padding-bottom: 0.2em; }
+.lx-line { display: block; }
+.lx-acc { font-family: var(--o-accent-font); font-style: italic; font-weight: var(--o-accent-w); letter-spacing: var(--o-accent-ls); }
+.lx-priv { color: var(--o-private); }
+.lx-dim { color: var(--o-text-3); }
+.lx-strong { color: var(--o-text); }
+.lx-h1 { margin: 0; line-height: 0.92; }
+.lx-h2 { margin: 0; line-height: 1; }
+.lx .tone-pub { color: var(--o-public); }
+.lx .tone-priv { color: var(--o-private); }
+.lx .tone-pend { color: var(--o-pending); }
+.lx .tone-ok { color: var(--o-armed); }
+.lx .tone-txt { color: var(--o-text); }
+
+/* ── Hero ── */
+.lx-hero {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; justify-content: flex-end; gap: 32px;
+}
+.lx-kicker { display: inline-flex; align-items: center; gap: 12px; }
+.lx-kicker-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--o-private); color: var(--o-private); }
+.lx-hero-foot { display: flex; justify-content: space-between; align-items: flex-end; gap: 28px 48px; flex-wrap: wrap; }
+.lx-lede { margin: 0; max-width: 430px; font-size: 17px; line-height: 1.6; color: var(--o-text-2); text-wrap: pretty; }
+.lx-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* ── Chapters ── */
+.lx-chapter { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.lx-col { max-width: 100%; display: flex; flex-direction: column; gap: 28px; }
+.lx-idx { display: flex; align-items: center; gap: 14px; }
+.lx-rule { height: 1px; background: var(--o-line-2); }
+.lx-body { margin: 0; max-width: 450px; font-size: 17px; line-height: 1.6; color: var(--o-text-2); text-wrap: pretty; }
+.lx-rows { margin: 0; max-width: 450px; border-top: 1px solid var(--o-line); }
+.lx-rows > div { display: flex; justify-content: space-between; gap: 16px; padding: 13px 0; border-bottom: 1px solid var(--o-line); }
+.lx-rows dt { font-size: 13px; color: var(--o-text-3); }
+.lx-rows dd { margin: 0; font-size: 13px; text-align: right; }
+
+.lx-bars { position: absolute; bottom: 42px; display: flex; align-items: center; gap: 16px; }
+.lx-roller { display: inline-flex; font-size: 12px; color: var(--o-text); }
+.lx-roll-win { display: inline-block; height: 1.3em; overflow: hidden; line-height: 1.3em; }
+.lx-roll { display: flex; flex-direction: column; }
+.lx-bar-list { flex: 1; display: flex; gap: 6px; }
+.lx-bar { flex: 1; height: 2px; border-radius: 2px; background: var(--o-line-2); overflow: hidden; }
+.lx-bar > span { display: block; height: 100%; background: var(--o-text); }
+
+/* ── The lens ── */
+.lx-lens { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: 40px; }
+.lx-lens-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
+.lx-lens-title { display: flex; flex-direction: column; gap: 18px; }
+.lx-lens-note { margin: 0; max-width: 380px; font-size: 15px; line-height: 1.6; color: var(--o-text-2); text-wrap: pretty; }
+.lx-table { position: relative; border-radius: var(--o-r-md); overflow: hidden; cursor: ew-resize; }
+.lx-tcol { display: flex; flex-direction: column; }
+.lx-private {
+  position: absolute; inset: 0;
+  background: var(--o-surface);
+  transition: clip-path 180ms var(--o-ease);
+}
+.lx-thead, .lx-trow { display: flex; align-items: center; padding: 0 24px; border-bottom: 1px solid var(--o-line); }
+.lx-thead { height: 48px; }
+.lx-trow { height: 56px; }
+.lx-trow:last-child { border-bottom: 0; }
+.lx-k { flex: 0 0 28%; min-width: 0; }
+.lx-trow .lx-k { font-size: 14px; color: var(--o-text-2); }
+.lx-pub, .lx-priv-v, .lx-ellipsis { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lx-pub { font-size: 13px; color: var(--o-public); }
+.lx-priv-v { font-size: 15px; color: var(--o-private); text-align: right; }
+.lx-handle-line {
+  position: absolute; top: 0; bottom: 0; width: 1px;
+  background: var(--o-text);
+  transition: left 180ms var(--o-ease);
+}
+.lx-handle {
+  position: absolute; top: 50%; left: 0;
+  transform: translate(-50%, -50%);
+  width: 36px; height: 36px; border-radius: 50%;
+  background: var(--o-text); color: var(--o-invert);
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: var(--o-shadow);
+}
+
+/* ── Begin ── */
+.lx-cta { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; }
+.lx-cta-body { display: flex; flex-direction: column; gap: 32px; }
+.lx-marquee-band { border-top: 1px solid var(--o-line); border-bottom: 1px solid var(--o-line); overflow: hidden; padding: 16px 0; }
+.lx-marquee { display: flex; width: max-content; gap: 44px; font-size: 40px; white-space: nowrap; }
+.lx-marquee > span { display: inline-flex; align-items: center; gap: 44px; }
+.lx-mdot { width: 5px; height: 5px; border-radius: 50%; background: var(--o-text-3); }
+.lx-footer { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--o-text-3); }
+
+/* ── Chrome ── */
+.lx-header {
+  position: absolute; top: 0; left: 0; right: 0;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  border-bottom: 1px solid transparent;
+}
+.lx .lx-header .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--o-text); text-decoration: none; }
+.lx .lx-header .brand-word { font-size: 25px; letter-spacing: -0.02em; line-height: 1; }
+.lx-nav { display: flex; gap: 2px; }
+.lx-header-end { display: flex; gap: 6px; align-items: center; }
+.lx .lx-header .icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: var(--o-r-pill);
+  border: 0; background: transparent; color: var(--o-text-2); cursor: pointer;
+  transition: color var(--o-t2) var(--o-ease), background-color var(--o-t2) var(--o-ease);
+}
+.lx .lx-header .icon-btn:hover { color: var(--o-text); background: color-mix(in srgb, var(--o-text) 6%, transparent); }
+
+.lx-ctrl { position: absolute; bottom: 24px; display: flex; align-items: center; gap: 8px; }
+.lx-pct { font-size: 12px; color: var(--o-text-3); margin-right: 8px; }
+.lx .btn.lx-round { width: 44px; padding: 0; }
+.lx-cue {
+  position: absolute; left: 50%; bottom: 24px;
+  transform: translateX(-50%);
+  width: 1px; height: 44px; background: var(--o-line-2); overflow: hidden;
+  pointer-events: none;
+}
+.lx-cue .drop { display: block; width: 1px; height: 18px; background: var(--o-text); }
+.lx-rail {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
+}
+.lx .lx-rail button {
+  display: inline-flex; align-items: center; gap: 10px; min-height: 28px;
+  background: none; border: 0; padding: 0; cursor: pointer;
+  font: 400 12px var(--o-sans); color: var(--o-text-3);
+}
+.lx .lx-rail button.is-current, .lx .lx-rail button:hover { color: var(--o-text); }
+.lx .lx-rail button > span { height: 1px; background: currentColor; transition: width 600ms var(--o-ease); }

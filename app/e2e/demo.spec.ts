@@ -35,13 +35,12 @@ async function finish(page: Page, expectText: RegExp) {
   await sheet.getByRole('button', { name: 'Close' }).click();
 }
 
-test('landing page seals the will line and links to the demo', async ({ page }) => {
+test('landing page tells the story and opens the demo', async ({ page }) => {
   const errors = watchErrors(page);
   await page.goto('/');
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Your will stays yours.');
-  await expect(page.getByRole('button', { name: 'Show what I wrote' })).toBeVisible({ timeout: 10_000 });
-  await page.getByRole('link', { name: 'Try the demo' }).click();
-  await expect(page.getByRole('heading', { name: 'Seal a demo vault' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Your will, proven private.');
+  await page.getByRole('link', { name: /Launch the demo/ }).click();
+  await expect(page.getByRole('heading', { name: 'Protect your vault with your face or fingerprint.' })).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -50,17 +49,31 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
   await addVirtualPasskey(page);
   await page.goto('/#/demo');
 
-  const create = page.getByRole('button', { name: /Create a passkey/ });
-  await expect(create).toBeEnabled();
-  await create.click();
-  await expect(page.getByRole('heading', { name: /Next check-in due in/ })).toBeVisible({ timeout: 30_000 });
+  // The wizard: register the passkey, choose a 1-of-3 guardian threshold, seal.
+  await page.getByRole('button', { name: /Register Face ID/ }).click();
+  await expect(page.getByText('Passkey registered on this device.')).toBeVisible();
+  const next = page.getByRole('button', { name: /Continue|Looks right/ });
+  await next.click();                                   // heirs
+  await next.click();                                   // shares
+  await next.click();                                   // guardians
+  await page.getByRole('button', { name: 'Fewer votes needed' }).click();
+  await expect(page.getByText('1 of 3', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'More votes needed' }).click();
+  await next.click();                                   // timers
+  await next.click();                                   // review
+  await expect(page.getByText('2 of 3 must agree')).toBeVisible();
+  await next.click();                                   // deploy
+  await page.getByRole('button', { name: 'Seal & deploy vault' }).click();
+  await page.getByRole('button', { name: /Go to my vault/ }).click({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Your next check-in is due in' })).toBeVisible();
 
   // Proof of life through Chrome's WebAuthn and the in-circuit verifier.
   await page.getByRole('button', { name: /I'm alive/ }).click();
   await finish(page, /Check-in recorded/);
-  await expect(page.getByText('Checked in', { exact: true })).toBeVisible();
+  await expect(page.getByText(/^Check-in · deadline moved/)).toBeVisible();
 
   // Change the will: Ada 40%, Ben 40%. Re-sealed with the passkey.
+  await page.getByRole('button', { name: 'Will', exact: true }).click();
   await page.getByRole('button', { name: 'Change the will' }).click();
   await page.getByLabel(/^Ada/).fill('40');
   await page.getByLabel(/^Ben/).fill('60');
@@ -81,36 +94,49 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
   await letter.getByRole('button', { name: 'Close' }).click();
   await expect(letter).toBeHidden();
 
-  // Two guardians report; the owner cancels.
-  const actor = page.getByLabel('Act as');
-  await actor.selectOption({ label: 'Dr. Mensah, family doctor' });
-  await page.getByRole('button', { name: /Report Amara's death/ }).click();
-  await finish(page, /1 of 2/);
-  await actor.selectOption({ label: 'Sarah Lin, lawyer' });
-  await page.getByRole('button', { name: /Report Amara's death/ }).click();
-  await finish(page, /Enough guardians agreed/);
-  await actor.selectOption({ label: 'Amara Okafor (owner)' });
-  await page.getByRole('button', { name: /cancel the countdown/ }).click();
-  await finish(page, /Countdown cancelled/);
+  // Two guardians vote, each after confirming; the owner cancels.
+  const actAs = page.getByRole('group', { name: 'Act as' });
+  const vote = async () => {
+    await page.getByRole('button', { name: 'I confirm the owner has died' }).click();
+    const cast = page.getByRole('button', { name: 'Cast my vote' });
+    await expect(cast).toBeDisabled();
+    await page.getByLabel(/reliable knowledge/).check();
+    await cast.click();
+  };
+  await actAs.getByRole('button', { name: 'Guardian' }).click();
+  await vote();
+  await finish(page, /1 of 2 so far/);
+  await page.getByRole('group', { name: 'Which guardian' }).getByRole('button', { name: 'Sarah Lin' }).click();
+  await vote();
+  await finish(page, /switch has started/);
+  await actAs.getByRole('button', { name: 'Amara' }).click();
+  await page.getByRole('button', { name: "I'm here, cancel the switch" }).click();
+  await finish(page, /Switch cancelled/);
 
-  // Silence: the deadline passes, the countdown runs out, the will is released.
-  await page.getByRole('button', { name: 'Skip to the deadline' }).click();
-  await page.getByRole('button', { name: 'Start the countdown' }).click();
-  await finish(page, /missed their deadline/);
-  await page.getByRole('button', { name: 'Skip the challenge window' }).click();
-  await page.getByRole('button', { name: 'Release the will' }).click();
+  // Silence: the deadline passes, the window runs out, the will is released.
+  await page.getByRole('button', { name: 'Skip to deadline' }).click();
+  await page.getByRole('button', { name: /Start the switch/ }).click();
+  await finish(page, /The switch has started/);
+  await page.getByRole('button', { name: 'Skip challenge window' }).click();
+  await page.getByRole('button', { name: /Release the will/ }).click();
   await finish(page, /released/);
+  await expect(page.getByRole('heading', { name: /This will has been released/ })).toBeVisible();
 
-  // Ben claims his new 40%.
-  await actor.selectOption({ label: 'Ben, son' });
-  await page.getByRole('button', { name: /Claim 10,000 demo tokens/ }).click();
+  // Ben claims his new 40% to a fresh address.
+  await actAs.getByRole('button', { name: 'Heir' }).click();
+  await expect(page.getByRole('heading', { name: 'Your share is ready when you are.' })).toBeVisible();
+  await page.getByRole('button', { name: 'Claim my share' }).click();
   await finish(page, /10,000 demo tokens sent/);
+  await expect(page.getByRole('heading', { name: 'Thank you, Ben.' })).toBeVisible();
 
-  // The privacy lens shows one nullifier and no names on the public side.
-  await page.getByRole('button', { name: 'Privacy lens' }).click();
+  // The privacy lens: one nullifier, and no names on the public side.
+  await page.getByRole('button', { name: 'Privacy Lens' }).click();
   const pub = page.locator('.lens-public');
   await expect(pub.getByText('claimNullifiers')).toBeVisible();
-  await expect(pub.locator('.ledger')).not.toContainText(/Ada|Ben|Cleo|Kofi|Mensah/);
+  await expect(pub.locator('.ledger')).toContainText('1 spent');
+  await expect(pub.locator('.ledger')).not.toContainText(/Ada|Ben|Cleo|Kofi|Mensah|Sarah|Tomás|Amara/);
+  await page.getByRole('button', { name: "Reveal Amara's view" }).first().click();
+  await expect(page.locator('.lens-private .ledger')).toContainText('Ben claimed');
 
   expect(errors).toEqual([]);
 });

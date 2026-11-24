@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { Phase } from '@codicil/contracts/vault';
-import { CHALLENGE, CLAIM_WINDOW, DAY, demo, ESTATE } from '../src/demo/store.js';
+import { CHALLENGE, CLAIM_WINDOW, DAY, defaultSetup, demo, ESTATE } from '../src/demo/store.js';
 import { createDemoPasskey } from '../src/demo/passkey.js';
 
 const s = () => demo.getSnapshot();
@@ -46,7 +46,7 @@ describe('demo store', () => {
     await ok(demo.checkIn());
     expect(s().deadline).toBe(before + 10 * DAY);
     expect(s().nonce).toBe(1n);
-    expect(s().activity[0].what).toBe('Checked in');
+    expect(s().activity[0].what).toMatch(/^Check-in · deadline moved/);
   });
 
   it('refuses to start the countdown before the deadline', async () => {
@@ -61,7 +61,7 @@ describe('demo store', () => {
     demo.advance(2 * DAY);
     await ok(demo.checkIn());
     expect(s().phase).toBe(Phase.armed);
-    expect(s().activity[0].what).toMatch(/Cancelled/);
+    expect(s().activity[0].what).toMatch(/^Switch cancelled/);
   });
 
   it('two guardian reports start the countdown; a check-in voids them', async () => {
@@ -133,5 +133,51 @@ describe('will updates', () => {
   it('cannot change the will after the deadline', async () => {
     demo.advanceTo(s().deadline);
     await fails(demo.updateWill({ ada: 5000n, ben: 4000n, cleo: 1000n, kofiBackup: true }), /deadline has passed/i);
+  });
+});
+
+describe('vault setup (the wizard)', () => {
+  it('deploys exactly the will the wizard previewed, with custom timers and threshold', async () => {
+    demo.reset();
+    const passkey = createDemoPasskey();
+    const setup = { ...defaultSetup(), ada: 6000n, ben: 2500n, cleo: 1500n, kofiBackup: false, threshold: 1, every: 7 * DAY, window: 3 * DAY };
+    const preview = demo.preview(setup, passkey);
+    expect(preview.problem).toBeUndefined();
+    await demo.setUp(passkey, setup);
+    expect(s().chain.willRoot).toBe(preview.willRoot);
+    expect(s().chain.guardianRoot).toBe(preview.guardianRoot);
+    expect(s().chain.ownerPasskeyCommit).toBe(preview.ownerCommit);
+    expect(s().deadline - s().now).toBe(7 * DAY);
+    expect(s().heirs.find((h) => h.profile.id === 'kofi')!.named).toBe(false);
+
+    await ok(demo.guardianReport(1));          // one vote is enough at k = 1
+    expect(s().phase).toBe(Phase.pending);
+    expect(s().pendingUntil - s().now).toBe(3 * DAY);
+  });
+
+  it('flags an over-allocated draft before anything is deployed', () => {
+    const preview = demo.preview({ ...defaultSetup(), ada: 7000n, ben: 3000n, cleo: 1000n });
+    expect(preview.willRoot).toBeUndefined();
+    expect(preview.problem).toMatch(/100%/);
+  });
+});
+
+describe('transactions', () => {
+  it('retries a failed action and leaves a toast when closed', async () => {
+    await fails(demo.startCountdown('Ben'), /checked in on time/i);
+    demo.advanceTo(s().deadline);
+    expect(await demo.retry()).toBe(true);
+    expect(s().phase).toBe(Phase.pending);
+    demo.dismissTx();
+    expect(s().toast?.title).toMatch(/switch has started/);
+  });
+
+  it('refuses a payout address that is not 32 bytes of hex', async () => {
+    demo.advanceTo(s().deadline);
+    await ok(demo.startCountdown('Ben'));
+    demo.advance(CHALLENGE);
+    await ok(demo.release('Ben'));
+    await fails(demo.claim('ben', 'mn_addr_nope'), /^That does not look like an address/);
+    await ok(demo.claim('ben', 'ab'.repeat(32)));
   });
 });

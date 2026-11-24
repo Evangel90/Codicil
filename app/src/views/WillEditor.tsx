@@ -36,8 +36,8 @@ export function WillEditor({ s, onDone }: { s: Snapshot; onDone: () => void }) {
 
   const row = (id: keyof Pct, name: string, note: string) => (
     <div className="edit-row">
-      <label htmlFor={ids[id]}><span className="private">{name}</span> <span className="muted small">{note}</span></label>
-      <span className="pct-input">
+      <label htmlFor={ids[id]}><span className="tone-private">{name}</span> <span className="muted small">{note}</span></label>
+      <span className="pct-input field">
         <input
           id={ids[id]}
           inputMode="decimal"
@@ -52,7 +52,7 @@ export function WillEditor({ s, onDone }: { s: Snapshot; onDone: () => void }) {
   );
 
   return (
-    <form className="will-editor" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+    <form className="card will-editor" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
       {row('ada', 'Ada', 'Daughter')}
       <label className="edit-check" htmlFor={ids.kofi}>
         <input id={ids.kofi} type="checkbox" checked={kofi} onChange={(e) => setKofi(e.target.checked)} />
@@ -60,14 +60,14 @@ export function WillEditor({ s, onDone }: { s: Snapshot; onDone: () => void }) {
       </label>
       {row('ben', 'Ben', 'Son')}
       {row('cleo', 'Cleo', 'Granddaughter, unlocks on her 18th birthday')}
-      <p id={ids.total} className={problem ? 'error small' : 'muted small'} role={problem ? 'alert' : undefined}>
+      <p id={ids.total} className={problem ? 'err-inline' : 'muted small'} role={problem ? 'alert' : undefined}>
         {problem ?? `Total ${Number(total) / 100}%.${total! < 10_000n ? ' Anything not allocated stays in the vault.' : ''}`}
       </p>
-      <div className="row-actions">
-        <button type="submit" className="btn btn-seal" disabled={busy || !!problem}>
-          Seal the new will{s.passkey?.kind === 'device' ? ' with Face ID / Touch ID' : ''}
+      <div className="btn-row">
+        <button type="submit" className="btn btn-primary" disabled={busy || !!problem}>
+          Seal the new will{s.passkey?.kind === 'device' ? ' with Face ID' : ''}
         </button>
-        <button type="button" className="btn btn-quiet" onClick={onDone}>Cancel</button>
+        <button type="button" className="btn btn-ghost" onClick={onDone}>Cancel</button>
       </div>
       <p className="muted small">
         Only a new 32-byte number reaches the chain. Nobody can tell what changed, or whether anything did.

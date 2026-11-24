@@ -2,8 +2,10 @@
 // Copyright 2026 The Codicil Authors
 //
 // The demo world: one owner, a three-heir will with a backup heir and a
-// tranche, three hidden guardians (any two can report), and a demo clock.
-// Every action runs the real vault circuit on the in-browser DemoChain.
+// tranche, three hidden guardians, and a demo clock. The owner configures the
+// shares, the backup, the guardian threshold and the timers in the setup
+// wizard, and every action runs the real vault circuit on the in-browser
+// DemoChain.
 
 import { useSyncExternalStore } from 'react';
 import { encodeRawTokenType, encodeUserAddress, sampleRawTokenType, sampleUserAddress } from '@midnight-ntwrk/compact-runtime';
@@ -37,13 +39,14 @@ import { approveWithPasskey, type OwnerPasskey } from './passkey.js';
 
 export const DAY = 86_400;
 export const CHECK_IN_EVERY = 30 * DAY;
-export const MAX_PERIOD = 60 * DAY;
 export const CHALLENGE = 7 * DAY;
 export const CLAIM_WINDOW = 30 * DAY;
 export const ESTATE = 25_000n;
+export const TOKEN = 'demo tokens';
 
 // ─── Cast ───────────────────────────────────────────────────────────────────
 export const OWNER_NAME = 'Amara Okafor';
+export const OWNER_FIRST = 'Amara';
 
 export interface HeirProfile {
   id: 'ada' | 'ben' | 'cleo' | 'kofi';
@@ -72,36 +75,66 @@ export type Actor =
   | { kind: 'heir'; id: HeirProfile['id'] }
   | { kind: 'guardian'; id: number };
 
+// ─── Setup ──────────────────────────────────────────────────────────────────
+export interface WillDraft {
+  ada: bigint;
+  ben: bigint;
+  cleo: bigint;
+  kofiBackup: boolean;
+}
+
+export interface VaultSetup extends WillDraft {
+  /** Unix seconds when Cleo's share unlocks. */
+  cleoUnlock: number;
+  /** Guardian reports needed, of 3. */
+  threshold: number;
+  /** Check-in interval, seconds. */
+  every: number;
+  /** Challenge window, seconds. */
+  window: number;
+}
+
+export function defaultSetup(now = Math.floor(Date.now() / 1000)): VaultSetup {
+  return { ada: 5000n, ben: 3000n, cleo: 2000n, kofiBackup: true, cleoUnlock: now + 400 * DAY, threshold: 2, every: CHECK_IN_EVERY, window: CHALLENGE };
+}
+
 // ─── Activity and transactions ──────────────────────────────────────────────
 export interface Activity {
   at: number;
   who: string;
   what: string;
+  tone: 'armed' | 'pending' | 'released' | 'public' | 'plain';
   /** What the transaction put on the public ledger. */
   published: string[];
   /** What stayed on the actor's device. */
   keptPrivate: string[];
 }
 
-export type TxStageId = 'prepare' | 'approve' | 'circuit' | 'record';
-export interface TxStage { id: TxStageId; label: string; detail: string }
+export type TxStageId = 'prepare' | 'approve' | 'circuit' | 'proof' | 'record';
+export interface TxStage { id: TxStageId; label: string; detail: string; skipped?: boolean; tag?: string }
 export interface Tx {
   title: string;
   stages: TxStage[];
   current: number;
   status: 'running' | 'done' | 'error';
   message?: string;
+  /** Contract error code, shown small for support. */
+  code?: string;
   startedAt: number;
   endedAt?: number;
+  /** Stage timings in seconds, by index. */
+  times: (number | undefined)[];
 }
+
+export interface Toast { id: number; title: string; body?: string }
 
 const STAGES: Record<TxStageId, TxStage> = {
   prepare: { id: 'prepare', label: 'Preparing', detail: 'Gathering what the circuit needs from this device.' },
-  approve: { id: 'approve', label: 'Approve with your passkey', detail: 'Face ID, Touch ID or your device PIN signs this exact action.' },
-  circuit: {
-    id: 'circuit',
-    label: 'Running the zero-knowledge circuit',
-    detail: 'The vault rules run on your device. On a live network this step produces the proof (a few seconds).',
+  approve: { id: 'approve', label: 'Waiting for Face ID', detail: 'Confirm with Face ID, Touch ID or your device PIN to sign this exact action.' },
+  circuit: { id: 'circuit', label: 'Running the vault rules on this device', detail: 'The compiled Compact circuit checks every rule, exactly as the chain will.' },
+  proof: {
+    id: 'proof', label: 'Generating zero-knowledge proof', tag: 'skipped in demo', skipped: true,
+    detail: 'On Midnight this step proves the circuit ran correctly, in a few seconds.',
   },
   record: { id: 'record', label: 'Recorded on the demo chain', detail: 'Only the public result is written. Your secrets never left this device.' },
 };
@@ -115,20 +148,18 @@ export interface HeirView {
   amount: bigint;
   /** False for a backup heir the owner has since removed. */
   named: boolean;
-}
-
-export interface WillDraft {
-  ada: bigint;
-  ben: bigint;
-  cleo: bigint;
-  kofiBackup: boolean;
+  /** Last 4 hex digits of the heir's public key. */
+  keyEnd: string;
 }
 
 export interface Snapshot {
   ready: boolean;
   passkey?: OwnerPasskey;
+  setup?: VaultSetup;
   actor: Actor;
   now: number;
+  deployedAt: number;
+  lastCheckIn: number;
   phase: Phase;
   deadline: number;
   pendingUntil: number;
@@ -156,6 +187,7 @@ export interface Snapshot {
   votedThisRound: number[];
   activity: Activity[];
   tx?: Tx;
+  toast?: Toast;
 }
 
 /** A problem with what the person entered; its message is shown as is. */
@@ -167,37 +199,52 @@ class InputError extends Error {
 function describeFailure(e: unknown): string {
   if (contractErrorCode(e)) return explainError(e);
   if (e instanceof Error && e.name === 'InputError') return e.message.charAt(0).toUpperCase() + e.message.slice(1) + '.';
-  if (e instanceof Error && e.name === 'NotAllowedError') return 'The passkey request was cancelled or timed out. Nothing was changed.';
+  if (e instanceof Error && e.name === 'NotAllowedError') return 'Face ID was cancelled or timed out. Nothing was sent and nothing changed.';
   return explainError(e);
 }
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 export const fieldHex = (f: bigint) => f.toString(16).padStart(64, '0');
 const wait = (ms: number) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
-const fmtDate = (t: number) =>
-  new Date(t * 1000).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+export const fmtDate = (t: number) =>
+  new Date(t * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+export const fmtShort = (t: number) =>
+  new Date(t * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+export const days = (seconds: number) => Math.round(seconds / DAY);
 
-interface World {
-  chain: DemoChain;
-  passkey: OwnerPasskey;
+interface Keys {
   ownerSalt: Uint8Array;
-  will: Will;
   heirKeys: Record<HeirProfile['id'], { key: HeirKey; salt: Uint8Array }>;
   guardianSecretsList: Uint8Array[];
+}
+
+interface World extends Keys {
+  chain: DemoChain;
+  passkey: OwnerPasskey;
+  setup: VaultSetup;
+  will: Will;
   guardianSet: GuardianSet;
+  deployedAt: number;
+  lastCheckIn: number;
   claimed: Map<number, string>;   // leaf → nullifier hex
   votedRound: Map<number, bigint>;
 }
 
 class DemoStore {
+  private keys?: Keys;
+  /** The will last shown in the wizard, so deploying seals exactly that one. */
+  private previewed?: { key: string; will: Will };
   private world?: World;
   private actor: Actor = { kind: 'owner' };
   private activity: Activity[] = [];
   private tx?: Tx;
+  private toast?: Toast;
+  private lastAction?: () => Promise<boolean>;
+  private clock?: ReturnType<typeof setInterval>;
   private snapshot: Snapshot;
   private listeners = new Set<() => void>();
   /** Pause between progress stages so people can follow them. Tests set 0. */
-  stageDelayMs = 450;
+  stageDelayMs = 420;
 
   constructor() {
     this.snapshot = this.build();
@@ -215,54 +262,90 @@ class DemoStore {
   }
 
   // ─── Setup ────────────────────────────────────────────────────────────────
-  async setUp(passkey: OwnerPasskey): Promise<void> {
+  /** Heir keys, guardian secrets and the owner salt, made once per session. */
+  private ensureKeys(): Keys {
+    this.keys ??= {
+      ownerSalt: newSalt(),
+      heirKeys: Object.fromEntries(HEIRS.map((h) => [h.id, { key: newHeirKey(), salt: newSalt() }])) as Keys['heirKeys'],
+      guardianSecretsList: GUARDIANS.map(() => newGuardianSecret()),
+    };
+    return this.keys;
+  }
+
+  /** Last 4 hex digits of an heir's public key, for the setup screens. */
+  heirKeyEnd(id: HeirProfile['id']): string {
+    return this.ensureKeys().heirKeys[id].key.pk.x.toString(16).slice(-4);
+  }
+
+  /** What the chain would receive for this setup: real commitments, computed here. */
+  preview(setup: VaultSetup, passkey?: OwnerPasskey): { ownerCommit?: string; willRoot?: string; guardianRoot: string; problem?: string } {
+    const k = this.ensureKeys();
+    const guardianRoot = fieldHex(buildGuardianSet(k.guardianSecretsList.map(guardianLeaf), setup.threshold).root);
+    const ownerCommit = passkey ? hex(pureCircuits.passkeyCommitment(passkey.pk, k.ownerSalt)) : undefined;
+    try {
+      return { ownerCommit, guardianRoot, willRoot: fieldHex(this.draftWill(setup).root) };
+    } catch (e) {
+      return { ownerCommit, guardianRoot, problem: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /** Builds the will for a setup once; the same setup gives the same will (and salts). */
+  private draftWill(setup: VaultSetup): Will {
+    const key = JSON.stringify(setup, (_, v) => (typeof v === 'bigint' ? v.toString() : v));
+    if (this.previewed?.key !== key) this.previewed = { key, will: this.willFor(this.ensureKeys(), setup, BigInt(setup.cleoUnlock)) };
+    return this.previewed.will;
+  }
+
+  async setUp(passkey: OwnerPasskey, setup: VaultSetup = defaultSetup()): Promise<void> {
     const now = Math.floor(Date.now() / 1000);
-    const heirKeys = Object.fromEntries(
-      HEIRS.map((h) => [h.id, { key: newHeirKey(), salt: newSalt() }]),
-    ) as World['heirKeys'];
-    const will = this.willFor({ heirKeys }, { ada: 5000n, ben: 3000n, cleo: 2000n, kofiBackup: true }, BigInt(now + 400 * DAY));
-    const guardianSecretsList = GUARDIANS.map(() => newGuardianSecret());
-    const guardianSet = buildGuardianSet(guardianSecretsList.map(guardianLeaf), 2);
-    const ownerSalt = newSalt();
+    const k = this.ensureKeys();
+    const will = this.draftWill(setup);
+    const guardianSet = buildGuardianSet(k.guardianSecretsList.map(guardianLeaf), setup.threshold);
 
     const chain = await DemoChain.deploy({
-      ownerPasskeyCommit: pureCircuits.passkeyCommitment(passkey.pk, ownerSalt),
+      ownerPasskeyCommit: pureCircuits.passkeyCommitment(passkey.pk, k.ownerSalt),
       ownerEdCommit: new Uint8Array(32),
       passkeyRpIdHash: rpIdHash(globalThis.location?.hostname ?? 'localhost'),
       willRoot: will.root,
-      firstDeadline: BigInt(now + CHECK_IN_EVERY),
-      maxPeriod: BigInt(MAX_PERIOD),
-      challengeWindow: BigInt(CHALLENGE),
+      firstDeadline: BigInt(now + setup.every),
+      // A check-in may set the next deadline up to this far ahead (D9).
+      maxPeriod: BigInt(Math.max(2 * setup.every, 60 * DAY)),
+      challengeWindow: BigInt(setup.window),
       claimWindow: BigInt(CLAIM_WINDOW),
       tokenColor: encodeRawTokenType(sampleRawTokenType()),
       guardianRoot: guardianSet.root,
       guardianThreshold: guardianSet.threshold,
       attestorKeyCommit: new Uint8Array(32),
     }, now);
-    this.world = { chain, passkey, ownerSalt, will, heirKeys, guardianSecretsList, guardianSet, claimed: new Map(), votedRound: new Map() };
+    this.world = {
+      ...k, chain, passkey, setup, will, guardianSet, deployedAt: now, lastCheckIn: now, claimed: new Map(), votedRound: new Map(),
+    };
     this.activity = [{
-      at: now,
-      who: OWNER_NAME,
-      what: 'Sealed the vault',
-      published: ['A commitment to the owner passkey', 'The will root (one 32-byte number)', 'The guardian root and "2 of 3"', 'The first check-in deadline'],
-      keptPrivate: ['The passkey itself', 'Heir names, shares, unlock dates and the backup heir', 'Who the guardians are'],
+      at: now, who: OWNER_NAME, what: 'Vault deployed and will sealed', tone: 'plain',
+      published: ['A commitment to your passkey', 'The heirs root (one 32-byte number)', `The guardians root and "${setup.threshold} of 3"`, 'Your first deadline and the timers'],
+      keptPrivate: ['The passkey itself', 'Names, shares, unlock dates and the backup heir', 'Who the guardians are'],
     }];
     await chain.call('deposit', {}, ESTATE);
-    this.log(OWNER_NAME, `Deposited ${ESTATE.toLocaleString()} demo tokens`, ['The amount'], []);
+    this.log(OWNER_NAME, `Deposit · ${ESTATE.toLocaleString()} ${TOKEN}`, 'public', ['The amount'], []);
     this.emit();
   }
 
   reset() {
+    this.stopClock();
     this.world = undefined;
+    this.keys = undefined;
+    this.previewed = undefined;
     this.activity = [];
     this.tx = undefined;
+    this.toast = undefined;
+    this.lastAction = undefined;
     this.actor = { kind: 'owner' };
     this.emit();
   }
 
   /** The will entries for a set of shares, with fresh salts. */
-  private willFor(w: Pick<World, 'heirKeys'>, d: WillDraft, cleoUnlock: bigint): Will {
-    const open = (id: HeirProfile['id']) => ({ pk: w.heirKeys[id].key.pk, salt: w.heirKeys[id].salt });
+  private willFor(k: Pick<Keys, 'heirKeys'>, d: WillDraft, cleoUnlock: bigint): Will {
+    const open = (id: HeirProfile['id']) => ({ pk: k.heirKeys[id].key.pk, salt: k.heirKeys[id].salt });
     return buildWill([
       { heir: open('ada'), backup: d.kofiBackup ? open('kofi') : undefined, shareBps: d.ada },
       { heir: open('ben'), shareBps: d.ben },
@@ -276,11 +359,24 @@ class DemoStore {
     this.emit();
   }
 
+  /** Close the sheet; a finished action leaves a toast behind. */
   dismissTx() {
-    if (this.tx?.status !== 'running') {
-      this.tx = undefined;
-      this.emit();
-    }
+    if (this.tx?.status === 'running') return;
+    if (this.tx?.status === 'done' && this.tx.message) this.toast = { id: Date.now(), title: this.tx.message };
+    this.tx = undefined;
+    this.emit();
+  }
+
+  dismissToast() {
+    this.toast = undefined;
+    this.emit();
+  }
+
+  retry() {
+    const again = this.lastAction;
+    this.tx = undefined;
+    this.emit();
+    return again ? again() : Promise.resolve(false);
   }
 
   // ─── Clock ────────────────────────────────────────────────────────────────
@@ -295,57 +391,101 @@ class DemoStore {
     this.advance(t - this.world.chain.now);
   }
 
+  /** Let demo time run with the wall clock, one second per second. */
+  startClock() {
+    if (this.clock) return;
+    this.clock = setInterval(() => { if (this.world && this.tx?.status !== 'running') this.advance(1); }, 1000);
+  }
+
+  stopClock() {
+    if (this.clock) clearInterval(this.clock);
+    this.clock = undefined;
+  }
+
   // ─── Actions ──────────────────────────────────────────────────────────────
-  private log(who: string, what: string, published: string[], keptPrivate: string[]) {
-    this.activity = [{ at: this.world!.chain.now, who, what, published, keptPrivate }, ...this.activity];
+  private log(who: string, what: string, tone: Activity['tone'], published: string[], keptPrivate: string[]) {
+    this.activity = [{ at: this.world!.chain.now, who, what, tone, published, keptPrivate }, ...this.activity];
   }
 
   /** Runs an action through the transaction sheet. Returns true on success. */
-  private async run(title: string, stageIds: TxStageId[], body: (stage: (id: TxStageId) => Promise<void>) => Promise<string>) {
+  private async run(
+    title: string,
+    stageIds: TxStageId[],
+    body: (stage: (id: TxStageId) => Promise<void>) => Promise<string>,
+  ): Promise<boolean> {
     if (!this.world || this.tx?.status === 'running') return false;
+    this.lastAction = () => this.run(title, stageIds, body);
     const stages = stageIds.map((id) => id === 'approve' && this.world!.passkey.kind === 'demo'
       ? { ...STAGES.approve, label: 'Signing with the demo key', detail: 'A software key signs in the exact passkey format. With a device passkey this is Face ID or Touch ID.' }
       : STAGES[id]);
-    this.tx = { title, stages, current: 0, status: 'running', startedAt: performance.now() };
+    const t0 = performance.now();
+    let mark = t0;
+    this.tx = { title, stages, current: 0, status: 'running', startedAt: t0, times: [] };
+    this.toast = undefined;
     this.emit();
     const stage = async (id: TxStageId) => {
-      this.tx = { ...this.tx!, current: stages.findIndex((s) => s.id === id) };
+      const now = performance.now();
+      const times = [...this.tx!.times];
+      times[this.tx!.current] = (now - mark) / 1000;
+      mark = now;
+      this.tx = { ...this.tx!, current: stages.findIndex((s) => s.id === id), times };
       this.emit();
       await wait(this.stageDelayMs);
     };
     try {
       await stage('prepare');
       const message = await body(stage);
+      if (stageIds.includes('proof')) await stage('proof');
       await stage('record');
-      this.tx = { ...this.tx!, current: stages.length, status: 'done', message, endedAt: performance.now() };
+      const times = [...this.tx!.times];
+      times[this.tx!.current] = (performance.now() - mark) / 1000;
+      this.tx = { ...this.tx!, current: stages.length, status: 'done', message, endedAt: performance.now(), times };
       this.emit();
       return true;
     } catch (e) {
       if (!contractErrorCode(e)) console.warn('[codicil demo]', e);
-      this.tx = { ...this.tx!, status: 'error', message: describeFailure(e), endedAt: performance.now() };
+      this.tx = { ...this.tx!, status: 'error', message: describeFailure(e), code: contractErrorCode(e), endedAt: performance.now() };
       this.emit();
       return false;
     }
   }
 
+  private ownerState(digest: Uint8Array, assertion: Awaited<ReturnType<typeof approveWithPasskey>>): CodicilPrivateState {
+    const w = this.world!;
+    return withPasskeyApproval({ passkey: { pk: w.passkey.pk, salt: w.ownerSalt } }, digest, assertion);
+  }
+
   checkIn() {
-    return this.run("Confirm you're alive", ['prepare', 'approve', 'circuit', 'record'], async (stage) => {
+    const wasPending = this.world?.chain.ledger.phase === Phase.pending;
+    return this.run(wasPending ? 'Cancelling the switch' : 'Recording your check-in', ['prepare', 'approve', 'circuit', 'proof', 'record'], async (stage) => {
       const w = this.world!;
-      const next = BigInt(w.chain.now + CHECK_IN_EVERY);
+      const next = BigInt(w.chain.now + w.setup.every);
       const digest = checkInDigest(w.chain.address, next, w.chain.ledger.nonce);
       await stage('approve');
       const assertion = await approveWithPasskey(w.passkey, digest);
       await stage('circuit');
-      const wasPending = w.chain.ledger.phase === Phase.pending;
-      const state = withPasskeyApproval({ passkey: { pk: w.passkey.pk, salt: w.ownerSalt } }, digest, assertion);
-      await w.chain.call('checkInPasskey', state, next);
-      this.log(OWNER_NAME, wasPending ? 'Cancelled the countdown by checking in' : 'Checked in', [
-        `New deadline: ${fmtDate(Number(next))}`, 'Check-in counter +1', 'Guardian round +1 (earlier reports no longer count)',
-      ], ['The passkey and its signature', 'Which person this vault belongs to']);
-      return wasPending
-        ? `Countdown cancelled. Your next deadline is ${fmtDate(Number(next))}.`
+      const pending = w.chain.ledger.phase === Phase.pending;
+      await w.chain.call('checkInPasskey', this.ownerState(digest, assertion), next);
+      w.lastCheckIn = w.chain.now;
+      this.log(OWNER_NAME, pending ? `Switch cancelled · deadline moved to ${fmtShort(Number(next))}` : `Check-in · deadline moved to ${fmtShort(Number(next))}`, 'armed', [
+        'The new deadline', 'Check-in counter +1', 'Guardian round +1, so earlier reports no longer count',
+      ], ['Your passkey and its signature', 'Who this vault belongs to']);
+      return pending
+        ? `Switch cancelled. Your next deadline is ${fmtDate(Number(next))}.`
         : `Check-in recorded. Your next deadline is ${fmtDate(Number(next))}.`;
     });
+  }
+
+  /** Prove the owner is present (Face ID) before showing private data. */
+  async verifyOwner(): Promise<boolean> {
+    const w = this.world;
+    if (!w) return false;
+    try {
+      await approveWithPasskey(w.passkey, crypto.getRandomValues(new Uint8Array(32)));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** The letter the owner hands this heir (a backup gets the entry they back up). */
@@ -356,7 +496,7 @@ class DemoStore {
   }
 
   updateWill(draft: WillDraft) {
-    return this.run('Seal the new will', ['prepare', 'approve', 'circuit', 'record'], async (stage) => {
+    return this.run('Sealing the new will', ['prepare', 'approve', 'circuit', 'proof', 'record'], async (stage) => {
       const w = this.world!;
       let will: Will;
       try {
@@ -368,37 +508,37 @@ class DemoStore {
       await stage('approve');
       const assertion = await approveWithPasskey(w.passkey, digest);
       await stage('circuit');
-      const state = withPasskeyApproval({ passkey: { pk: w.passkey.pk, salt: w.ownerSalt } }, digest, assertion);
-      await w.chain.call('updateWillPasskey', state, will.root);
+      await w.chain.call('updateWillPasskey', this.ownerState(digest, assertion), will.root);
       w.will = will;
-      this.log(OWNER_NAME, 'Updated the will', [
-        'A new will root (one 32-byte number)', 'Will version +1',
-      ], ['Who gets what, and what changed', 'That a backup heir was ' + (draft.kofiBackup ? 'kept' : 'removed')]);
-      return 'Your new will is sealed. The old one can no longer be claimed against.';
+      w.setup = { ...w.setup, ...draft };
+      this.log(OWNER_NAME, `Will updated to version ${(w.chain.ledger.willVersion + 1n).toString()}`, 'plain', [
+        'A new heirs root (one 32-byte number)', 'Will version +1',
+      ], ['Who gets what, and what changed', draft.kofiBackup ? 'The backup heir' : 'That the backup heir was removed']);
+      return 'Your new will is sealed. Letters for the old one no longer work.';
     });
   }
 
   deposit(amount: bigint) {
-    return this.run('Add to the estate', ['prepare', 'circuit', 'record'], async (stage) => {
+    return this.run('Adding to the estate', ['prepare', 'circuit', 'record'], async (stage) => {
       await stage('circuit');
       await this.world!.chain.call('deposit', {}, amount);
-      this.log(OWNER_NAME, `Deposited ${amount.toLocaleString()} demo tokens`, ['The amount'], []);
-      return `${amount.toLocaleString()} demo tokens added to the estate.`;
+      this.log(OWNER_NAME, `Deposit · ${amount.toLocaleString()} ${TOKEN}`, 'public', ['The amount'], []);
+      return `Deposit received. ${amount.toLocaleString()} ${TOKEN} added to the estate.`;
     });
   }
 
   startCountdown(who: string) {
-    return this.run('Start the countdown', ['prepare', 'circuit', 'record'], async (stage) => {
+    return this.run('Starting the switch', ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
       await stage('circuit');
       await this.world!.chain.call('triggerTimeout', {});
-      this.log(who, 'Started the countdown (deadline missed)', ['Phase: pending', 'When the challenge window ends'], []);
-      return `The owner missed their deadline. They have ${CHALLENGE / DAY} days to cancel before the will is released.`;
+      this.log(who, 'Deadline passed · switch started', 'pending', ['Vault state: pending', 'When the challenge window ends'], []);
+      return `The switch has started. The owner has ${days(this.world!.setup.window)} days to cancel.`;
     });
   }
 
   guardianReport(id: number) {
     const g = GUARDIANS[id];
-    return this.run('Report a death', ['prepare', 'circuit', 'record'], async (stage) => {
+    return this.run('Casting your vote', ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
       const w = this.world!;
       await stage('circuit');
       const state: CodicilPrivateState = { guardian: guardianSecrets(w.guardianSet, w.guardianSecretsList[id]) };
@@ -407,42 +547,43 @@ class DemoStore {
       w.votedRound.set(id, round);
       const l = w.chain.ledger;
       const started = l.phase === Phase.pending;
-      this.log('A guardian', started ? 'Reported a death; enough guardians agreed, so the countdown started' : 'Reported a death', [
-        'A one-time vote token (cannot be linked to the guardian)', `Votes this round: ${l.guardianVotes} of ${l.guardianThreshold}`,
+      this.log('A guardian', started ? 'Guardians agreed · switch started' : 'A guardian voted', started ? 'pending' : 'plain', [
+        'A one-time vote stamp that cannot be linked to the guardian', `Votes this round: ${l.guardianVotes} of ${l.guardianThreshold}`,
       ], [`That it was ${g.name}`, 'The guardian secret']);
       return started
-        ? `Enough guardians agreed. The owner has ${CHALLENGE / DAY} days to cancel.`
-        : `Report recorded anonymously: ${l.guardianVotes} of ${l.guardianThreshold} guardians so far.`;
+        ? `Your vote is recorded. Enough guardians agreed, so the switch has started.`
+        : `Your vote is recorded: ${l.guardianVotes} of ${l.guardianThreshold} so far. No one can see who voted.`;
     });
   }
 
   release(who: string) {
-    return this.run('Release the will', ['prepare', 'circuit', 'record'], async (stage) => {
+    return this.run('Releasing the will', ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
       await stage('circuit');
       await this.world!.chain.call('finalizeRelease', {});
-      this.log(who, 'Released the will', ['Phase: released', `Estate snapshot: ${this.world!.chain.ledger.estateSnapshot.toLocaleString()}`, 'A "released" event'], []);
+      this.log(who, 'Challenge window ended · will released', 'released', ['Vault state: released', `Estate snapshot: ${this.world!.chain.ledger.estateSnapshot.toLocaleString()}`, 'A "released" event'], []);
       return 'The will is released. Heirs can now claim their shares.';
     });
   }
 
-  claim(heirId: HeirProfile['id']) {
+  /** `to` is a 64-hex unshielded address; a fresh one is made if omitted. */
+  claim(heirId: HeirProfile['id'], to: string = sampleUserAddress()) {
     const h = HEIRS.find((x) => x.id === heirId)!;
-    return this.run('Claim your share', ['prepare', 'circuit', 'record'], async (stage) => {
+    return this.run('Claiming your share', ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
       const w = this.world!;
+      if (!/^[0-9a-f]{64}$/i.test(to)) throw new InputError('that does not look like an address. It should be 64 hexadecimal characters');
       await stage('circuit');
       const k = w.heirKeys[heirId];
       // The heir works only from the letter they were given and their own key.
       const letter = decodeHeirLetter(this.letterFor(heirId));
       const state: CodicilPrivateState = { claimant: { leaf: letter.leaf, path: letter.path, key: k.key, keySalt: k.salt } };
-      const to = sampleUserAddress();
-      const out = await w.chain.call(h.backup ? 'claimAsBackup' : 'claim', state, { bytes: encodeUserAddress(to) });
+      const out = await w.chain.call(h.backup ? 'claimAsBackup' : 'claim', state, { bytes: encodeUserAddress(to.toLowerCase()) });
       const paid = out.payouts.reduce((a, [, v]) => a + v, 0n);
       const nul = hex(pureCircuits.claimNullifier(vaultId(w.chain.address), pureCircuits.heirLeafHash(w.will.leaves[h.leaf])));
       w.claimed.set(h.leaf, nul);
-      this.log('An heir', 'Claimed a share', [
-        'A one-time claim token', `${paid.toLocaleString()} demo tokens to a fresh address`,
-      ], [`That it was ${h.name}`, 'Which will entry', 'The heir key']);
-      return `${paid.toLocaleString()} demo tokens sent to your new address ${to.slice(0, 8)}…${to.slice(-4)}.`;
+      this.log('An heir', 'A share was claimed', 'released', [
+        'A one-time claim stamp', `${paid.toLocaleString()} ${TOKEN} to a fresh address`,
+      ], [`That it was ${h.name}`, 'Which entry in the will', 'The heir key']);
+      return `${paid.toLocaleString()} ${TOKEN} sent to ${to.slice(0, 6)}…${to.slice(-4)}.`;
     });
   }
 
@@ -451,11 +592,11 @@ class DemoStore {
     const w = this.world;
     if (!w) {
       return {
-        ready: false, actor: this.actor, now: Math.floor(Date.now() / 1000), phase: Phase.armed, deadline: 0,
+        ready: false, actor: this.actor, now: Math.floor(Date.now() / 1000), deployedAt: 0, lastCheckIn: 0, phase: Phase.armed, deadline: 0,
         pendingUntil: 0, releasedAt: 0, estate: 0n, estateSnapshot: 0n, estatePaid: 0n, nonce: 0n, willVersion: 0n,
         guardianRound: 0n, guardianVotes: 0n, guardianThreshold: 0n,
         chain: { address: '', willRoot: '', guardianRoot: '', ownerPasskeyCommit: '', claimNullifiers: [], guardianNullifierCount: 0 },
-        heirs: [], leafHashes: [], votedThisRound: [], activity: [], tx: this.tx,
+        heirs: [], leafHashes: [], votedThisRound: [], activity: [], tx: this.tx, toast: this.toast,
       };
     }
     const l = w.chain.ledger;
@@ -464,8 +605,11 @@ class DemoStore {
     return {
       ready: true,
       passkey: w.passkey,
+      setup: w.setup,
       actor: this.actor,
       now: w.chain.now,
+      deployedAt: w.deployedAt,
+      lastCheckIn: w.lastCheckIn,
       phase: l.phase,
       deadline: Number(l.deadline),
       pendingUntil: Number(l.pendingUntil),
@@ -495,16 +639,17 @@ class DemoStore {
           claimed: w.claimed.has(profile.leaf),
           amount: payoutFor(snapshotBase, leaf.shareBps),
           named: !profile.backup || leaf.backupKeyCommit.some((b) => b !== 0),
+          keyEnd: w.heirKeys[profile.id].key.pk.x.toString(16).slice(-4),
         };
       }),
       leafHashes: leaves.map((leaf) => hex(pureCircuits.heirLeafHash(leaf))),
       votedThisRound: [...w.votedRound].filter(([, r]) => r === l.guardianRound).map(([id]) => id),
       activity: this.activity,
       tx: this.tx,
+      toast: this.toast,
     };
   }
 }
 
 export const demo = new DemoStore();
 export const useDemo = (): Snapshot => useSyncExternalStore(demo.subscribe, demo.getSnapshot);
-export { fmtDate };

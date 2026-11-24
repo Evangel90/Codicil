@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { encode } from 'uqr';
 import { decodeHeirLetter, letterFingerprint } from '@codicil/sdk';
 import { demo, fmtDate, HEIRS, OWNER_NAME, type HeirProfile, type Snapshot } from '../demo/store.js';
+import { Logo } from '../components/ui.js';
 
 function Qr({ text, label }: { text: string; label: string }) {
   const { size, path } = useMemo(() => {
@@ -46,6 +47,7 @@ function Letter({ s, id, onClose }: { s: Snapshot; id: HeirProfile['id']; onClos
     <dialog ref={ref} className="letter-dialog" aria-labelledby="letter-title">
       <article className="letter">
         <header>
+          <span className="letter-mark"><Logo size={28} /></span>
           <p className="letter-kicker">A letter from {OWNER_NAME}</p>
           <h2 id="letter-title">For {h.name}</h2>
         </header>
@@ -74,15 +76,15 @@ function Letter({ s, id, onClose }: { s: Snapshot; id: HeirProfile['id']; onClos
         </details>
       </article>
       <div className="letter-actions">
-        <button type="button" className="btn btn-seal" onClick={() => window.print()}>Print</button>
+        <button type="button" className="btn btn-primary btn-sm" onClick={() => window.print()}>Print</button>
         <button
           type="button"
-          className="btn"
+          className="btn btn-secondary btn-sm"
           onClick={() => { void navigator.clipboard?.writeText(text); setCopied(true); }}
         >
           {copied ? 'Copied' : 'Copy as text'}
         </button>
-        <button type="button" className="btn btn-quiet" onClick={() => ref.current?.close()}>Close</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => ref.current?.close()}>Close</button>
       </div>
     </dialog>
   );
@@ -92,9 +94,9 @@ export function HeirLetters({ s }: { s: Snapshot }) {
   const [open, setOpen] = useState<HeirProfile['id']>();
   const recipients = s.heirs.filter((h) => h.named);
   return (
-    <section aria-labelledby="letters-title" className="stack">
-      <h2 id="letters-title">Heir letters</h2>
-      <p className="muted small">
+    <section aria-labelledby="letters-title" className="letters stack-16">
+      <h2 id="letters-title" className="disp h-sec">Heir letters</h2>
+      <p className="lede">
         Give each heir their letter in person or in a sealed envelope. It tells them which share is theirs and proves it
         is in the will, without revealing anything to anyone else.
         {s.willVersion > 0n && ' You changed the will, so letters given out before that no longer work. Hand out these new ones.'}
@@ -102,9 +104,9 @@ export function HeirLetters({ s }: { s: Snapshot }) {
       <ul className="letter-list">
         {recipients.map((h) => (
           <li key={h.profile.id}>
-            <span className="private">{h.profile.name}</span>
-            <span className="muted small">{h.profile.backup ? 'backup for Ada' : `${Number(h.shareBps) / 100}%`}</span>
-            <button type="button" className="btn btn-quiet" onClick={() => setOpen(h.profile.id)}>
+            <span className="tone-private">{h.profile.name}</span>
+            <span className="muted small">{h.profile.backup ? 'Backup for Ada' : `${Number(h.shareBps) / 100}%`} · key …{h.keyEnd}</span>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setOpen(h.profile.id)}>
               Open {h.profile.name}'s letter
             </button>
           </li>
