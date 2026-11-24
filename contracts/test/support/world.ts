@@ -14,7 +14,13 @@ import {
 } from '@midnight-ntwrk/compact-runtime';
 import { Contract, ledger, pureCircuits as pure, type VaultConfig } from '@codicil/contracts/vault';
 import {
+  attestationDigest,
+  buildGuardianSet,
   buildWill,
+  guardianLeaf,
+  guardianSecrets,
+  newGuardianSecret,
+  signAttestation,
   checkInDigest,
   claimPackage,
   createWitnesses,
@@ -28,6 +34,7 @@ import {
   withPasskeyApproval,
   withWalletApproval,
   type ClaimantSecrets,
+  type GuardianSet,
   type CodicilPrivateState,
   type EdKey,
   type HeirEntry,
@@ -68,6 +75,10 @@ export interface World {
   /** A well-formed claimant whose leaf was never in the will. */
   outsider: ClaimantSecrets;
   color: Uint8Array;
+  /** Three guardian secrets; any two can start the countdown. */
+  guardians: Uint8Array[];
+  guardianSet: GuardianSet;
+  attestor: { key: P256Key; salt: Uint8Array };
 }
 
 export const nobody: CodicilPrivateState = {};
@@ -120,6 +131,9 @@ export async function deployVault(opts: DeployOptions = {}): Promise<World> {
   const outsider = { ...claimPackage(strayWill, 0), key: stranger.key, keySalt: stranger.keySalt };
 
   const color = encodeRawTokenType(sampleRawTokenType());
+  const guardians = [newGuardianSecret(), newGuardianSecret(), newGuardianSecret()];
+  const guardianSet = buildGuardianSet(guardians.map(guardianLeaf), 2);
+  const attestor = { key: newP256Key(), salt: newSalt() };
   const config: VaultConfig = {
     ownerPasskeyCommit: pure.passkeyCommitment(owner.passkey.pk, owner.state.passkey!.salt),
     ownerEdCommit: pure.edKeyCommitment(owner.wallet.pk, owner.state.wallet!.salt),
@@ -130,6 +144,9 @@ export async function deployVault(opts: DeployOptions = {}): Promise<World> {
     challengeWindow: BigInt(CHALLENGE),
     claimWindow: BigInt(CLAIM_WINDOW),
     tokenColor: color,
+    guardianRoot: guardianSet.root,
+    guardianThreshold: guardianSet.threshold,
+    attestorKeyCommit: pure.attestorCommitment(attestor.key.pk, attestor.salt),
     ...opts.config,
   };
   // Tests run "lax" witnesses by default so they can hand the circuit
@@ -137,7 +154,7 @@ export async function deployVault(opts: DeployOptions = {}): Promise<World> {
   const witnesses = createWitnesses({ strict: opts.strictWitnesses ?? false });
   const sim = (await Simulator.deploy<CodicilPrivateState>(new Contract(witnesses), {}, config))
     .withProofChecks(CONTRACT_DIR);
-  return { sim, owner, will, heirs, backup, outsider, color };
+  return { sim, owner, will, heirs, backup, outsider, color, guardians, guardianSet, attestor };
 }
 
 export interface SignOptions {
@@ -174,4 +191,24 @@ export async function updateWill(w: World, via: Via, root: bigint, time: number,
 export async function release(w: World): Promise<void> {
   await w.sim.call('triggerTimeout', { time: FIRST_DEADLINE, as: nobody });
   await w.sim.call('finalizeRelease', { time: RELEASED_AT, as: nobody });
+}
+
+/** Private state of guardian `i`. */
+export const asGuardian = (w: World, i: number): CodicilPrivateState =>
+  ({ guardian: guardianSecrets(w.guardianSet, w.guardians[i]) });
+
+export const vote = (w: World, i: number, time: number, asOf = time) =>
+  w.sim.call('guardianAttest', { time, as: asGuardian(w, i) }, BigInt(asOf));
+
+/** Private state carrying an attestation for `round` (default: the current round). */
+export function attestation(w: World, opts: { round?: bigint; signer?: P256Key; digest?: Uint8Array } = {}): CodicilPrivateState {
+  const digest = attestationDigest(w.sim.address, opts.round ?? L(w.sim).guardianRound);
+  const signed = opts.digest ?? digest;
+  return {
+    attestor: {
+      pk: w.attestor.key.pk,
+      salt: w.attestor.salt,
+      approval: { digest, proof: signAttestation((opts.signer ?? w.attestor.key).sk, signed) },
+    },
+  };
 }

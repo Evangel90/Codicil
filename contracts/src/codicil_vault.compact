@@ -14,9 +14,9 @@
 //                 heir keys. They enter only through witnesses, on the user's
 //                 own device.
 //
-// Lifecycle (docs/ARCHITECTURE.md):
-//   ARMED --deadline passes, triggerTimeout--> PENDING --challenge window--> RELEASED
-//     ^-------- owner check-in during the challenge window (veto) ---'
+// Lifecycle:
+//   ARMED --timeout | k-of-n guardians | signed attestation--> PENDING --challenge window--> RELEASED
+//     ^----------------- owner check-in during the challenge window (veto) --'
 
 pragma language_version >= 0.28.0;
 
@@ -50,6 +50,9 @@ export struct VaultConfig {
   challengeWindow: Uint<64>;      // time the owner has to veto a trigger
   claimWindow: Uint<64>;          // after release, before backups may claim
   tokenColor: Bytes<32>;          // unshielded token held by the vault
+  guardianRoot: Field;            // Merkle root of guardianLeaf(secret) values
+  guardianThreshold: Uint<8>;     // votes needed to start the countdown; 0 = no guardians
+  attestorKeyCommit: Bytes<32>;   // attestorCommitment(pk, salt); all zeros = disabled
 }
 
 // ─── Public ledger ──────────────────────────────────────────────────────────
@@ -71,6 +74,12 @@ export ledger estateTotal: Uint<128>;     // deposits so far (docs/DECISIONS.md 
 export ledger estateSnapshot: Uint<128>;  // frozen at release; shares are of this
 export ledger estatePaid: Uint<128>;      // sum of all claims; never exceeds the snapshot
 export ledger claimNullifiers: Set<Bytes<32>>;
+export ledger guardianRoot: Field;
+export ledger guardianThreshold: Uint<8>;
+export ledger guardianRound: Counter;     // bumped by every owner check-in
+export ledger guardianVotes: Counter;     // votes in the current round
+export ledger guardianNullifiers: Set<Bytes<32>>;
+export ledger attestorKeyCommit: Bytes<32>;
 
 // ─── Witnesses (TypeScript in sdk/src/witnesses.ts; run on the user's device)
 witness ownerPasskey(): Secp256r1Point;
@@ -84,6 +93,11 @@ witness claimantLeafPath(leafHash: Bytes<32>): MerkleTreePath<10, Bytes<32>>;
 witness claimantSecretKey(): Curve25519Scalar;
 witness claimantKeySalt(): Bytes<32>;
 witness payoutDivision(snapshot: Uint<128>, bps: Uint<16>): [Uint<128>, Uint<16>];
+witness guardianSecret(): Bytes<32>;
+witness guardianPath(leaf: Bytes<32>): MerkleTreePath<10, Bytes<32>>;
+witness attestorKey(): Secp256r1Point;
+witness attestorSalt(): Bytes<32>;
+witness attestorSignature(digest: Bytes<32>): Secp256r1EcdsaSignature;
 
 // ─── Constructor ────────────────────────────────────────────────────────────
 constructor(config: VaultConfig) {
@@ -100,6 +114,9 @@ constructor(config: VaultConfig) {
   challengeWindow = c.challengeWindow;
   claimWindow = c.claimWindow;
   tokenColor = c.tokenColor;
+  guardianRoot = c.guardianRoot;
+  guardianThreshold = c.guardianThreshold;
+  attestorKeyCommit = c.attestorKeyCommit;
   phase = Phase.armed;
 }
 
@@ -144,6 +161,32 @@ export pure circuit claimNullifier(vault: Bytes<32>, leafHash: Bytes<32>): Bytes
     [pad(32, "codicil:claim:v1"), vault, leafHash]);
 }
 
+// A guardian's leaf in the guardian tree. The guardian keeps `secret`.
+export pure circuit guardianLeaf(secret: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "codicil:guardian:v1"), secret]);
+}
+
+// One vote per guardian per round, unlinkable to the guardian and across vaults.
+export pure circuit guardianNullifier(vault: Bytes<32>, secret: Bytes<32>, round: Uint<64>): Bytes<32> {
+  return persistentHash<Vector<4, Bytes<32>>>(
+    [pad(32, "codicil:guardian-vote:v1"), vault, secret, round as Bytes<32>]);
+}
+
+export pure circuit attestorCommitment(pk: Secp256r1Point, salt: Bytes<32>): Bytes<32> {
+  return persistentCommit<Vector<3, Bytes<32>>>(
+    [pad(32, "codicil:attestor:v1"),
+     secp256r1PointX(pk) as Bytes<32>,
+     secp256r1PointY(pk) as Bytes<32>],
+    salt);
+}
+
+// What an attestor signs to declare the owner dead. Bound to the round, so
+// any owner check-in voids attestations signed before it.
+export pure circuit attestationDigest(vault: Bytes<32>, round: Uint<64>): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>(
+    [pad(32, "codicil:attestation:v1"), vault, round as Bytes<32>]);
+}
+
 // ─── Owner authentication ───────────────────────────────────────────────────
 circuit approvedByPasskey(digest: Bytes<32>): [] {
   const pk = ownerPasskey();
@@ -178,6 +221,10 @@ circuit checkInPreconditions(next: Uint<64>): [] {
 circuit applyCheckIn(next: Uint<64>): [] {
   deadline = next;
   nonce.increment(1);
+  // Proof of life voids every guardian vote and attestation made so far
+  // (docs/DECISIONS.md D13), not just those that triggered a countdown.
+  guardianRound.increment(1);
+  guardianVotes.resetToDefault();
   if (phase == Phase.pending) {
     phase = Phase.armed;   // owner veto during the challenge window
   }
@@ -231,12 +278,61 @@ export circuit deposit(amount: Uint<128>): [] {
   estateTotal = (estateTotal + a) as Uint<128>;
 }
 
+circuit startChallenge(start: Uint<64>): [] {
+  phase = Phase.pending;
+  pendingUntil = (start + challengeWindow) as Uint<64>;
+}
+
+// `asOf` must be within the last 15 minutes, so a trigger cannot backdate the
+// challenge window to shorten the owner's time to veto.
+circuit freshTimestamp(asOf: Uint<64>): [] {
+  assert(blockTimeGte(asOf), "stale timestamp");
+  assert(blockTimeLt((asOf + 900) as Uint<64>), "stale timestamp");
+}
+
 // Anyone may start the countdown once the owner has missed their deadline.
 export circuit triggerTimeout(): [] {
   assert(phase == Phase.armed, "not armed");
   assert(blockTimeGte(deadline), "owner is still alive");
-  phase = Phase.pending;
-  pendingUntil = (deadline + challengeWindow) as Uint<64>;
+  startChallenge(deadline);
+}
+
+// A hidden guardian votes that the owner has died. When `guardianThreshold`
+// votes are in, the countdown starts, whatever the deadline. Nobody learns
+// which guardians voted.
+export circuit guardianAttest(asOf: Uint<64>): [] {
+  const t = disclose(asOf);
+  assert(phase == Phase.armed, "not armed");
+  assert(guardianThreshold > 0, "no guardians");
+  freshTimestamp(t);
+
+  const secret = guardianSecret();
+  const leaf = guardianLeaf(secret);
+  const path = guardianPath(leaf);
+  assert(path.leaf == leaf, "not a guardian");
+  assert(merkleTreePathRootNoLeafHash<10>(path).field == guardianRoot, "not a guardian");
+
+  const nul = disclose(guardianNullifier(kernel.self().bytes, secret, guardianRound));
+  assert(!guardianNullifiers.member(nul), "already voted");
+  guardianNullifiers.insert(nul);
+  guardianVotes.increment(1);
+  if (guardianVotes >= guardianThreshold) {
+    startChallenge(t);
+  }
+}
+
+// A trusted attestor (e.g. a notary or death-registry service) signs that the
+// owner has died; anyone holding that attestation can start the countdown.
+export circuit triggerAttestation(asOf: Uint<64>): [] {
+  const t = disclose(asOf);
+  assert(phase == Phase.armed, "not armed");
+  freshTimestamp(t);
+  const pk = attestorKey();
+  assert(attestorKeyCommit != default<Bytes<32>>
+      && attestorCommitment(pk, attestorSalt()) == attestorKeyCommit, "unknown attestor");
+  const digest = attestationDigest(kernel.self().bytes, guardianRound);
+  assert(secp256r1EcdsaVerify(digest, attestorSignature(digest), pk), "bad attestation");
+  startChallenge(t);
 }
 
 export circuit finalizeRelease(): [] {

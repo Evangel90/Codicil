@@ -45,6 +45,9 @@ async function deployWorld(): Promise<World> {
     challengeWindow: BigInt(CHALLENGE),
     claimWindow: BigInt(CLAIM_WINDOW),
     tokenColor: color,
+    guardianRoot: 0n,
+    guardianThreshold: 0n,
+    attestorKeyCommit: new Uint8Array(32),
   };
   const vault = await chain.deploy(await loadModule('codicil_vault'), [config], vaultWitnesses);
   const secret = randomBytes(32);

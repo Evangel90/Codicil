@@ -40,6 +40,12 @@ from the catalogue or from this page, or if the catalogue has a stale entry.
 | `already claimed` | heir | This share has already been claimed. |
 | `bad payout math` | heir | The payout calculation was rejected. Please update the app and try again. |
 | `estate exhausted` | heir | There is not enough left in the estate to pay this share. |
+| `no guardians` | anyone | This vault has no guardians. |
+| `stale timestamp` | anyone | Your device clock looks wrong. Check the time and try again. |
+| `not a guardian` | anyone | This guardian key is not registered for this vault. |
+| `already voted` | anyone | You have already reported this vault in the current round. |
+| `unknown attestor` | anyone | This attestation is not from the attestor the owner chose (or the vault has none). |
+| `bad attestation` | anyone | The attestation is invalid or out of date. The owner may have checked in since it was signed. |
 | `callable by contracts only` | integrator | This check is for other contracts, not for direct calls. |
 | `escrow closed` | anyone | This escrow has already been paid out. |
 | `already withdrawn` | heir | This escrow has already been paid out. |

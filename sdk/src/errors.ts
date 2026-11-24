@@ -50,6 +50,13 @@ export const CONTRACT_ERRORS = {
   'already claimed': { audience: 'heir', message: 'This share has already been claimed.' },
   'bad payout math': { audience: 'heir', message: 'The payout calculation was rejected. Please update the app and try again.' },
   'estate exhausted': { audience: 'heir', message: 'There is not enough left in the estate to pay this share.' },
+  // Guardians and attestation
+  'no guardians': { audience: 'anyone', message: 'This vault has no guardians.' },
+  'stale timestamp': { audience: 'anyone', message: 'Your device clock looks wrong. Check the time and try again.' },
+  'not a guardian': { audience: 'anyone', message: 'This guardian key is not registered for this vault.' },
+  'already voted': { audience: 'anyone', message: 'You have already reported this vault in the current round.' },
+  'unknown attestor': { audience: 'anyone', message: 'This attestation is not from the attestor the owner chose (or the vault has none).' },
+  'bad attestation': { audience: 'anyone', message: 'The attestation is invalid or out of date. The owner may have checked in since it was signed.' },
   // Integrators
   'callable by contracts only': { audience: 'integrator', message: 'This check is for other contracts, not for direct calls.' },
   // Example escrow (contracts/src/inheritable_escrow.compact)

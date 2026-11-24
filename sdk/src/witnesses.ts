@@ -13,6 +13,7 @@ import type { Curve25519Point, Secp256r1Point } from '@midnight-ntwrk/compact-ru
 import type { Witnesses } from '@codicil/contracts/vault';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import type { Cip30Signature } from './cip30.js';
+import type { GuardianSecrets, P256Signature } from './guardians.js';
 import { BPS_TOTAL, type ClaimantSecrets } from './will.js';
 import type { WebAuthnAssertion } from './webauthn.js';
 
@@ -30,10 +31,19 @@ export interface WalletOwner {
   approval?: Approval<Cip30Signature>;
 }
 
+/** An attestor's key, and an attestation they signed for the current round. */
+export interface Attestor {
+  pk: Secp256r1Point;
+  salt: Uint8Array;
+  approval?: Approval<P256Signature>;
+}
+
 export interface CodicilPrivateState {
   passkey?: PasskeyOwner;
   wallet?: WalletOwner;
   claimant?: ClaimantSecrets;
+  guardian?: GuardianSecrets;
+  attestor?: Attestor;
 }
 
 export class MissingSecretError extends Error {
@@ -84,6 +94,12 @@ export function createWitnesses(opts: WitnessOptions = {}): Witnesses<CodicilPri
     claimantLeafPath: ({ privateState: s }) => [s, need(s.claimant, 'claim package').path],
     claimantSecretKey: ({ privateState: s }) => [s, need(s.claimant, 'claim package').key.sk],
     claimantKeySalt: ({ privateState: s }) => [s, need(s.claimant, 'claim package').keySalt],
+    guardianSecret: ({ privateState: s }) => [s, need(s.guardian, 'guardian secret').secret],
+    guardianPath: ({ privateState: s }) => [s, need(s.guardian, 'guardian secret').path],
+    attestorKey: ({ privateState: s }) => [s, need(s.attestor, 'attestation').pk],
+    attestorSalt: ({ privateState: s }) => [s, need(s.attestor, 'attestation').salt],
+    attestorSignature: ({ privateState: s }, digest) =>
+      [s, approvalFor(need(s.attestor, 'attestation').approval, digest, strict, 'attestation')],
     payoutDivision: ({ privateState: s }, snapshot, bps) => {
       const product = snapshot * bps;
       return [s, [product / BPS_TOTAL, product % BPS_TOTAL]];

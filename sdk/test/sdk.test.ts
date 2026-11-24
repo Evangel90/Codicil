@@ -11,6 +11,7 @@ import { p256 } from '@noble/curves/nist.js';
 import { bytesToHex, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import {
   ApprovalMismatchError,
+  buildGuardianSet,
   buildWill,
   challengeFor,
   clientDataJSONFor,
@@ -19,15 +20,19 @@ import {
   createWitnesses,
   DEFAULT_ORIGIN,
   fromCoseSign1,
+  guardianLeaf,
+  guardianSecrets,
   heirKeyFromScalar,
   MissingSecretError,
   newEdKey,
+  newGuardianSecret,
   newHeirKey,
   newP256Key,
   newSalt,
   parseDerSignature,
   payoutFor,
   publicKeyFromCoseKey,
+  signAttestation,
   signLikePasskey,
   signLikeWallet,
   toWebAuthnAssertion,
@@ -204,5 +209,36 @@ describe('witnesses', () => {
     const [, [q, r]] = createWitnesses().payoutDivision(ctx({}), 1_000_001n, 3333n);
     expect(q * 10_000n + r).toBe(1_000_001n * 3333n);
     expect(r < 10_000n).toBe(true);
+  });
+});
+
+describe('guardian sets', () => {
+  const secrets = [newGuardianSecret(), newGuardianSecret(), newGuardianSecret()];
+  const leaves = secrets.map(guardianLeaf);
+
+  it('validates the threshold', () => {
+    expect(() => buildGuardianSet([], 1)).toThrow('at least one guardian');
+    expect(() => buildGuardianSet(leaves, 0)).toThrow('between 1 and 3');
+    expect(() => buildGuardianSet(leaves, 4)).toThrow('between 1 and 3');
+    expect(buildGuardianSet(leaves, 2).threshold).toBe(2n);
+  });
+
+  it('gives each guardian their own path, and refuses unknown secrets', () => {
+    const set = buildGuardianSet(leaves, 2);
+    expect(guardianSecrets(set, secrets[1]).path).toEqual(set.tree.pathFor(1));
+    expect(() => guardianSecrets(set, newGuardianSecret())).toThrow('not one of the vault guardians');
+  });
+
+  it('leaves reveal nothing obvious about the secret', () => {
+    expect(guardianLeaf(secrets[0])).not.toEqual(secrets[0]);
+    expect(guardianLeaf(secrets[0])).toEqual(guardianLeaf(Uint8Array.from(secrets[0])));
+  });
+
+  it('attestations are raw P-256 signatures over the digest', () => {
+    const key = newP256Key();
+    const digest = randomBytes(32);
+    const { r, s } = signAttestation(key.sk, digest);
+    const pub = p256.Point.fromAffine({ x: key.pk.x, y: key.pk.y }).toBytes();
+    expect(p256.verify(new p256.Signature(r, s).toBytes('compact'), digest, pub, { prehash: false, lowS: false })).toBe(true);
   });
 });
