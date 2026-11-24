@@ -8,6 +8,7 @@ import { CHALLENGE, CLAIM_WINDOW, DAY, defaultSetup, demo } from '../src/demo/st
 import { createDemoPasskey } from '../src/demo/passkey.js';
 import { nextUp, planSummary, presetFor, PRESETS } from '../src/demo/guide.js';
 import { calendarFile, remindersFor } from '../src/demo/ics.js';
+import { commands, filterCommands } from '../src/demo/commands.js';
 
 const s = () => demo.getSnapshot();
 const run = async (p: Promise<boolean>) => { expect(await p, s().tx?.message).toBe(true); demo.dismissTx(); };
@@ -105,5 +106,41 @@ describe('calendar reminders', () => {
     expect(ics.match(/BEGIN:VEVENT/g)).toHaveLength(2);
     expect(ics).not.toMatch(/heir|Ada|Ben|Cleo|share/i);
     expect(remindersFor(now + 3 * DAY, now)).toHaveLength(1);
+  });
+});
+
+describe('the command palette', () => {
+  const ctx = { setTab: () => {}, reset: () => {}, toggleTheme: () => {}, downloadReminders: () => {} };
+  const settled = async () => {
+    while (s().tx?.status === 'running') await new Promise((r) => setTimeout(r, 1));
+    expect(s().tx?.status).toBe('done');
+    demo.dismissTx();
+  };
+  const labels = () => commands(s(), ctx).map((c) => c.label);
+
+  it('offers what fits the moment, and puts whoever is next first', async () => {
+    expect(labels()).toContain('Check in as Amara');
+    expect(labels()).toContain('Skip to deadline');
+    expect(labels()).not.toContain('Act as Amara (owner)');   // already Amara
+    demo.advanceTo(s().deadline);
+    expect(labels()).toContain('Start the switch');
+    commands(s(), ctx).find((c) => c.label === 'Start the switch')!.run();
+    await settled();
+    expect(s().phase).toBe(1);
+    expect(labels()).toContain('Cancel the switch as Amara');
+    demo.advance(CHALLENGE);
+    commands(s(), ctx).find((c) => c.label === 'Release the will')!.run();
+    await settled();
+    const actAs = commands(s(), ctx).filter((c) => c.group === 'Act as');
+    expect(actAs.slice(0, 2).map((c) => c.hint)).toEqual(['next', 'next']);
+    expect(actAs[0].label).toBe('Act as Ada (heir)');
+  });
+
+  it('matches every word of the query, including keywords', () => {
+    const list = commands(s(), ctx);
+    expect(filterCommands(list, 'alive').map((c) => c.id)).toEqual(['checkin']);
+    expect(filterCommands(list, 'act ben').map((c) => c.label)).toEqual(['Act as Ben (heir)']);
+    expect(filterCommands(list, 'calendar')[0].id).toBe('ics');
+    expect(filterCommands(list, 'zzz')).toEqual([]);
   });
 });

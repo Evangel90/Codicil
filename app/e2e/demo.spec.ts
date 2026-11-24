@@ -116,7 +116,14 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
   await finish(page, /Switch cancelled/);
 
   // Silence: the deadline passes, the window runs out, the will is released.
-  await page.getByRole('button', { name: 'Skip to deadline' }).click();
+  // The command palette, from the keyboard.
+  await page.keyboard.press('ControlOrMeta+k');
+  const palette = page.getByRole('dialog', { name: 'Command palette' });
+  await expect(palette).toBeVisible();
+  await page.keyboard.type('skip deadline');
+  await expect(palette.getByRole('option')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  await expect(palette).toBeHidden();
   await page.getByRole('button', { name: /Start the switch/ }).click();
   await finish(page, /The switch has started/);
   await page.getByRole('button', { name: 'Skip challenge window' }).click();

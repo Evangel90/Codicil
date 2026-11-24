@@ -4,10 +4,14 @@
 // The demo app shell: header, the demo bar (clock and who you are acting as),
 // and the screen for the current person.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Phase } from '@codicil/contracts/vault';
 import { Brand, Icon, ICONS, Segmented, ThemeToggle, Toast, TxSheet } from '../components/ui.js';
-import { CLAIM_WINDOW, DAY, demo, GUARDIANS, HEIRS, OWNER_FIRST, useDemo, type Actor, type Snapshot } from '../demo/store.js';
+import { toggleTheme } from '../theme.js';
+import { jumpsFor, type CommandContext, type Tab } from '../demo/commands.js';
+import { calendarFile, downloadCalendar, remindersFor } from '../demo/ics.js';
+import { IS_MAC, Palette, usePaletteShortcut } from './Palette.js';
+import { DAY, demo, GUARDIANS, HEIRS, OWNER_FIRST, useDemo, type Actor, type Snapshot } from '../demo/store.js';
 import { nextUp, sameActor, type NextUp } from '../demo/guide.js';
 import { Wizard } from './Wizard.js';
 import { OwnerView } from './OwnerView.js';
@@ -17,7 +21,7 @@ import { GuardianView } from './GuardianView.js';
 import { LensView } from './LensView.js';
 import { InspectView } from './InspectView.js';
 
-export type Tab = 'vault' | 'will' | 'lens';
+export type { Tab };
 
 const upper = (t: number) =>
   new Date(t * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase();
@@ -82,15 +86,7 @@ function ActAs({ s, up }: { s: Snapshot; up: NextUp }) {
 
 function DemoBar({ s, onReset }: { s: Snapshot; onReset: () => void }) {
   const up = nextUp(s);
-  const jumps: { label: string; to: number }[] = [{ label: '+1 day', to: s.now + DAY }];
-  if (s.phase === Phase.armed && s.now < s.deadline) jumps.push({ label: 'Skip to deadline', to: s.deadline });
-  if (s.phase === Phase.pending && s.now < s.pendingUntil) jumps.push({ label: 'Skip challenge window', to: s.pendingUntil });
-  const waits = [s.releasedAt + CLAIM_WINDOW, ...s.heirs.filter((h) => !h.claimed).map((h) => h.unlockAt)].filter((t) => t > s.now).sort((a, b) => a - b);
-  const cleo = s.heirs.find((h) => h.profile.id === 'cleo')!;
-  if (s.phase === Phase.released && waits.length) {
-    const t = waits[0];
-    jumps.push({ label: t === cleo.unlockAt ? "Skip to Cleo's unlock date" : 'Skip to the backup date', to: t });
-  }
+  const jumps = jumpsFor(s);
   const day = Math.floor((s.now - s.deployedAt) / DAY) + 1;
   return (
     <div className="demobar" aria-label="Demo controls" role="region">
@@ -160,8 +156,18 @@ export function Demo() {
   // Each screen starts at the top.
   useEffect(() => { window.scrollTo(0, 0); }, [tab, sealed, s.actor.kind]);
 
-  const reset = () => { demo.reset(); setSealed(false); setTab('vault'); };
+  const reset = useCallback(() => { demo.reset(); setSealed(false); setTab('vault'); }, []);
   const inApp = s.ready && sealed;
+  const [palette, setPalette] = usePaletteShortcut();
+  const ctx = useMemo<CommandContext>(() => ({
+    setTab,
+    reset,
+    toggleTheme,
+    downloadReminders: () => {
+      const x = demo.getSnapshot();
+      downloadCalendar(calendarFile(remindersFor(x.deadline, x.now), x.now, `${location.origin}/#/demo`));
+    },
+  }), [reset]);
 
   return (
     <div className="app">
@@ -171,6 +177,12 @@ export function Demo() {
           {inApp && <Nav s={s} tab={tab} setTab={setTab} />}
           <span className="grow" />
           <span className="net hide-sm"><span className="dot tone-armed" aria-hidden="true" />Demo chain · in your browser</span>
+          {inApp && (
+            <button type="button" className="kbd-btn" onClick={() => setPalette(true)} aria-label="Open the command palette" title="Command palette">
+              <Icon d={ICONS.search} size={15} stroke={1.6} />
+              <span className="mono hide-sm" aria-hidden="true">{IS_MAC ? '⌘K' : 'Ctrl K'}</span>
+            </button>
+          )}
           <ThemeToggle />
         </div>
       </header>
@@ -195,6 +207,7 @@ export function Demo() {
           </span>
         </footer>
       )}
+      {inApp && <Palette s={s} ctx={ctx} open={palette} onClose={() => setPalette(false)} />}
       <TxSheet tx={s.tx} />
       <Toast toast={s.toast} />
     </div>

@@ -51,6 +51,7 @@ export const ICONS = {
   chain: 'M3 3h7v7H3zM14 14h7v7h-7zM10 6.5h4v11',
   down: 'M12 5v14M6 13l6 6 6-6',
   letter: 'M3 6h18v12H3zM3 6l9 7 9-7',
+  search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4',
 } as const;
 
 export function ThemeToggle() {
