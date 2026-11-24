@@ -1,174 +1,161 @@
-/* Landing: the Obsidian 3D scroll story. Dynamic values are set inline. */
+/* Landing: a normal scrolling page over a fixed field of points.
+   Type scale (1.25 steps from 18px): 14 · 18 · 22 · 28 · 44 · 72. */
 
 .lx {
+  --lx-gutter: 40px;
+  --lx-max: 1200px;
+  --lx-col: 560px;
   position: relative;
-  height: 100vh;
-  height: 100dvh;
-  overflow: hidden;
+  min-height: 100vh;
   background: var(--o-bg);
   color: var(--o-text);
+  font-size: 18px;
+  line-height: 1.6;
 }
+.lx-wrap { width: 100%; max-width: calc(var(--lx-max) + 2 * var(--lx-gutter)); margin: 0 auto; padding: 0 var(--lx-gutter); position: relative; z-index: 1; }
 
-/* ── Layers behind the story ── */
-.lx-glow {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  background: radial-gradient(closest-side, var(--o-glow), transparent);
-  pointer-events: none;
-}
-.lx-canvas-host, .lx-vignette, .lx-grain { position: absolute; inset: 0; pointer-events: none; }
-.lx-canvas-host .lx-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+/* ── The field: fixed behind everything ── */
+.lx-field, .lx-nogl { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
+.lx-field .lx-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .lx-nogl {
-  position: absolute; left: 50%; top: 50%;
-  width: 520px; height: 520px; margin: -260px 0 0 -260px;
+  left: 60%; top: 50%; right: auto; bottom: auto;
+  width: 480px; height: 480px; margin: -240px 0 0 -240px;
   background-image: radial-gradient(var(--o-text-3) 1px, transparent 1.5px);
   background-size: 12px 12px;
   -webkit-mask-image: radial-gradient(circle, #000 35%, transparent 68%);
   mask-image: radial-gradient(circle, #000 35%, transparent 68%);
-  pointer-events: none;
 }
-.lx-vignette { background: radial-gradient(ellipse 85% 75% at 50% 45%, transparent 55%, var(--o-bg) 125%); }
-.lx-grain { width: 100%; height: 100%; mix-blend-mode: overlay; }
-
-/* ── Scroller and the sticky stage ── */
-.lx-scroller {
-  position: absolute; inset: 0;
-  overflow-y: auto; overflow-x: hidden;
-  scrollbar-width: none;
-  outline: none;
-}
-.lx-scroller::-webkit-scrollbar { display: none; }
-.ox .lx-scroller:focus-visible { outline: 1.5px solid var(--o-signal); outline-offset: -3px; }
-.lx-stage { position: sticky; top: 0; height: 100%; overflow: hidden; }
-.lx-spacer { height: 800%; }
 
 /* ── Type ── */
-.lx-mask { display: block; overflow: hidden; padding: 0.04em 0.08em 0.18em 0.04em; margin: 0 0 -0.1em -0.04em; }
-.lx-h2 .lx-mask { padding-bottom: 0.2em; }
-.lx-line { display: block; }
-.lx-acc { font-family: var(--o-accent-font); font-style: italic; font-weight: var(--o-accent-w); letter-spacing: var(--o-accent-ls); }
+.lx-h1, .lx-h2 { font-family: var(--o-display); font-weight: 400; color: var(--o-text); text-wrap: balance; margin: 0; }
+.lx-h1 { font-size: clamp(44px, 6.2vw, 80px); line-height: 1.02; letter-spacing: -0.022em; }
+.lx-h2 { font-size: clamp(32px, 3.4vw, 44px); line-height: 1.12; letter-spacing: -0.015em; }
+.lx p { margin: 0; text-wrap: pretty; }
+.lx a:not(.btn) { color: inherit; text-decoration: underline; text-decoration-color: var(--o-line-2); text-underline-offset: 3px; }
+.lx a:not(.btn):hover { text-decoration-color: currentColor; }
+.lx-pub { color: var(--o-public); }
 .lx-priv { color: var(--o-private); }
-.lx-dim { color: var(--o-text-3); }
-.lx-strong { color: var(--o-text); }
-.lx-h1 { margin: 0; line-height: 0.92; }
-.lx-h2 { margin: 0; line-height: 1; }
-.lx .tone-pub { color: var(--o-public); }
-.lx .tone-priv { color: var(--o-private); }
-.lx .tone-pend { color: var(--o-pending); }
-.lx .tone-ok { color: var(--o-armed); }
-.lx .tone-txt { color: var(--o-text); }
+.lx-txt { color: var(--o-text); }
+.lx-note { font-size: 14px; color: var(--o-text-3); }
+
+/* ── Header ── */
+.lx-header { position: fixed; top: 0; left: 0; right: 0; z-index: 10; border-bottom: 1px solid transparent; transition: background-color 300ms var(--o-ease), border-color 300ms var(--o-ease); }
+.lx-header.is-scrolled { background: var(--o-glass); border-bottom-color: var(--o-line); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
+.lx-header-row { display: flex; align-items: center; gap: 24px; height: 68px; }
+.lx .lx-header .brand, .lx .lx-footer .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--o-text); text-decoration: none; }
+.lx .brand-word { font-size: 24px; letter-spacing: -0.02em; line-height: 1; }
+.lx-nav { display: flex; gap: 4px; margin-left: 16px; }
+.lx-nav button { background: none; border: 0; padding: 8px 12px; border-radius: 999px; font: 400 14px var(--o-sans); color: var(--o-text-2); cursor: pointer; transition: color var(--o-t2) var(--o-ease), background-color var(--o-t2) var(--o-ease); }
+.lx-nav button:hover { color: var(--o-text); background: color-mix(in srgb, var(--o-text) 6%, transparent); }
+.lx-header-end { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 
 /* ── Hero ── */
-.lx-hero {
-  position: absolute; inset: 0;
-  display: flex; flex-direction: column; justify-content: flex-end; gap: 32px;
+.lx-hero { min-height: min(100vh, 880px); display: flex; align-items: center; padding-top: 68px; padding-bottom: 40px; }
+.lx-hero-text { max-width: 600px; display: flex; flex-direction: column; gap: 24px; }
+.lx-lede { font-size: 20px; line-height: 1.55; color: var(--o-text-2); max-width: 30em; }
+.lx-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+
+/* ── Section rhythm ── */
+.lx-how, .lx-lens, .lx-people, .lx-faq { padding-top: 120px; scroll-margin-top: 40px; }
+.lx-intro { max-width: var(--lx-col); display: flex; flex-direction: column; gap: 16px; margin-bottom: 48px; }
+.lx-intro-wide { max-width: 760px; }
+.lx-intro p { color: var(--o-text-2); }
+
+/* ── How it works: steps scroll on the left, the field changes on the right ── */
+.lx-steps { list-style: none; margin: 0; padding: 0; max-width: var(--lx-col); }
+.lx-step {
+  display: grid; grid-template-columns: 44px minmax(0, 1fr); column-gap: 20px; align-content: center;
+  border-top: 1px solid var(--o-line);
+  padding: 64px 0 72px;
 }
-.lx-kicker { display: inline-flex; align-items: center; gap: 12px; }
-.lx-kicker-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--o-private); color: var(--o-private); }
-.lx-hero-foot { display: flex; justify-content: space-between; align-items: flex-end; gap: 28px 48px; flex-wrap: wrap; }
-.lx-lede { margin: 0; max-width: 430px; font-size: 17px; line-height: 1.6; color: var(--o-text-2); text-wrap: pretty; }
-.lx-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.lx-step > :not(.lx-step-n) { grid-column: 2; }
+.lx-step-n { grid-row: 1; font-family: var(--o-display); font-size: 28px; line-height: 1.1; color: var(--o-text-3); }
+.lx-step h3 { margin: 0 0 12px; font-size: 28px; font-weight: 400; font-family: var(--o-display); line-height: 1.2; letter-spacing: -0.01em; }
+.lx-step p { color: var(--o-text-2); }
+.lx-rows { margin: 28px 0 0; }
+.lx-rows > div { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid var(--o-line); font-size: 14px; }
+.lx-rows dt { color: var(--o-text-3); }
+.lx-rows dd { margin: 0; text-align: right; }
 
-/* ── Chapters ── */
-.lx-chapter { position: absolute; inset: 0; display: flex; flex-direction: column; }
-.lx-col { max-width: 100%; display: flex; flex-direction: column; gap: 28px; }
-.lx-idx { display: flex; align-items: center; gap: 14px; }
-.lx-rule { height: 1px; background: var(--o-line-2); }
-.lx-body { margin: 0; max-width: 450px; font-size: 17px; line-height: 1.6; color: var(--o-text-2); text-wrap: pretty; }
-.lx-rows { margin: 0; max-width: 450px; border-top: 1px solid var(--o-line); }
-.lx-rows > div { display: flex; justify-content: space-between; gap: 16px; padding: 13px 0; border-bottom: 1px solid var(--o-line); }
-.lx-rows dt { font-size: 13px; color: var(--o-text-3); }
-.lx-rows dd { margin: 0; font-size: 13px; text-align: right; }
-
-.lx-bars { position: absolute; bottom: 42px; display: flex; align-items: center; gap: 16px; }
-.lx-roller { display: inline-flex; font-size: 12px; color: var(--o-text); }
-.lx-roll-win { display: inline-block; height: 1.3em; overflow: hidden; line-height: 1.3em; }
-.lx-roll { display: flex; flex-direction: column; }
-.lx-bar-list { flex: 1; display: flex; gap: 6px; }
-.lx-bar { flex: 1; height: 2px; border-radius: 2px; background: var(--o-line-2); overflow: hidden; }
-.lx-bar > span { display: block; height: 100%; background: var(--o-text); }
-
-/* ── The lens ── */
-.lx-lens { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: 40px; }
-.lx-lens-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
-.lx-lens-title { display: flex; flex-direction: column; gap: 18px; }
-.lx-lens-note { margin: 0; max-width: 380px; font-size: 15px; line-height: 1.6; color: var(--o-text-2); text-wrap: pretty; }
-.lx-table { position: relative; border-radius: var(--o-r-md); overflow: hidden; cursor: ew-resize; }
+/* ── The ledger table ── */
+.lx-table { position: relative; border-radius: var(--o-r-md); overflow: hidden; cursor: ew-resize; touch-action: pan-y; user-select: none; }
 .lx-tcol { display: flex; flex-direction: column; }
-.lx-private {
-  position: absolute; inset: 0;
-  background: var(--o-surface);
-  transition: clip-path 180ms var(--o-ease);
-}
-.lx-thead, .lx-trow { display: flex; align-items: center; padding: 0 24px; border-bottom: 1px solid var(--o-line); }
-.lx-thead { height: 48px; }
+.lx-private { position: absolute; inset: 0; background: var(--o-surface); transition: clip-path 160ms var(--o-ease); }
+.lx-thead, .lx-trow { display: flex; align-items: center; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--o-line); }
+.lx-thead { height: 48px; font-size: 14px; }
+.lx-thead .lx-k { color: var(--o-text-3); }
 .lx-trow { height: 56px; }
 .lx-trow:last-child { border-bottom: 0; }
-.lx-k { flex: 0 0 28%; min-width: 0; }
-.lx-trow .lx-k { font-size: 14px; color: var(--o-text-2); }
-.lx-pub, .lx-priv-v, .lx-ellipsis { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lx-pub { font-size: 13px; color: var(--o-public); }
-.lx-priv-v { font-size: 15px; color: var(--o-private); text-align: right; }
-.lx-handle-line {
-  position: absolute; top: 0; bottom: 0; width: 1px;
-  background: var(--o-text);
-  transition: left 180ms var(--o-ease);
-}
+.lx-k { flex: 0 0 24%; min-width: 0; font-size: 15px; color: var(--o-text-2); }
+.lx-trow .lx-pub { font-size: 13px; }
+.lx-tcol .lx-pub, .lx-right { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lx-right { text-align: right; font-size: 15px; }
+.lx-handle-line { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--o-text); transition: left 160ms var(--o-ease); }
 .lx-handle {
-  position: absolute; top: 50%; left: 0;
-  transform: translate(-50%, -50%);
-  width: 36px; height: 36px; border-radius: 50%;
+  position: absolute; top: 50%; left: 0; transform: translate(-50%, -50%);
+  width: 40px; height: 40px; border-radius: 50%;
   background: var(--o-text); color: var(--o-invert);
   display: inline-flex; align-items: center; justify-content: center;
-  box-shadow: var(--o-shadow);
+  box-shadow: var(--o-shadow); cursor: ew-resize;
 }
+.lx-handle:focus-visible { outline: 2px solid var(--o-signal); outline-offset: 3px; }
+.lx-lens .lx-note { margin-top: 16px; }
 
-/* ── Begin ── */
-.lx-cta { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; }
-.lx-cta-body { display: flex; flex-direction: column; gap: 32px; }
-.lx-marquee-band { border-top: 1px solid var(--o-line); border-bottom: 1px solid var(--o-line); overflow: hidden; padding: 16px 0; }
-.lx-marquee { display: flex; width: max-content; gap: 44px; font-size: 40px; white-space: nowrap; }
-.lx-marquee > span { display: inline-flex; align-items: center; gap: 44px; }
-.lx-mdot { width: 5px; height: 5px; border-radius: 50%; background: var(--o-text-3); }
-.lx-footer { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--o-text-3); }
+/* ── Who does what ── */
+.lx-people-list { margin: 0; max-width: 700px; }
+.lx-people-list > div { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 8px 32px; padding: 28px 0; border-top: 1px solid var(--o-line); }
+.lx-people-list dt { font-family: var(--o-display); font-size: 22px; line-height: 1.3; }
+.lx-people-list dd { margin: 0; display: flex; flex-direction: column; gap: 8px; color: var(--o-text-2); max-width: 34em; }
+.lx-needs { font-size: 14px; color: var(--o-text-3); }
 
-/* ── Chrome ── */
-.lx-header {
-  position: absolute; top: 0; left: 0; right: 0;
-  display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  border-bottom: 1px solid transparent;
+/* ── Questions ── */
+.lx-faq-list { max-width: 700px; }
+.lx-faq details { border-top: 1px solid var(--o-line); }
+.lx-faq details:last-child { border-bottom: 1px solid var(--o-line); }
+.lx-faq summary {
+  list-style: none; cursor: pointer;
+  display: flex; justify-content: space-between; align-items: baseline; gap: 24px;
+  padding: 20px 0; font-size: 18px; color: var(--o-text);
 }
-.lx .lx-header .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--o-text); text-decoration: none; }
-.lx .lx-header .brand-word { font-size: 25px; letter-spacing: -0.02em; line-height: 1; }
-.lx-nav { display: flex; gap: 2px; }
-.lx-header-end { display: flex; gap: 6px; align-items: center; }
-.lx .lx-header .icon-btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px; border-radius: var(--o-r-pill);
-  border: 0; background: transparent; color: var(--o-text-2); cursor: pointer;
-  transition: color var(--o-t2) var(--o-ease), background-color var(--o-t2) var(--o-ease);
-}
-.lx .lx-header .icon-btn:hover { color: var(--o-text); background: color-mix(in srgb, var(--o-text) 6%, transparent); }
+.lx-faq summary::-webkit-details-marker { display: none; }
+.lx-faq summary::after { content: '+'; font-size: 22px; line-height: 1; color: var(--o-text-3); transition: transform 300ms var(--o-ease); }
+.lx-faq details[open] summary::after { transform: rotate(45deg); }
+.lx-faq summary:focus-visible { outline: 2px solid var(--o-signal); outline-offset: 4px; border-radius: 4px; }
+.lx-faq details p { padding: 0 48px 24px 0; color: var(--o-text-2); max-width: 36em; }
 
-.lx-ctrl { position: absolute; bottom: 24px; display: flex; align-items: center; gap: 8px; }
-.lx-pct { font-size: 12px; color: var(--o-text-3); margin-right: 8px; }
-.lx .btn.lx-round { width: 44px; padding: 0; }
-.lx-cue {
-  position: absolute; left: 50%; bottom: 24px;
-  transform: translateX(-50%);
-  width: 1px; height: 44px; background: var(--o-line-2); overflow: hidden;
-  pointer-events: none;
+/* ── Closing ── */
+.lx-cta { padding-top: 140px; padding-bottom: 120px; display: flex; flex-direction: column; align-items: flex-start; gap: 20px; }
+.lx-cta p { color: var(--o-text-2); max-width: 30em; }
+.lx-cta .btn { margin-top: 8px; }
+
+.lx-footer { position: relative; z-index: 1; border-top: 1px solid var(--o-line); background: var(--o-bg); }
+.lx-footer-row { display: flex; align-items: center; gap: 16px 32px; flex-wrap: wrap; padding-top: 28px; padding-bottom: 32px; }
+.lx-footer-links { display: flex; gap: 8px 24px; flex-wrap: wrap; font-size: 14px; }
+.lx .lx-footer-links a { color: var(--o-text-2); text-decoration: none; }
+.lx .lx-footer-links a:hover { color: var(--o-text); }
+.lx-fine { margin-left: auto; font-size: 13px; color: var(--o-text-3); }
+
+/* ── Phones and small tablets ── */
+@media (max-width: 820px) {
+  .lx { --lx-gutter: 20px; font-size: 17px; }
+  .lx-nav { display: none; }
+  .lx-hero { min-height: auto; padding-top: 128px; padding-bottom: 44vh; align-items: flex-start; }
+  .lx-lede { font-size: 18px; }
+  .lx-how, .lx-lens, .lx-people, .lx-faq { padding-top: 88px; }
+  .lx-intro { margin-bottom: 32px; }
+  .lx-step { min-height: 0; padding: 36px 0; grid-template-columns: 32px minmax(0, 1fr); column-gap: 12px; }
+  .lx-step h3 { font-size: 24px; }
+  .lx-rows > div { flex-direction: column; gap: 2px; }
+  .lx-rows dd { text-align: left; }
+  .lx-thead, .lx-trow { padding: 0 14px; }
+  .lx-k { flex-basis: 30%; font-size: 14px; }
+  .lx-right { font-size: 13px; }
+  .lx-people-list > div { grid-template-columns: minmax(0, 1fr); }
+  .lx-faq details p { padding-right: 0; }
+  .lx-cta { padding-top: 96px; padding-bottom: 88px; }
+  .lx-fine { margin-left: 0; }
+  .lx .lx-header-end .btn { padding: 0 14px; }
 }
-.lx-cue .drop { display: block; width: 1px; height: 18px; background: var(--o-text); }
-.lx-rail {
-  position: absolute; top: 50%; transform: translateY(-50%);
-  display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
+@media (max-width: 420px) {
+  .lx .lx-header-end .btn { font-size: 13px; }
 }
-.lx .lx-rail button {
-  display: inline-flex; align-items: center; gap: 10px; min-height: 28px;
-  background: none; border: 0; padding: 0; cursor: pointer;
-  font: 400 12px var(--o-sans); color: var(--o-text-3);
-}
-.lx .lx-rail button.is-current, .lx .lx-rail button:hover { color: var(--o-text); }
-.lx .lx-rail button > span { height: 1px; background: currentColor; transition: width 600ms var(--o-ease); }

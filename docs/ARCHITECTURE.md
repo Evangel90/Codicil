@@ -185,7 +185,7 @@ one transaction ([`escrow.test.ts`](../contracts/test/escrow.test.ts)).
 The app is React + Vite with hand-written CSS tokens (the "Obsidian" design: dark and light themes,
 works on phones).
 
-- **Landing page** (`#/`): a WebGL scroll story explaining the product.
+- **Landing page** (`#/`): a scrolling page over a WebGL point field that changes shape with each section.
 - **Demo** (`#/demo`): a seven-step setup wizard, then the vault from four points of view: the
   owner (Amara), an heir (Ada, Ben, Cleo, Kofi), a guardian, and "Anyone" (the public inspector).
 

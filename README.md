@@ -228,7 +228,7 @@ Milestones and status: [docs/ROADMAP.md](docs/ROADMAP.md). Customers, go-to-mark
 - Web app with a demo that runs the real contract in the browser: Face ID check-ins, changing the
   will, printable heir letters with QR codes that heirs check on their own device, a who-acts-next
   guide, plain-words summary with warnings, presets, a public inspector, calendar reminders, a ⌘K command palette, guardian reports, veto, release, claims and a privacy
-  lens, in the Obsidian design with a 3D scroll story on the landing page. Dark and light themes,
+  lens, in the Obsidian design, with a landing page whose 3D point field changes shape as you scroll. Dark and light themes,
   works on phones.
 - 154 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
   CI on every push.

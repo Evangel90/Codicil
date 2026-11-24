@@ -26,7 +26,7 @@ an error catalogue with plain-language messages for every contract error.
 
 **App (24 Nov).** A web app that runs the real contract in the browser:
 
-- a landing page with a 3D scroll story;
+- a landing page whose 3D point field changes shape as you scroll through how it works;
 - a seven-step setup wizard with presets and a plain-words review that flags risky choices;
 - owner, heir, guardian and public views, a Privacy Lens, and a guide to who acts next;
 - check-ins with real Face ID / Touch ID, will changes, printable heir letters with QR codes that
