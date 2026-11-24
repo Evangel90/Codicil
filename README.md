@@ -10,13 +10,15 @@ zero-knowledge proofs on [Midnight](https://midnight.network).**
 Self-custodied crypto is lost when its owner dies. Existing on-chain "dead man's switches" publish
 who the heirs are, what each gets and when the owner is active, which makes families targets.
 Codicil keeps the will private. The owner proves they are alive with **Face ID / Touch ID** (a
-passkey) or a **Cardano wallet**, verified inside a ZK circuit. If they stop, heirs can claim
-their share privately once the owner has had a chance to veto.
+passkey) or a **Cardano wallet**, verified inside a ZK circuit. If they stop, or if hidden
+guardians or a trusted attestor report their death, heirs can claim their share privately once the
+owner has had a chance to veto.
 
-> **Status (Wave 3, in progress):** contracts and SDK for the vault core, multi-heir wills,
-> tranches, backup heirs and the cross-contract hook are built and tested (106 tests, every call
-> checked against its ZK circuit). Guardians, the attestation trigger, the web app and the Preprod
-> deployment are next. See [What changed this Wave](#what-changed-this-wave).
+> **Status (Wave 3, in progress):** the vault contract and SDK are built and tested. That covers
+> passkey and wallet check-ins, multi-heir wills with tranches and backup heirs, hidden k-of-n
+> guardians, the attestation trigger and the cross-contract hook: 126 tests, every call checked
+> against its ZK circuit. The web app and the Preprod deployment are next. See
+> [What changed this Wave](#what-changed-this-wave).
 > Demo video, deck and live demo: *coming with the app*.
 
 ## Judge quickstart
@@ -43,6 +45,8 @@ stateDiagram-v2
     [*] --> Armed: deploy (owner key commitments + will root)
     Armed --> Armed: checkIn (passkey or wallet proof of life)
     Armed --> Pending: triggerTimeout (deadline passed, anyone)
+    Armed --> Pending: guardianAttest (k of n hidden guardians)
+    Armed --> Pending: triggerAttestation (signed by the owner's chosen attestor)
     Pending --> Armed: checkIn during the challenge window (veto)
     Pending --> Released: finalizeRelease (window over, anyone)
     Released --> Released: claim / claimAsBackup (heirs, once per share)
@@ -72,8 +76,10 @@ flowchart LR
   and path.
 - **Check-in** signs `aliveDigest(vault, nextDeadline, nonce)`. The circuit checks the signature
   against the committed key without revealing it. Replays fail because the nonce moves.
-- **Release**: anyone can start the countdown after a missed deadline. The owner can veto during
-  the challenge window. After that the estate is snapshotted.
+- **Release**: the countdown starts after a missed deadline (anyone can trigger it), when k of n
+  hidden guardians vote, or with an attestation from a trusted signer. In every case the owner can
+  veto during the challenge window, and any check-in voids earlier votes and attestations. After
+  the window the estate is snapshotted.
 - **Claim**: an heir proves their leaf is in the will and that they hold its key. A nullifier
   stops double claims without revealing which heir claimed. Backup heirs share the same nullifier,
   so at most one of the pair is ever paid.
@@ -96,19 +102,19 @@ Repository layout:
 
 | Midnight feature | Used for | Where |
 |---|---|---|
-| Dual ledger: public ledger plus private witnesses | Only commitments, the will root, deadlines and nullifiers are public | [`codicil_vault.compact:56`](contracts/src/codicil_vault.compact#L56), witnesses [`:76`](contracts/src/codicil_vault.compact#L76) |
-| `persistentCommit` (salted commitments) | Hide owner and heir public keys | [`codicil_vault.compact:108`](contracts/src/codicil_vault.compact#L108) |
-| Merkle proofs (`merkleTreePathRootNoLeafHash`) | Prove "my share is in the will" without saying which | [`codicil_vault.compact:268`](contracts/src/codicil_vault.compact#L268) |
-| Nullifiers (`Set<Bytes<32>>`) | One claim per share, unlinkable to the heir | [`codicil_vault.compact:282`](contracts/src/codicil_vault.compact#L282) |
-| **P-256** `secp256r1EcdsaVerify` (Ledger 9) | Face ID / Touch ID passkey check-ins | [`lib/WebAuthn.compact:99`](contracts/src/lib/WebAuthn.compact#L99) |
+| Dual ledger: public ledger plus private witnesses | Only commitments, the will root, deadlines and nullifiers are public | [`codicil_vault.compact:59`](contracts/src/codicil_vault.compact#L59), witnesses [`:85`](contracts/src/codicil_vault.compact#L85) |
+| `persistentCommit` (salted commitments) | Hide owner and heir public keys | [`codicil_vault.compact:125`](contracts/src/codicil_vault.compact#L125) |
+| Merkle proofs (`merkleTreePathRootNoLeafHash`) | Prove "my share is in the will" without saying which | [`codicil_vault.compact:364`](contracts/src/codicil_vault.compact#L364) |
+| Nullifiers (`Set<Bytes<32>>`) | One claim per share, one vote per guardian per round, unlinkable | `claimNullifiers`, `guardianNullifiers` in [`codicil_vault.compact`](contracts/src/codicil_vault.compact) |
+| **P-256** `secp256r1EcdsaVerify` (Ledger 9) | Face ID / Touch ID passkey check-ins; attestor signatures | [`lib/WebAuthn.compact:99`](contracts/src/lib/WebAuthn.compact#L99) |
 | **SHA-256** `persistentHash` over raw bytes | Rebuild the WebAuthn signed message in-circuit | [`lib/WebAuthn.compact:96`](contracts/src/lib/WebAuthn.compact#L96) |
 | **Ed25519** `ed25519Verify` (Ledger 9) | Cardano wallet (CIP-30) check-ins | [`lib/Cip30.compact:38`](contracts/src/lib/Cip30.compact#L38) |
-| **Curve25519** `ecMulGenerator` (Ledger 9) | Heirs prove they hold their key | [`codicil_vault.compact:274`](contracts/src/codicil_vault.compact#L274) |
-| **`kernel.caller()`** (Ledger 9) | The integrator hook answers only contracts | [`codicil_vault.compact:254`](contracts/src/codicil_vault.compact#L254) |
+| **Curve25519** `ecMulGenerator` (Ledger 9) | Heirs prove they hold their key | [`codicil_vault.compact:370`](contracts/src/codicil_vault.compact#L370) |
+| **`kernel.caller()`** (Ledger 9) | The integrator hook answers only contracts | [`codicil_vault.compact:350`](contracts/src/codicil_vault.compact#L350) |
 | **Cross-contract calls** (Ledger 9) | `inheritable_escrow` asks the vault before paying out | [`inheritable_escrow.compact:49`](contracts/src/inheritable_escrow.compact#L49) |
-| **Events** `emit` (Ledger 9) | Heir apps and indexers learn of a release | [`codicil_vault.compact:248`](contracts/src/codicil_vault.compact#L248) |
-| Block time (`blockTimeGte` / `blockTimeLt`) | Deadlines, challenge window, tranches | [`codicil_vault.compact:175`](contracts/src/codicil_vault.compact#L175) |
-| Unshielded tokens (`receiveUnshielded` / `sendUnshielded`) | Hold the estate, pay heirs | [`codicil_vault.compact:230`](contracts/src/codicil_vault.compact#L230), [`:292`](contracts/src/codicil_vault.compact#L292) |
+| **Events** `emit` (Ledger 9) | Heir apps and indexers learn of a release | [`codicil_vault.compact:344`](contracts/src/codicil_vault.compact#L344) |
+| Block time (`blockTimeGte` / `blockTimeLt`) | Deadlines, challenge window, tranches | [`codicil_vault.compact:218`](contracts/src/codicil_vault.compact#L218) |
+| Unshielded tokens (`receiveUnshielded` / `sendUnshielded`) | Hold the estate, pay heirs | [`codicil_vault.compact:277`](contracts/src/codicil_vault.compact#L277), [`:388`](contracts/src/codicil_vault.compact#L388) |
 | Generic modules | Passkey verifier parameterised by the site origin | [`codicil_vault.compact:28`](contracts/src/codicil_vault.compact#L28) |
 
 ## What is public and what is private
@@ -118,8 +124,11 @@ Repository layout:
 | Owner passkey / wallet public key | Private; only a salted commitment on-chain | Owner only |
 | Will (heirs, shares, unlock dates, backups) | Private; only the Merkle root on-chain | Owner; each heir learns only their own entry |
 | Deadline, phase, counters | Public ledger | Everyone (reveals that *a* vault is alive, not *whose*) |
+| Guardian identities and votes | Private; only the Merkle root, threshold and a vote count on-chain | Each guardian knows only themselves |
 | Claims | Public nullifier; payout to an address the heir chooses | Everyone sees *that* a share was claimed, not by which heir |
 | Payout amount | Public (unshielded transfer) | Everyone. Hiding amounts is on the roadmap ([D4, D8](docs/DECISIONS.md)) |
+
+Threats and mitigations, each linked to the test that demonstrates it: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
 
 Tests check the privacy claims directly: a check-in transcript contains no owner key, salt or
 signed digest, and a claim transcript contains no leaf, key commitment or heir key
@@ -138,6 +147,7 @@ this call can be generated", not just "the JavaScript ran".
 | [`lifecycle.test.ts`](contracts/test/lifecycle.test.ts) | Deposits, timeout, release, events, what a check-in reveals |
 | [`claims.test.ts`](contracts/test/claims.test.ts) | Claims, tranches, backups, exact payout maths, over-allocated wills, malicious payout witness |
 | [`properties.test.ts`](contracts/test/properties.test.ts) | fast-check: random wills, estates and claim orders; the owner can always veto |
+| [`guardians.test.ts`](contracts/test/guardians.test.ts) | k-of-n threshold, double votes, non-members, stale timestamps, votes voided by check-ins, attestation replay across rounds |
 | [`escrow.test.ts`](contracts/test/escrow.test.ts) | Cross-contract hook: two proofs in one transaction |
 | [`webauthn-real.test.ts`](contracts/test/webauthn-real.test.ts) | Real Touch ID assertions verified by the vault's own WebAuthn module |
 | [`errors.test.ts`](contracts/test/errors.test.ts) | Every contract error has a friendly UI message and is documented |
@@ -161,21 +171,22 @@ Design decisions: [docs/DECISIONS.md](docs/DECISIONS.md). Error catalogue: [docs
 
 ## Roadmap
 
-1. Hidden guardians (k-of-n, nullifier votes) and a signed attestation trigger, both followed by
-   the owner's challenge window.
-2. Web app: create a vault, check in with Face ID, heir claim page, a "privacy lens" showing what
+1. Web app: create a vault, check in with Face ID, heir claim page, a "privacy lens" showing what
    is public, plus a demo mode.
-3. End-to-end deployment on Preprod.
+2. End-to-end deployment on Preprod.
+3. Owner-signed updates to guardians and the attestor; a recovery key.
 4. Stretch: unlinkable check-ins, a sealed digital legacy (encrypted letters with keys split among
    guardians), and executor disclosures for courts and tax authorities.
 
 ## What changed this Wave
 
 - Phase 0: 15 validation gates, 14 passing, with real passkey and wallet captures.
-- Vault contract: passkey and wallet check-ins, will updates, timeout, veto, release, multi-heir
-  claims with tranches and backup heirs, a payout cap, and the cross-contract hook.
+- Vault contract: passkey and wallet check-ins, will updates, timeout, hidden k-of-n guardians, an
+  attestation trigger, veto, release, multi-heir claims with tranches and backup heirs, a payout cap,
+  and the cross-contract hook.
 - TypeScript SDK with witnesses, will builder, passkey/wallet conversion and an error catalogue.
-- 106 tests with ZK constraint checks, including property tests. CI on every push.
+- 126 tests with ZK constraint checks, including property tests. CI on every push.
+- A threat model mapping each threat to the test that covers it.
 
 ## License and attribution
 

@@ -110,3 +110,22 @@ replayed as an approval.
 - `estatePaid` tracks the sum of all claims, and `claim` asserts it never exceeds the snapshot
   (`estate exhausted`). The SDK refuses to build a will over 100%, but the contract does not rely on
   the client for that.
+
+## D13: Guardians and attestations are voided by any proof of life (2026-11-24)
+
+- **Hidden guardians.** Each guardian creates a secret on their own device and gives the owner
+  only `guardianLeaf(secret)`. Only the Merkle root and threshold `k` are on-chain. A vote proves
+  membership and publishes `H(domain, vault, secret, round)`. That nullifier stops double votes
+  but differs per round and per vault, so votes cannot be linked to a guardian or across vaults.
+- **Votes are voided by every check-in, not only by a veto.** The brief resets the round only when
+  the owner cancels a countdown. That would let votes pile up slowly: one guardian's mistaken
+  vote in March plus another's in October could trigger a living owner's vault. Every owner
+  check-in now bumps `guardianRound` and resets the count, so only `k` votes cast since the
+  owner's last sign of life count.
+- **Attestations are bound to the round** (`attestationDigest(vault, guardianRound)`). An
+  attestation signed in advance, or one the owner already vetoed, stops working at the next
+  check-in.
+- **Fresh timestamps.** Both triggers take `asOf` and require `asOf ≤ now < asOf + 15 min`.
+  Otherwise a trigger could backdate `asOf` and shorten the owner's challenge window.
+- **Not yet supported:** changing guardians or the attestor after deployment. That needs an
+  owner-signed settings update like `updateWill`; it is on the roadmap.
