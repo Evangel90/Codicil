@@ -23,6 +23,9 @@ owner has had a chance to veto.
 
 ## Judge quickstart
 
+The full guide, with what to expect at each step and where each rubric item is evidenced:
+[docs/JUDGES_QUICKSTART.md](docs/JUDGES_QUICKSTART.md).
+
 Requirements: Node 22+ and the [Compact toolchain](https://docs.midnight.network/) (compiler 0.36.1).
 
 ```bash
@@ -127,7 +130,7 @@ Repository layout:
 | [`sdk/src/`](sdk/src) | Witnesses, will builder, passkey/wallet conversion, error catalogue |
 | [`codicil-spike/`](codicil-spike) | Phase 0 validation spike (gates V1–V15) |
 | [`tools/webauthn-capture/`](tools/webauthn-capture) | Page used to capture real passkey and wallet signatures |
-| [`docs/`](docs) | Validation results, design decisions, error catalogue |
+| [`docs/`](docs) | [Architecture](docs/ARCHITECTURE.md), [privacy](docs/PRIVACY.md), [threat model](docs/THREAT_MODEL.md), [testing](docs/TESTING.md), [validation](docs/VALIDATION.md), [decisions](docs/DECISIONS.md), [errors](docs/ERRORS.md), [roadmap](docs/ROADMAP.md), [business](docs/BUSINESS.md), [progress by Wave](docs/WAVES.md) |
 
 ## Midnight integration
 
@@ -159,6 +162,7 @@ Repository layout:
 | Claims | Public nullifier; payout to an address the heir chooses | Everyone sees *that* a share was claimed, not by which heir |
 | Payout amount | Public (unshielded transfer) | Everyone. Hiding amounts is on the roadmap ([D4, D8](docs/DECISIONS.md)) |
 
+Every ledger field and transaction, and what each reveals: [docs/PRIVACY.md](docs/PRIVACY.md).
 Threats and mitigations, each linked to the test that demonstrates it: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
 
 Tests check the privacy claims directly: a check-in transcript contains no owner key, salt or
@@ -186,7 +190,8 @@ this call can be generated", not just "the JavaScript ran".
 | [`app/test`](app/test/demo.test.ts) | The whole demo story through the app's own store: wizard setup and preview, check-ins, veto, guardian rounds, release, claims, tranche, backup, retries; who acts next, the plain-words summary and its warnings, presets, letters held by heirs (stale after a will change), calendar reminders, the command palette |
 | [`app/e2e`](app/e2e/demo.spec.ts) | In Chrome: the setup wizard with a passkey (virtual authenticator), check-in through the real WebAuthn API, will change and letter, guardian votes, release, loading and checking a letter, the command palette, claim, public inspector, privacy lens. `npm run e2e` |
 
-The property tests already found one design flaw, now fixed ([D9](docs/DECISIONS.md)).
+The property tests already found one design flaw, now fixed ([D9](docs/DECISIONS.md)). How to run each
+level, and the bugs the tests caught: [docs/TESTING.md](docs/TESTING.md).
 
 ## Validation results
 
@@ -210,6 +215,9 @@ Design decisions: [docs/DECISIONS.md](docs/DECISIONS.md). Error catalogue: [docs
 4. Stretch: unlinkable check-ins, a sealed digital legacy (encrypted letters with keys split among
    guardians), and executor disclosures for courts and tax authorities.
 
+Milestones and status: [docs/ROADMAP.md](docs/ROADMAP.md). Customers, go-to-market and revenue:
+[docs/BUSINESS.md](docs/BUSINESS.md).
+
 ## What changed this Wave
 
 - Phase 0: 15 validation gates, 14 passing, with real passkey and wallet captures.
@@ -224,7 +232,8 @@ Design decisions: [docs/DECISIONS.md](docs/DECISIONS.md). Error catalogue: [docs
   works on phones.
 - 154 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
   CI on every push.
-- A threat model mapping each threat to the test that covers it.
+- Docs: architecture, privacy (every field and transaction), a threat model mapping each threat to
+  the test that covers it, testing, roadmap, business and a judges' quickstart. Details: [docs/WAVES.md](docs/WAVES.md).
 
 ## License and attribution
 
