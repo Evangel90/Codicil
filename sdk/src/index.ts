@@ -11,3 +11,4 @@ export * from './guardians.js';
 export * from './witnesses.js';
 export * from './owner.js';
 export * from './errors.js';
+export * from './letter.js';

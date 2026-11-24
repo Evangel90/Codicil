@@ -71,6 +71,16 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
   await finish(page, /new will is sealed/);
   await expect(page.getByRole('cell', { name: '40%' })).toHaveCount(2);
 
+  // Ben's letter: reissued for the new will, with a QR code.
+  await page.getByRole('button', { name: "Open Ben's letter" }).click();
+  const letter = page.getByRole('dialog', { name: 'For Ben' });
+  await expect(letter.getByRole('img', { name: /QR code/ })).toBeVisible();
+  await expect(letter).toContainText('will version 2');
+  await letter.getByText('Letter as text').click();
+  await expect(letter.locator('code')).toContainText('codicil:claim:v1:');
+  await letter.getByRole('button', { name: 'Close' }).click();
+  await expect(letter).toBeHidden();
+
   // Two guardians report; the owner cancels.
   const actor = page.getByLabel('Act as');
   await actor.selectOption({ label: 'Dr. Mensah, family doctor' });

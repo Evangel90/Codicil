@@ -14,6 +14,8 @@ import {
   checkInDigest,
   claimPackage,
   contractErrorCode,
+  decodeHeirLetter,
+  encodeHeirLetter,
   explainError,
   guardianLeaf,
   guardianSecrets,
@@ -346,6 +348,13 @@ class DemoStore {
     });
   }
 
+  /** The letter the owner hands this heir (a backup gets the entry they back up). */
+  letterFor(heirId: HeirProfile['id']): string {
+    const w = this.world!;
+    const h = HEIRS.find((x) => x.id === heirId)!;
+    return encodeHeirLetter({ vault: w.chain.address, ...claimPackage(w.will, h.leaf) });
+  }
+
   updateWill(draft: WillDraft) {
     return this.run('Seal the new will', ['prepare', 'approve', 'circuit', 'record'], async (stage) => {
       const w = this.world!;
@@ -422,7 +431,9 @@ class DemoStore {
       const w = this.world!;
       await stage('circuit');
       const k = w.heirKeys[heirId];
-      const state: CodicilPrivateState = { claimant: { ...claimPackage(w.will, h.leaf), key: k.key, keySalt: k.salt } };
+      // The heir works only from the letter they were given and their own key.
+      const letter = decodeHeirLetter(this.letterFor(heirId));
+      const state: CodicilPrivateState = { claimant: { leaf: letter.leaf, path: letter.path, key: k.key, keySalt: k.salt } };
       const to = sampleUserAddress();
       const out = await w.chain.call(h.backup ? 'claimAsBackup' : 'claim', state, { bytes: encodeUserAddress(to) });
       const paid = out.payouts.reduce((a, [, v]) => a + v, 0n);

@@ -7,6 +7,7 @@ import { duration, PhaseBadge } from '../components/ui.js';
 import { demo, fmtDate, OWNER_NAME, type Snapshot } from '../demo/store.js';
 import { Timeline } from './Timeline.js';
 import { WillEditor } from './WillEditor.js';
+import { HeirLetters } from './HeirLetters.js';
 
 export function OwnerView({ s }: { s: Snapshot }) {
   const left = s.deadline - s.now;
@@ -100,6 +101,8 @@ export function OwnerView({ s }: { s: Snapshot }) {
         </table>
         )}
       </section>
+
+      {s.phase !== Phase.released && <HeirLetters s={s} />}
 
       <Timeline items={s.activity} title={`${OWNER_NAME}'s vault activity`} />
     </div>

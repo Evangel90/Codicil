@@ -90,6 +90,33 @@ table.will { width: 100%; border-collapse: collapse; }
 .edit-check { display: flex; gap: 10px; align-items: flex-start; font-size: 0.92rem; color: var(--text-2); padding-left: 2px; }
 .edit-check input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--brass); }
 
+/* ─── Heir letters ───────────────────────────────────────── */
+.letter-list { list-style: none; margin: 0; padding: 0; }
+.letter-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.letter-list li .private { font-size: 1.05rem; min-width: 4em; }
+.letter-list li .btn { margin-left: auto; }
+.letter-dialog { width: min(760px, calc(100% - 32px)); max-height: calc(100% - 32px); padding: 0; border: 0; border-radius: var(--r-lg); background: transparent; color: inherit; }
+.letter-dialog::backdrop { background: rgb(5 10 20 / 0.7); }
+.letter { background: #f6f1e6; color: #2b2418; padding: clamp(20px, 5vw, 44px); border-radius: var(--r-lg) var(--r-lg) 0 0; font-family: var(--serif); }
+.letter header { border-bottom: 1px solid #d8cdb5; padding-bottom: 14px; margin-bottom: 20px; }
+.letter-kicker { font: 500 0.85rem/1.4 var(--sans); color: #6b5f48; }
+.letter h2 { font-size: clamp(1.8rem, 5vw, 2.6rem); color: #2b2418; }
+.letter-body { display: grid; grid-template-columns: 1fr minmax(160px, 220px); gap: 24px; align-items: start; }
+.letter-text { display: grid; gap: 12px; font-size: 1.02rem; }
+.letter .muted { color: #6b5f48; font-family: var(--sans); }
+.qr { width: 100%; height: auto; display: block; }
+.letter-raw { margin-top: 20px; font-family: var(--sans); font-size: 0.85rem; color: #6b5f48; }
+.letter-raw code { display: block; margin-top: 8px; color: #3a4a5e; }
+.letter-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 20px; background: var(--ink-2); border-radius: 0 0 var(--r-lg) var(--r-lg); }
+@media (max-width: 560px) { .letter-body { grid-template-columns: 1fr; } .qr { max-width: 240px; } }
+@media print {
+  body * { visibility: hidden; }
+  .letter-dialog, .letter-dialog .letter, .letter-dialog .letter * { visibility: visible; }
+  .letter-dialog { position: fixed; inset: 0; width: 100%; max-height: none; }
+  .letter { border-radius: 0; }
+  .letter-raw, .letter-actions { display: none; }
+}
+
 /* ─── Timeline ────────────────────────────────────────────── */
 .timeline ol { list-style: none; padding: 0; margin: 16px 0 0; }
 .timeline > ol > li { padding: 16px 0; border-bottom: 1px solid var(--line); }
