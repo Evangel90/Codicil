@@ -59,3 +59,54 @@ public ledger state, so the paid amount is still derivable from the change.
 use unshielded payouts to a fresh address. Either way the README states that per-heir *amounts*
 are not hidden today. Roadmap ideas: pay every heir from separate pre-split coins, or batch
 claims so amounts cannot be attributed.
+
+## D9: The check-in limit is measured from now, not from the old deadline (2026-11-24)
+
+The brief specified `next ≤ deadline + maxPeriod`. A property test (`contracts/test/properties.test.ts`)
+found two problems with it:
+
+1. **The veto could become impossible.** While the vault is pending, the old deadline is already in
+   the past. If the challenge window is longer than `maxPeriod`, then late in the window no valid
+   `next` exists and the owner can no longer cancel a false trigger.
+2. **The limit could be bypassed.** Several check-ins in a row could each add `maxPeriod`, pushing
+   the deadline arbitrarily far into the future. The limit exists to stop exactly that, for example
+   a coerced owner setting the switch decades ahead.
+
+**Decision:** `next ≤ now + maxPeriod`, written as `blockTimeGte(next − maxPeriod)` because Compact
+can compare against block time but not read it. The subtraction is guarded for `maxPeriod > next`.
+A test covers that case under the ZK constraint check. The veto property now holds for any
+challenge window, which is tested.
+
+## D10: Owner approvals are signed first, then proven (2026-11-24)
+
+Witnesses run synchronously inside proof generation. A Face ID prompt or a wallet pop-up is
+asynchronous. So the app:
+
+1. computes the digest with the contract's own pure circuit (`aliveDigest` / `willUpdateDigest`,
+   with the vault address and current nonce);
+2. asks the passkey or wallet to sign it;
+3. stores `{digest, signature}` as an *approval* in the private state;
+4. calls the circuit.
+
+The witness hands the approval over only if its digest matches (`ApprovalMismatchError` otherwise),
+so a stale approval fails fast and plainly instead of failing a proof. Tests run the witnesses in a
+lax mode to prove the circuit also rejects such approvals by itself.
+
+## D11: The wallet path verifies the CIP-30 message format (2026-11-24)
+
+`checkInEd25519` / `updateWillEd25519` verify a CIP-30 `Sig_structure` (119 bytes, digest at
+offset 87; gate V7), not a raw signature over the digest. A Cardano wallet (Lace, Nightly, Eternl)
+can then approve directly. An app-held Ed25519 key signs the same 119 bytes. The circuit pins the
+COSE context and header bytes, so a signature the key made for some other purpose cannot be
+replayed as an approval.
+
+## D12: Passkey origin lengths are module parameters; total payouts are capped (2026-11-24)
+
+- The WebAuthn verifier is a generic module, `WebAuthn<#CD, #CDX>`, because the signed
+  clientDataJSON length depends on the site origin (gate V6). The vault imports it with the
+  lengths for its deployment origin (`<134, 243>` for `http://localhost:5173`). The SDK holds the
+  origin in `sdk/src/config.ts`, and a test fails if the two disagree. **Deploying under a new
+  domain means changing one line and recompiling.**
+- `estatePaid` tracks the sum of all claims, and `claim` asserts it never exceeds the snapshot
+  (`estate exhausted`). The SDK refuses to build a will over 100%, but the contract does not rely on
+  the client for that.
