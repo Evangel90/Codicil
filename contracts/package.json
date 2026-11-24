@@ -1,0 +1,30 @@
+{
+  "name": "@codicil/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Codicil Compact contracts and their generated TypeScript bindings",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./vault": "./managed/codicil_vault/contract/index.js",
+    "./escrow": "./managed/inheritable_escrow/contract/index.js",
+    "./test/webauthn-harness": "./managed/webauthn_harness/contract/index.js"
+  },
+  "scripts": {
+    "compile": "compact compile --skip-zk src/codicil_vault.compact managed/codicil_vault && compact compile --skip-zk src/inheritable_escrow.compact managed/inheritable_escrow && compact compile --skip-zk test/contracts/webauthn_harness.compact managed/webauthn_harness",
+    "compile:full": "compact compile src/codicil_vault.compact managed/codicil_vault && compact compile src/inheritable_escrow.compact managed/inheritable_escrow",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-runtime": "0.21.0"
+  },
+  "devDependencies": {
+    "@codicil/sdk": "0.1.0",
+    "@midnightntwrk/onchain-runtime-v4": "4.0.2",
+    "@midnightntwrk/zkir-v3": "3.2.1",
+    "@noble/curves": "2.4.0",
+    "@noble/hashes": "2.4.0",
+    "fast-check": "4.10.2"
+  }
+}

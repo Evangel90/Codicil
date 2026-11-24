@@ -1,0 +1,40 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Codicil Authors
+//
+// In-circuit verification of a Cardano CIP-30 `signData` signature over a
+// 32-byte digest. Validated by gate V7 with real wallet signatures.
+//
+// signData returns a COSE_Sign1; the wallet's Ed25519 key signs the CBOR
+// Sig_structure ["Signature1", protected, h'', payload]. With a base address
+// (57 bytes) it is always 119 bytes, with the digest at offset 87:
+//
+//   0  84 6a "Signature1"                        array(4), text(10)
+//   12 58 46                                     bstr(70): protected header
+//   14 a2 01 27 67 "address" 58 39 <address 57>  {1: -8 (EdDSA), "address": addr}
+//   84 40                                        external_aad = h''
+//   85 58 20 <digest 32>                         payload
+//
+// A key held by the app (no wallet) signs the same 119 bytes, so one format
+// covers both. The address bytes are not checked: the key commitment is what
+// identifies the owner.
+
+module Cip30 {
+  import CompactStandardLibrary;
+
+  // Not exported from the contract top level: compactc 0.36.1 crashes when a
+  // top-level exported struct contains a Curve25519Point (see docs/VALIDATION.md).
+  export struct Cip30Signature {
+    sigStructure: Bytes<119>;
+    sig: Ed25519Signature;
+  }
+
+  export circuit cip30Verify(s: Cip30Signature, digest: Bytes<32>, pk: Curve25519Point): Boolean {
+    const head = Bytes [0x84, 0x6a, ...pad(10, "Signature1"), 0x58, 0x46,
+                        0xa2, 0x01, 0x27, 0x67, ...pad(7, "address"), 0x58, 0x39];
+    assert(slice<27>(s.sigStructure, 0) == head
+        && slice<3>(s.sigStructure, 84) == Bytes [0x40, 0x58, 0x20],
+        "not a wallet signature");
+    assert(slice<32>(s.sigStructure, 87) == digest, "wallet signed something else");
+    return ed25519Verify<119>(s.sigStructure, s.sig, pk);
+  }
+}

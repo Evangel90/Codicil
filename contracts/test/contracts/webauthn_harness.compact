@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Codicil Authors
+//
+// Test-only contract: exposes the vault's own WebAuthn module (same file,
+// same generic arguments) so real captured passkey assertions, which sign
+// arbitrary digests, can be checked against it.
+
+pragma language_version >= 0.28.0;
+
+import CompactStandardLibrary;
+import "../../src/lib/WebAuthn"<134, 243>;
+
+witness assertion(): WebAuthnAssertion;
+
+export ledger verified: Counter;
+
+export circuit verify(digest: Bytes<32>, rpIdHash: Bytes<32>, pk: Secp256r1Point): [] {
+  assert(webauthnVerify(assertion(), digest, rpIdHash, pk), "bad owner signature");
+  verified.increment(1);
+}

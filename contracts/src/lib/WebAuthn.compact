@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Codicil Authors
+//
+// In-circuit verification of a WebAuthn (passkey: Face ID / Touch ID /
+// Windows Hello) assertion over a 32-byte digest. Validated by gate V6 with
+// real Touch ID assertions (docs/VALIDATION.md).
+//
+// A passkey signs SHA-256(authenticatorData || SHA-256(clientDataJSON)). This
+// module rebuilds that message and checks:
+//   - clientDataJSON starts with {"type":"webauthn.get","challenge":" and the
+//     next 43 base64url characters decode to the digest;
+//   - authenticatorData carries our relying party's rpIdHash and the
+//     user-present (UP) and user-verified (UV) flags.
+//
+// Circuits need fixed sizes. clientDataJSON has length CD for the deployment's
+// origin, or CD + 109 when Chrome randomly appends its
+// "other_keys_can_be_added_here" member. The witness supplies the bytes
+// zero-padded to CDX = CD + 109, with `longForm` saying which length is real.
+//
+// Generic parameters: CD = 36 (prefix) + 43 (challenge) + 12 (`","origin":"`)
+//                          + len(origin) + 22 (`","crossOrigin":false}`)
+//                        = 113 + len(origin);  CDX = CD + 109.
+// E.g. http://localhost:5173 → <134, 243>; https://codicil.app → <132, 241>.
+
+module WebAuthn<#CD, #CDX> {
+  import CompactStandardLibrary;
+
+  export struct WebAuthnAssertion {
+    authenticatorData: Bytes<37>;   // rpIdHash(32) || flags(1) || signCount(4)
+    clientData: Bytes<CDX>;         // clientDataJSON, zero-padded to CDX bytes
+    longForm: Boolean;              // true: CDX bytes (Chrome variant); false: CD bytes
+    sig: Secp256r1EcdsaSignature;
+  }
+
+  // Value of one base64url character (RFC 4648 §5).
+  circuit b64urlValue(c: Uint<8>): Field {
+    const upper = c >= 65 && c <= 90;    // A-Z → 0..25
+    const lower = c >= 97 && c <= 122;   // a-z → 26..51
+    const digit = c >= 48 && c <= 57;    // 0-9 → 52..61
+    assert(upper || lower || digit || c == 45 || c == 95, "bad passkey challenge");
+    const f = c as Field;
+    return upper ? f - 65
+         : lower ? f - 71
+         : digit ? f + 4
+         : c == 45 ? 62 as Field
+         : 63 as Field;
+  }
+
+  // 43 base64url characters encode 32 bytes: ten groups of 4 chars → 3 bytes,
+  // then 3 chars → the last 2 bytes followed by 2 zero bits.
+  circuit challengeMatches(chars: Bytes<43>, digest: Bytes<32>): Boolean {
+    for (const g of 0..10) {
+      const sextets = b64urlValue(chars[4 * g]) * 262144
+                    + b64urlValue(chars[4 * g + 1]) * 4096
+                    + b64urlValue(chars[4 * g + 2]) * 64
+                    + b64urlValue(chars[4 * g + 3]);
+      const bytes = (digest[3 * g] as Field) * 65536
+                  + (digest[3 * g + 1] as Field) * 256
+                  + (digest[3 * g + 2] as Field);
+      assert(sextets == bytes, "passkey signed something else");
+    }
+    const tail = b64urlValue(chars[40]) * 4096 + b64urlValue(chars[41]) * 64 + b64urlValue(chars[42]);
+    return tail == (digest[30] as Field) * 1024 + (digest[31] as Field) * 4;
+  }
+
+  // Compact has no bitwise operators: strip the high bits one at a time, then
+  // test UV (bit 2) and UP (bit 0).
+  circuit userPresentAndVerified(flags: Uint<8>): Boolean {
+    const b7 = flags >= 128;
+    const r7 = ((flags as Field) - (b7 ? 128 : 0) as Field) as Uint<8>;
+    const b6 = r7 >= 64;
+    const r6 = ((r7 as Field) - (b6 ? 64 : 0) as Field) as Uint<8>;
+    const b5 = r6 >= 32;
+    const r5 = ((r6 as Field) - (b5 ? 32 : 0) as Field) as Uint<8>;
+    const b4 = r5 >= 16;
+    const r4 = ((r5 as Field) - (b4 ? 16 : 0) as Field) as Uint<8>;
+    const b3 = r4 >= 8;
+    const r3 = ((r4 as Field) - (b3 ? 8 : 0) as Field) as Uint<8>;
+    const uv = r3 >= 4;
+    const r2 = ((r3 as Field) - (uv ? 4 : 0) as Field) as Uint<8>;
+    const up = r2 == 1 || r2 == 3;
+    return uv && up;
+  }
+
+  // True when `a` is a valid passkey approval of `digest` by `pk` for the
+  // relying party `rpIdHash`. Malformed assertions fail with a specific message.
+  export circuit webauthnVerify(a: WebAuthnAssertion, digest: Bytes<32>,
+                                rpIdHash: Bytes<32>, pk: Secp256r1Point): Boolean {
+    assert(slice<36>(a.clientData, 0) == pad(36, "{\"type\":\"webauthn.get\",\"challenge\":\""),
+           "bad passkey data");
+    assert(challengeMatches(slice<43>(a.clientData, 36), digest), "passkey signed something else");
+    assert(a.longForm || slice<109>(a.clientData, CD) == default<Bytes<109>>, "bad passkey data");
+    assert(slice<32>(a.authenticatorData, 0) == rpIdHash, "passkey is for another site");
+    assert(userPresentAndVerified(a.authenticatorData[32]), "passkey user not verified");
+
+    const cdHash = a.longForm ? persistentHash<Bytes<CDX>>(a.clientData)
+                              : persistentHash<Bytes<CD>>(slice<CD>(a.clientData, 0));
+    const msg = persistentHash<Bytes<69>>(Bytes [...a.authenticatorData, ...cdHash]);
+    return secp256r1EcdsaVerify(msg, a.sig, pk);
+  }
+}

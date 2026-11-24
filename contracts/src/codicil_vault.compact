@@ -1,0 +1,309 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Codicil Authors
+//
+// Codicil vault: a private dead man's switch for an estate.
+//
+// The owner proves they are alive with a passkey (Face ID / Touch ID) or a
+// Cardano wallet signature. If they stop, the vault goes PENDING; after a
+// challenge window in which the owner can still veto, it is RELEASED and each
+// heir claims their share.
+//
+// Public ledger : phase, key *commitments*, the will's Merkle *root*,
+//                 deadlines, counters, claim nullifiers.
+// Private       : owner keys, the will (heirs, shares, unlock dates, backups),
+//                 heir keys. They enter only through witnesses, on the user's
+//                 own device.
+//
+// Lifecycle (docs/ARCHITECTURE.md):
+//   ARMED --deadline passes, triggerTimeout--> PENDING --challenge window--> RELEASED
+//     ^-------- owner check-in during the challenge window (veto) ---'
+
+pragma language_version >= 0.28.0;
+
+import CompactStandardLibrary;
+
+// Passkey clientDataJSON lengths for the deployment origin:
+// <113 + len(origin), 222 + len(origin)>. http://localhost:5173 → <134, 243>.
+// sdk/src/config.ts holds the origin; a test fails if the two disagree.
+import "lib/WebAuthn"<134, 243>;
+import "lib/Cip30";
+
+export enum Phase { armed, pending, released }
+
+// One entry of the will. Only heirLeafHash(leaf) is ever used in a proof, and
+// only the Merkle root of all leaves is stored on-chain.
+export struct HeirLeaf {
+  heirKeyCommit: Bytes<32>;    // edKeyCommitment(heir public key, salt)
+  backupKeyCommit: Bytes<32>;  // same for the backup heir; all zeros = none
+  shareBps: Uint<16>;          // basis points of the estate snapshot
+  unlockAt: Uint<64>;          // earliest claim time (tranches, minors)
+  salt: Bytes<32>;             // hides the leaf contents
+}
+
+export struct VaultConfig {
+  ownerPasskeyCommit: Bytes<32>;  // passkeyCommitment(pk, salt); all zeros = disabled
+  ownerEdCommit: Bytes<32>;       // edKeyCommitment(pk, salt); all zeros = disabled
+  passkeyRpIdHash: Bytes<32>;     // SHA-256 of the WebAuthn relying party id
+  willRoot: Field;
+  firstDeadline: Uint<64>;        // unix seconds
+  maxPeriod: Uint<64>;            // longest allowed check-in extension
+  challengeWindow: Uint<64>;      // time the owner has to veto a trigger
+  claimWindow: Uint<64>;          // after release, before backups may claim
+  tokenColor: Bytes<32>;          // unshielded token held by the vault
+}
+
+// ─── Public ledger ──────────────────────────────────────────────────────────
+export ledger phase: Phase;
+export ledger ownerPasskeyCommit: Bytes<32>;
+export ledger ownerEdCommit: Bytes<32>;
+export ledger passkeyRpIdHash: Bytes<32>;
+export ledger willRoot: Field;
+export ledger willVersion: Counter;
+export ledger nonce: Counter;
+export ledger deadline: Uint<64>;
+export ledger maxPeriod: Uint<64>;
+export ledger challengeWindow: Uint<64>;
+export ledger claimWindow: Uint<64>;
+export ledger pendingUntil: Uint<64>;
+export ledger releasedAt: Uint<64>;
+export ledger tokenColor: Bytes<32>;
+export ledger estateTotal: Uint<128>;     // deposits so far (docs/DECISIONS.md D1)
+export ledger estateSnapshot: Uint<128>;  // frozen at release; shares are of this
+export ledger estatePaid: Uint<128>;      // sum of all claims; never exceeds the snapshot
+export ledger claimNullifiers: Set<Bytes<32>>;
+
+// ─── Witnesses (TypeScript in sdk/src/witnesses.ts; run on the user's device)
+witness ownerPasskey(): Secp256r1Point;
+witness ownerPasskeySalt(): Bytes<32>;
+witness ownerPasskeyAssertion(digest: Bytes<32>): WebAuthnAssertion;
+witness ownerEdKey(): Curve25519Point;
+witness ownerEdSalt(): Bytes<32>;
+witness ownerEdSignature(digest: Bytes<32>): Cip30Signature;
+witness claimantLeaf(): HeirLeaf;
+witness claimantLeafPath(leafHash: Bytes<32>): MerkleTreePath<10, Bytes<32>>;
+witness claimantSecretKey(): Curve25519Scalar;
+witness claimantKeySalt(): Bytes<32>;
+witness payoutDivision(snapshot: Uint<128>, bps: Uint<16>): [Uint<128>, Uint<16>];
+
+// ─── Constructor ────────────────────────────────────────────────────────────
+constructor(config: VaultConfig) {
+  const c = disclose(config);
+  assert(c.ownerPasskeyCommit != default<Bytes<32>> || c.ownerEdCommit != default<Bytes<32>>,
+         "vault needs an owner key");
+  assert(c.maxPeriod > 0 && c.challengeWindow > 0, "invalid vault settings");
+  ownerPasskeyCommit = c.ownerPasskeyCommit;
+  ownerEdCommit = c.ownerEdCommit;
+  passkeyRpIdHash = c.passkeyRpIdHash;
+  willRoot = c.willRoot;
+  deadline = c.firstDeadline;
+  maxPeriod = c.maxPeriod;
+  challengeWindow = c.challengeWindow;
+  claimWindow = c.claimWindow;
+  tokenColor = c.tokenColor;
+  phase = Phase.armed;
+}
+
+// ─── Pure helpers (exported so TypeScript never re-implements hashing) ──────
+export pure circuit passkeyCommitment(pk: Secp256r1Point, salt: Bytes<32>): Bytes<32> {
+  return persistentCommit<Vector<3, Bytes<32>>>(
+    [pad(32, "codicil:passkey:v1"),
+     secp256r1PointX(pk) as Bytes<32>,
+     secp256r1PointY(pk) as Bytes<32>],
+    salt);
+}
+
+export pure circuit edKeyCommitment(pk: Curve25519Point, salt: Bytes<32>): Bytes<32> {
+  return persistentCommit<Vector<3, Bytes<32>>>(
+    [pad(32, "codicil:edkey:v1"),
+     curve25519PointX(pk) as Bytes<32>,
+     curve25519PointY(pk) as Bytes<32>],
+    salt);
+}
+
+export pure circuit heirLeafHash(leaf: HeirLeaf): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>(
+    [pad(32, "codicil:heirleaf:v1"), persistentHash<HeirLeaf>(leaf)]);
+}
+
+// What the owner signs to prove life: bound to this vault, the new deadline
+// and the replay nonce (docs/DECISIONS.md D5).
+export pure circuit aliveDigest(vault: Bytes<32>, next: Uint<64>, n: Uint<64>): Bytes<32> {
+  return persistentHash<Vector<4, Bytes<32>>>(
+    [pad(32, "codicil:alive:v1"), vault, next as Bytes<32>, n as Bytes<32>]);
+}
+
+// What the owner signs to replace the will.
+export pure circuit willUpdateDigest(vault: Bytes<32>, newRoot: Field, n: Uint<64>): Bytes<32> {
+  return persistentHash<Vector<4, Bytes<32>>>(
+    [pad(32, "codicil:will:v1"), vault, newRoot as Bytes<32>, n as Bytes<32>]);
+}
+
+// One per will leaf, shared by the heir and their backup so only one can claim.
+export pure circuit claimNullifier(vault: Bytes<32>, leafHash: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>(
+    [pad(32, "codicil:claim:v1"), vault, leafHash]);
+}
+
+// ─── Owner authentication ───────────────────────────────────────────────────
+circuit approvedByPasskey(digest: Bytes<32>): [] {
+  const pk = ownerPasskey();
+  assert(ownerPasskeyCommit != default<Bytes<32>>
+      && passkeyCommitment(pk, ownerPasskeySalt()) == ownerPasskeyCommit, "unknown owner key");
+  assert(webauthnVerify(ownerPasskeyAssertion(digest), digest, passkeyRpIdHash, pk),
+         "bad owner signature");
+}
+
+circuit approvedByWallet(digest: Bytes<32>): [] {
+  const pk = ownerEdKey();
+  assert(ownerEdCommit != default<Bytes<32>>
+      && edKeyCommitment(pk, ownerEdSalt()) == ownerEdCommit, "unknown owner key");
+  assert(cip30Verify(ownerEdSignature(digest), digest, pk), "bad owner signature");
+}
+
+// ─── Check-in (proof of life) ───────────────────────────────────────────────
+circuit checkInPreconditions(next: Uint<64>): [] {
+  assert(phase != Phase.released, "vault already released");
+  if (phase == Phase.armed) {
+    assert(blockTimeLt(deadline), "switch already expired");
+  }
+  assert(blockTimeLt(next), "deadline must be in the future");
+  // next <= now + maxPeriod, measured from now rather than from the old
+  // deadline: otherwise repeated check-ins could push the deadline arbitrarily
+  // far, and a long challenge window could leave the owner unable to veto
+  // (found by the property tests; docs/DECISIONS.md D9).
+  const earliest = next > maxPeriod ? (next - maxPeriod) as Uint<64> : 0 as Uint<64>;
+  assert(blockTimeGte(earliest), "deadline too far");
+}
+
+circuit applyCheckIn(next: Uint<64>): [] {
+  deadline = next;
+  nonce.increment(1);
+  if (phase == Phase.pending) {
+    phase = Phase.armed;   // owner veto during the challenge window
+  }
+}
+
+export circuit checkInPasskey(nextDeadline: Uint<64>): [] {
+  const next = disclose(nextDeadline);
+  checkInPreconditions(next);
+  approvedByPasskey(aliveDigest(kernel.self().bytes, next, nonce));
+  applyCheckIn(next);
+}
+
+export circuit checkInEd25519(nextDeadline: Uint<64>): [] {
+  const next = disclose(nextDeadline);
+  checkInPreconditions(next);
+  approvedByWallet(aliveDigest(kernel.self().bytes, next, nonce));
+  applyCheckIn(next);
+}
+
+// ─── Will update ────────────────────────────────────────────────────────────
+circuit willUpdatePreconditions(): [] {
+  assert(phase == Phase.armed, "will locked");
+  assert(blockTimeLt(deadline), "switch already expired");
+}
+
+circuit applyWillUpdate(root: Field): [] {
+  willRoot = root;
+  willVersion.increment(1);
+  nonce.increment(1);
+}
+
+export circuit updateWillPasskey(newRoot: Field): [] {
+  const root = disclose(newRoot);
+  willUpdatePreconditions();
+  approvedByPasskey(willUpdateDigest(kernel.self().bytes, root, nonce));
+  applyWillUpdate(root);
+}
+
+export circuit updateWillEd25519(newRoot: Field): [] {
+  const root = disclose(newRoot);
+  willUpdatePreconditions();
+  approvedByWallet(willUpdateDigest(kernel.self().bytes, root, nonce));
+  applyWillUpdate(root);
+}
+
+// ─── Funding and release ────────────────────────────────────────────────────
+export circuit deposit(amount: Uint<128>): [] {
+  assert(phase == Phase.armed, "vault closed");
+  const a = disclose(amount);
+  receiveUnshielded(tokenColor, a);
+  estateTotal = (estateTotal + a) as Uint<128>;
+}
+
+// Anyone may start the countdown once the owner has missed their deadline.
+export circuit triggerTimeout(): [] {
+  assert(phase == Phase.armed, "not armed");
+  assert(blockTimeGte(deadline), "owner is still alive");
+  phase = Phase.pending;
+  pendingUntil = (deadline + challengeWindow) as Uint<64>;
+}
+
+export circuit finalizeRelease(): [] {
+  assert(phase == Phase.pending, "not pending");
+  assert(blockTimeGte(pendingUntil), "challenge window open");
+  phase = Phase.released;
+  releasedAt = pendingUntil;
+  estateSnapshot = estateTotal;
+  emit(Misc { name: pad(32, "codicil:released:v1"), payload: default<Bytes<256>> });
+}
+
+// Hook for other contracts: "has this vault been released?" (gate V12).
+// kernel.caller() is only meaningful for contract callers, so users are rejected.
+export circuit isReleasedForContract(): Boolean {
+  const caller = kernel.caller();
+  assert(caller.is_some && caller.value.is_left, "callable by contracts only");
+  return phase == Phase.released;
+}
+
+// ─── Claims ─────────────────────────────────────────────────────────────────
+// Proves, without revealing which one, that the claimant's leaf is in the will.
+circuit provenLeaf(): [HeirLeaf, Bytes<32>] {
+  assert(phase == Phase.released, "vault not released");
+  const leaf = claimantLeaf();
+  const leafHash = heirLeafHash(leaf);
+  const path = claimantLeafPath(leafHash);
+  // Two asserts, not `&&`: a short-circuit would branch on private data.
+  assert(path.leaf == leafHash, "not in will");
+  assert(merkleTreePathRootNoLeafHash<10>(path).field == willRoot, "not in will");
+  return [leaf, leafHash];
+}
+
+// Commitment to the key the claimant holds (they prove knowledge of its secret).
+circuit claimantKeyCommit(): Bytes<32> {
+  return edKeyCommitment(ecMulGenerator(claimantSecretKey()), claimantKeySalt());
+}
+
+circuit pay(leaf: HeirLeaf, leafHash: Bytes<32>, recipient: UserAddress): [] {
+  assert(blockTimeGte(disclose(leaf.unlockAt)), "share still locked");
+
+  const nul = disclose(claimNullifier(kernel.self().bytes, leafHash));
+  assert(!claimNullifiers.member(nul), "already claimed");
+  claimNullifiers.insert(nul);
+
+  // No integer division in Compact: the witness supplies q and r, the circuit
+  // checks q * 10000 + r == snapshot * bps with r < 10000 (D2).
+  const [q, r] = payoutDivision(estateSnapshot, leaf.shareBps);
+  assert(q * 10000 + r == estateSnapshot * leaf.shareBps && r < 10000, "bad payout math");
+  const amount = disclose(q);
+  assert(estatePaid + amount <= estateSnapshot, "estate exhausted");
+  estatePaid = (estatePaid + amount) as Uint<128>;
+
+  sendUnshielded(tokenColor, amount, right<ContractAddress, UserAddress>(disclose(recipient)));
+}
+
+export circuit claim(recipient: UserAddress): [] {
+  const [leaf, leafHash] = provenLeaf();
+  assert(claimantKeyCommit() == leaf.heirKeyCommit, "not the heir");
+  pay(leaf, leafHash, recipient);
+}
+
+// A backup heir may claim a share its primary heir left unclaimed after the
+// claim window. Same nullifier, so at most one of the two is ever paid.
+export circuit claimAsBackup(recipient: UserAddress): [] {
+  const [leaf, leafHash] = provenLeaf();
+  assert(leaf.backupKeyCommit != default<Bytes<32>>
+      && claimantKeyCommit() == leaf.backupKeyCommit, "not the backup heir");
+  assert(blockTimeGte((releasedAt + claimWindow) as Uint<64>), "primary claim window open");
+  pay(leaf, leafHash, recipient);
+}

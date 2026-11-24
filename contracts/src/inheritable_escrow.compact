@@ -1,0 +1,52 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Codicil Authors
+//
+// Example integrator: any Midnight contract can make a position
+// "inheritable" with one cross-contract call to a Codicil vault (gate V12).
+//
+// The escrow holds unshielded tokens. Its beneficiary is fixed at deployment as
+// a hash commitment, and it can withdraw only once the linked vault reports
+// that it has been released.
+
+pragma language_version >= 0.28.0;
+
+import CompactStandardLibrary;
+
+// Structural interface: any contract exporting this circuit with this
+// signature (and a proof) satisfies it.
+contract CodicilVault {
+  circuit isReleasedForContract(): Boolean;
+}
+
+export ledger vault: CodicilVault;
+export ledger tokenColor: Bytes<32>;
+export ledger beneficiaryCommit: Bytes<32>;
+export ledger held: Uint<128>;
+export ledger withdrawn: Boolean;
+
+witness beneficiarySecret(): Bytes<32>;
+
+export pure circuit beneficiaryCommitment(secret: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "codicil:escrow:beneficiary:v1"), secret]);
+}
+
+constructor(v: CodicilVault, color: Bytes<32>, beneficiary: Bytes<32>) {
+  vault = disclose(v);
+  tokenColor = disclose(color);
+  beneficiaryCommit = disclose(beneficiary);
+}
+
+export circuit deposit(amount: Uint<128>): [] {
+  assert(!withdrawn, "escrow closed");
+  const a = disclose(amount);
+  receiveUnshielded(tokenColor, a);
+  held = (held + a) as Uint<128>;
+}
+
+export circuit withdrawToBeneficiary(recipient: UserAddress): [] {
+  assert(!withdrawn, "already withdrawn");
+  assert(beneficiaryCommitment(beneficiarySecret()) == beneficiaryCommit, "not the beneficiary");
+  assert(vault.isReleasedForContract(), "vault not released");
+  withdrawn = true;
+  sendUnshielded(tokenColor, held, right<ContractAddress, UserAddress>(disclose(recipient)));
+}
