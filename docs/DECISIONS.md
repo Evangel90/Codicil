@@ -177,3 +177,35 @@ tells every observer that the owner slipped.
 
 **Trade-off:** grace also delays the heirs by the same amount, and a check-in made during grace is
 visibly late on-chain, because block time is public.
+
+## D16: The release fee is taken once, in `finalizeRelease`, before the snapshot (2026-11-25)
+
+A vault can be deployed with `feeBps` (basis points of the estate) and `feeRecipient` (a user
+address). `finalizeRelease` sends `floor(estateTotal × feeBps / 10000)` to that address and sets
+`estateSnapshot = estateTotal − fee`.
+
+- **Why at release and not per claim.** One transfer instead of one per heir, and the payout maths
+  does not change at all: shares are still `floor(snapshot × bps / 10000)` and `estatePaid` is still
+  capped at the snapshot. So `fee + all claims ≤ fee + snapshot = estateTotal`, with no path that
+  pays a unit twice. A per-claim fee would need a second division in every claim and would leave
+  fee dust behind for every heir.
+- **Rounding.** The fee rounds down, so its dust stays in the snapshot for the heirs. Heirs' shares
+  round down as before; a fully allocated will leaves less than one unit per heir in the vault.
+  Both are property-tested.
+- **The same checked division as payouts** (D2): the `payoutDivision` witness supplies `(q, r)` and
+  the circuit asserts `q × 10000 + r = estateTotal × feeBps` with `r < 10000` (`bad fee math`). The
+  releaser is anyone, so the circuit cannot trust the number.
+- **Zero means off.** With `feeBps = 0` the circuit does not call the witness and makes no transfer;
+  a client with no payout witness can still release. A fee that rounds to zero is not sent either.
+- **A 10% cap in the constructor** (`fee too high`), and a non-zero address when a fee is set
+  (`fee needs an address`). The cap is a seat belt against a hostile or buggy client: no deployment
+  can route more than a tenth of the estate away from the heirs.
+- **Fixed at deployment.** There is no circuit that changes the fee, so the operator cannot raise it
+  and the owner agreed to it by deploying.
+- **No extra ledger field for the amount.** Deposits close when the countdown starts, so the fee
+  taken is always `estateTotal − estateSnapshot`.
+
+**What it makes public:** the rate and the fee address, from deployment, and the fee transfer at
+release. That is unavoidable for a fee. The cost is a link: every vault that pays the same operator
+shows the same address ([PRIVACY.md](PRIVACY.md), known leaks). **Limits:** the fee address is a
+user address, not a contract; and the fee binds only owners who deploy through an app that sets it.

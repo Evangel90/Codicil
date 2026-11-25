@@ -23,6 +23,7 @@ import {
   guardianLeaf,
   guardianSecrets,
   heirKeyFromScalar,
+  MAX_FEE_BPS,
   MissingSecretError,
   newEdKey,
   newGuardianSecret,
@@ -32,9 +33,12 @@ import {
   parseDerSignature,
   payoutFor,
   publicKeyFromCoseKey,
+  releaseFeeConfig,
+  releaseFeeFor,
   signAttestation,
   signLikePasskey,
   signLikeWallet,
+  snapshotAfterFee,
   timeoutOpensAt,
   toWebAuthnAssertion,
   VAULT_EVENTS,
@@ -273,5 +277,25 @@ describe('optional vault settings', () => {
     expect(VAULT_OPTIONS_OFF.gracePeriod).toBe(0n);
     expect(timeoutOpensAt({ deadline: 100n, ...VAULT_OPTIONS_OFF })).toBe(100n);
     expect(timeoutOpensAt({ deadline: 100n, gracePeriod: 30n })).toBe(130n);
+  });
+
+  it('the release fee is off by default, capped like the contract, and rounds down', () => {
+    expect(VAULT_OPTIONS_OFF.feeBps).toBe(0n);
+    expect(releaseFeeFor(1_000_001n, VAULT_OPTIONS_OFF.feeBps)).toBe(0n);
+    expect(snapshotAfterFee(1_000_001n, 0n)).toBe(1_000_001n);
+    expect(releaseFeeFor(1_000_001n, 250n)).toBe(25_000n);
+    expect(snapshotAfterFee(1_000_001n, 250n)).toBe(975_001n);
+    expect(releaseFeeFor(39n, 250n)).toBe(0n);
+
+    const cap = readFileSync(VAULT_SOURCE, 'utf8').match(/assert\(c\.feeBps <= (\d+), "fee too high"\)/);
+    expect(cap && BigInt(cap[1])).toBe(MAX_FEE_BPS);
+
+    const address = new Uint8Array(32).fill(7);
+    expect(releaseFeeConfig(250n, address)).toEqual({ feeBps: 250n, feeRecipient: { bytes: address } });
+    expect(releaseFeeConfig(0n, new Uint8Array(32)).feeBps).toBe(0n);
+    expect(() => releaseFeeConfig(MAX_FEE_BPS + 1n, address)).toThrow('between 0% and 10%');
+    expect(() => releaseFeeConfig(-1n, address)).toThrow('between 0% and 10%');
+    expect(() => releaseFeeConfig(1n, new Uint8Array(32))).toThrow('needs an address');
+    expect(() => releaseFeeConfig(1n, new Uint8Array(31))).toThrow('32 bytes');
   });
 });

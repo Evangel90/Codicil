@@ -56,8 +56,10 @@ Proposed, and to be tested with users:
 | B2B licensing | White-label vaults and SDK support for wallets and custodians |
 | Professional tools | Attestor and executor tools for lawyers and notaries: issuing attestations, disclosure proofs for courts |
 
-The contract does not take fees today. A release fee would be a single extra transfer in
-`finalizeRelease` or `pay`; it is on the [roadmap](ROADMAP.md) after the Preprod test.
+The release fee is built into the contract as an option ([D16](DECISIONS.md)): a vault can be deployed
+with a rate of up to 10% and a fee address, and `finalizeRelease` sends that share of the estate there
+before the heirs' shares are worked out. A vault deployed without it pays nothing. The rate and the
+address are public and cannot be changed after deployment. The other streams are not in the contract.
 
 ## Competition
 

@@ -53,6 +53,8 @@ export struct VaultConfig {
   claimWindow: Uint<64>;          // after release, before backups may claim
   gracePeriod: Uint<64>;          // after a missed deadline, before the countdown may start; 0 = none
   tokenColor: Bytes<32>;          // unshielded token held by the vault
+  feeBps: Uint<16>;               // release fee in basis points of the estate; 0 = no fee
+  feeRecipient: UserAddress;      // where the release fee is sent; unused when feeBps is 0
   guardianRoot: Field;            // Merkle root of guardianLeaf(secret) values
   guardianThreshold: Uint<8>;     // votes needed to start the countdown; 0 = no guardians
   attestorKeyCommit: Bytes<32>;   // attestorCommitment(pk, salt); all zeros = disabled
@@ -75,8 +77,10 @@ export ledger pendingUntil: Uint<64>;
 export ledger releasedAt: Uint<64>;
 export ledger tokenColor: Bytes<32>;
 export ledger estateTotal: Uint<128>;     // deposits so far (docs/DECISIONS.md D1)
-export ledger estateSnapshot: Uint<128>;  // frozen at release; shares are of this
+export ledger estateSnapshot: Uint<128>;  // frozen at release, after the fee; shares are of this
 export ledger estatePaid: Uint<128>;      // sum of all claims; never exceeds the snapshot
+export ledger feeBps: Uint<16>;           // public by nature: the fee is a visible transfer
+export ledger feeRecipient: UserAddress;
 export ledger claimNullifiers: Set<Bytes<32>>;
 export ledger guardianRoot: Field;
 export ledger guardianThreshold: Uint<8>;
@@ -121,6 +125,12 @@ constructor(config: VaultConfig) {
   claimWindow = c.claimWindow;
   gracePeriod = c.gracePeriod;
   tokenColor = c.tokenColor;
+  // The cap protects the owner from a hostile or buggy client: no deployment
+  // can route more than 10% of the estate away from the heirs (D16).
+  assert(c.feeBps <= 1000, "fee too high");
+  assert(c.feeBps == 0 || c.feeRecipient.bytes != default<Bytes<32>>, "fee needs an address");
+  feeBps = c.feeBps;
+  feeRecipient = c.feeRecipient;
   guardianRoot = c.guardianRoot;
   guardianThreshold = c.guardianThreshold;
   attestorKeyCommit = c.attestorKeyCommit;
@@ -366,12 +376,30 @@ export circuit triggerAttestation(asOf: Uint<64>): [] {
   startChallenge(t);
 }
 
+// The release fee: floor(estateTotal × feeBps / 10000), sent once, at release.
+// Heirs' shares are then taken of what remains, so the payout maths in `pay`
+// is untouched: fee + all claims ≤ fee + snapshot = estateTotal. The fee
+// rounds down, so its dust stays with the heirs. With feeBps = 0 there is no
+// witness call and no transfer.
+circuit takeReleaseFee(): Uint<128> {
+  if (feeBps == 0) {
+    return 0;
+  }
+  const [q, r] = payoutDivision(estateTotal, feeBps);
+  assert(q * 10000 + r == estateTotal * feeBps && r < 10000, "bad fee math");
+  const fee = disclose(q);
+  if (fee > 0) {
+    sendUnshielded(tokenColor, fee, right<ContractAddress, UserAddress>(feeRecipient));
+  }
+  return fee;
+}
+
 export circuit finalizeRelease(): [] {
   assert(phase == Phase.pending, "not pending");
   assert(blockTimeGte(pendingUntil), "challenge window open");
   phase = Phase.released;
   releasedAt = pendingUntil;
-  estateSnapshot = estateTotal;
+  estateSnapshot = (estateTotal - takeReleaseFee()) as Uint<128>;
   emit(Misc { name: pad(32, "codicil:released:v1"), payload: default<Bytes<256>> });
 }
 

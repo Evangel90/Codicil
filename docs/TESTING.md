@@ -1,6 +1,6 @@
 # Testing
 
-169 unit and simulator tests plus 2 browser end-to-end tests, all run by CI on every push
+180 unit and simulator tests plus 2 browser end-to-end tests, all run by CI on every push
 ([workflow](../.github/workflows/ci.yml)). This page explains what each level proves, how to run
 it, and the bugs the tests caught.
 
@@ -15,8 +15,8 @@ npm run e2e          # builds the app and runs Playwright in Chrome
 
 | Level | Command | Count | Time |
 |---|---|---|---|
-| Contract simulator + ZK constraint checks | `npm test -w @codicil/contracts` | 117 | ~6 s |
-| SDK | `npm test -w @codicil/sdk` | 30 | ~1 s |
+| Contract simulator + ZK constraint checks | `npm test -w @codicil/contracts` | 127 | ~6 s |
+| SDK | `npm test -w @codicil/sdk` | 31 | ~1 s |
 | App logic (the demo store and helpers) | `npm test -w @codicil/app` | 22 | ~3 s |
 | Browser end-to-end | `npm run e2e` | 2 | ~30 s |
 | Full compile with proving keys | `npm run compile:full` | 12 circuits | several minutes |
@@ -42,11 +42,12 @@ in the SDK and a row in [ERRORS.md](ERRORS.md).
 | [`auth.test.ts`](../contracts/test/auth.test.ts) | 45 | Check-ins and will updates by passkey and by wallet, each against: replay, wrong deadline, another vault, wrong key, forged signature, another website, Face ID not used, the `maxPeriod` limit, veto; the will-change notice |
 | [`claims.test.ts`](../contracts/test/claims.test.ts) | 18 | Claims, tranches, backup heirs, exact payout maths, over-allocated wills, a client lying about the payout division |
 | [`guardians.test.ts`](../contracts/test/guardians.test.ts) | 16 | k-of-n threshold, double votes, outsiders, stale timestamps, votes voided by a check-in, attestations bound to a round |
+| [`fee.test.ts`](../contracts/test/fee.test.ts) | 9 | The optional release fee: exact amount, one transfer, shares taken of what remains, dust, the 10% cap, a client lying about the fee, and no fee meaning no transfer |
 | [`lifecycle.test.ts`](../contracts/test/lifecycle.test.ts) | 20 | Deposits, timeout, release, the release event, the grace period (late check-ins, when the timeout opens, the veto window after it), and a byte search of the check-in transcript for keys, salts and digests |
 | [`webauthn-real.test.ts`](../contracts/test/webauthn-real.test.ts) | 6 | Real Touch ID assertions captured in Chrome on macOS, verified by the vault's own WebAuthn module, including Chrome's long `clientDataJSON` form |
 | [`escrow.test.ts`](../contracts/test/escrow.test.ts) | 4 | Cross-contract call: the escrow asks the vault, two proofs in one transaction |
 | [`errors.test.ts`](../contracts/test/errors.test.ts) | 5 | Every contract error is mapped and documented |
-| [`properties.test.ts`](../contracts/test/properties.test.ts) | 3 | fast-check: random wills, estates and claim orders never overpay; the owner can always veto, with any grace period; during the grace period the owner can always check in |
+| [`properties.test.ts`](../contracts/test/properties.test.ts) | 4 | fast-check: random wills, estates, fees and claim orders never overpay; a fully allocated will leaves only rounding dust, whatever the fee; the owner can always veto, with any grace period; during the grace period the owner can always check in |
 
 ## 2. SDK tests
 

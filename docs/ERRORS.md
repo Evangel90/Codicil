@@ -13,6 +13,8 @@ from the catalogue or from this page, or if the catalogue has a stale entry.
 | `vault needs an owner key` | owner | Add a passkey or a wallet before creating the vault. |
 | `invalid vault settings` | owner | The check-in period and challenge window must both be longer than zero. |
 | `grace period too long` | owner | The grace period cannot be longer than the longest check-in period. |
+| `fee too high` | owner | The release fee cannot be more than 10% of the estate. |
+| `fee needs an address` | owner | A release fee needs an address to be paid to. |
 | `vault already released` | owner | This vault has already been released to the heirs. It can no longer be changed. |
 | `switch already expired` | owner | Your check-in deadline has passed. Start the challenge window, then check in to cancel it. |
 | `deadline must be in the future` | owner | Choose a next check-in date in the future. |
@@ -33,6 +35,7 @@ from the catalogue or from this page, or if the catalogue has a stale entry.
 | `grace period open` | anyone | The owner missed the deadline but is still within the grace period. The countdown can start when it ends. |
 | `not pending` | anyone | The vault is not waiting for release. |
 | `challenge window open` | anyone | The owner can still cancel. Release becomes possible when the challenge window ends. |
+| `bad fee math` | anyone | The release fee calculation was rejected. Please update the app and try again. |
 | `vault not released` | heir | This vault has not been released yet. |
 | `not in will` | heir | This claim package is not part of the current will. The owner may have updated it. |
 | `not the heir` | heir | This key does not match the heir named in this share. |

@@ -69,6 +69,16 @@ export interface ClaimantSecrets extends ClaimPackage {
   keySalt: Uint8Array;
 }
 
+/** Exactly what the vault sends to the fee address at release (rounded down; 0 when there is no fee). */
+export function releaseFeeFor(estateTotal: bigint, feeBps: bigint): bigint {
+  return (estateTotal * feeBps) / BPS_TOTAL;
+}
+
+/** What is left for the heirs: the snapshot their shares are taken of. */
+export function snapshotAfterFee(estateTotal: bigint, feeBps: bigint): bigint {
+  return estateTotal - releaseFeeFor(estateTotal, feeBps);
+}
+
 /** Exactly what the vault pays for a share (rounded down). */
 export function payoutFor(snapshot: bigint, shareBps: bigint): bigint {
   return (snapshot * shareBps) / BPS_TOTAL;

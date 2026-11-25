@@ -16,7 +16,7 @@ owner has had a chance to veto.
 
 > **Status (Wave 3, in progress):** the vault contract, SDK and web app are built and tested. That
 > covers passkey and wallet check-ins, multi-heir wills with tranches and backup heirs, hidden k-of-n
-> guardians, the attestation trigger and the cross-contract hook: 169 tests, every contract call
+> guardians, the attestation trigger and the cross-contract hook: 180 tests, every contract call
 > checked against its ZK circuit, plus browser tests that check in with Chrome's real WebAuthn. The
 > Preprod deployment is next. See [What changed this Wave](#what-changed-this-wave).
 > Demo video and deck: *coming*.
@@ -114,7 +114,7 @@ flowchart LR
   can trigger it), when k of n
   hidden guardians vote, or with an attestation from a trusted signer. In every case the owner can
   veto during the challenge window, and any check-in voids earlier votes and attestations. After
-  the window the estate is snapshotted.
+  the window the estate is snapshotted, after an optional release fee.
 - **Claim**: an heir proves their leaf is in the will and that they hold its key. A nullifier
   stops double claims without revealing which heir claimed. Backup heirs share the same nullifier,
   so at most one of the pair is ever paid.
@@ -182,7 +182,8 @@ this call can be generated", not just "the JavaScript ran".
 | [`auth.test.ts`](contracts/test/auth.test.ts) | Check-ins and will updates via passkey and wallet: replay, wrong deadline, other vault, wrong key, forged signature, other website, Face ID not used, limits, veto |
 | [`lifecycle.test.ts`](contracts/test/lifecycle.test.ts) | Deposits, timeout, release, events, what a check-in reveals |
 | [`claims.test.ts`](contracts/test/claims.test.ts) | Claims, tranches, backups, exact payout maths, over-allocated wills, malicious payout witness |
-| [`properties.test.ts`](contracts/test/properties.test.ts) | fast-check: random wills, estates and claim orders; the owner can always veto |
+| [`fee.test.ts`](contracts/test/fee.test.ts) | Optional release fee: exact amount, shares taken of what remains, the 10% cap, malicious fee witness, no fee means no transfer |
+| [`properties.test.ts`](contracts/test/properties.test.ts) | fast-check: random wills, estates, fees and claim orders; the owner can always veto |
 | [`guardians.test.ts`](contracts/test/guardians.test.ts) | k-of-n threshold, double votes, non-members, stale timestamps, votes voided by check-ins, attestation replay across rounds |
 | [`escrow.test.ts`](contracts/test/escrow.test.ts) | Cross-contract hook: two proofs in one transaction |
 | [`webauthn-real.test.ts`](contracts/test/webauthn-real.test.ts) | Real Touch ID assertions verified by the vault's own WebAuthn module |
@@ -231,7 +232,7 @@ Milestones and status: [docs/ROADMAP.md](docs/ROADMAP.md). Customers, go-to-mark
   guide, plain-words summary with warnings, presets, a public inspector, calendar reminders, a ⌘K command palette, guardian reports, veto, release, claims and a privacy
   lens, in the Obsidian design, with a landing page whose 3D point field changes shape as you scroll. Dark and light themes,
   works on phones.
-- 169 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
+- 180 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
   CI on every push.
 - Docs: architecture, privacy (every field and transaction), a threat model mapping each threat to
   the test that covers it, testing, roadmap, business and a judges' quickstart. Details: [docs/WAVES.md](docs/WAVES.md).

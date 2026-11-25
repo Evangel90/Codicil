@@ -5,6 +5,7 @@
 
 import { sha256 } from '@noble/hashes/sha2.js';
 import { utf8ToBytes } from '@noble/hashes/utils.js';
+import { encodeUserAddress } from '@midnight-ntwrk/compact-runtime';
 import type { VaultConfig } from '@codicil/contracts/vault';
 
 /** Web origin the app is served from. Passkey signatures are bound to it. */
@@ -42,4 +43,30 @@ export function rpIdHash(rpId: string = DEFAULT_RP_ID): Uint8Array {
 export const VAULT_OPTIONS_OFF = {
   /** No grace period: the countdown can start at the deadline itself. */
   gracePeriod: 0n,
+  /** No release fee: nothing is taken from the estate and no extra transfer is made. */
+  feeBps: 0n,
+  feeRecipient: { bytes: new Uint8Array(32) },
 } as const satisfies Partial<VaultConfig>;
+
+/**
+ * The contract refuses a release fee above this: 10% of the estate, in basis
+ * points. A test fails if it disagrees with the vault source.
+ */
+export const MAX_FEE_BPS = 1_000n;
+
+/**
+ * Release-fee settings for a `VaultConfig`: `feeBps` basis points of the
+ * estate go to `recipient` (a user address, hex or bytes) when the will is
+ * released. Both are public on the ledger. The contract enforces the same
+ * limits; checking here gives a clear error before deployment.
+ */
+export function releaseFeeConfig(
+  feeBps: bigint,
+  recipient: string | Uint8Array,
+): Pick<VaultConfig, 'feeBps' | 'feeRecipient'> {
+  if (feeBps < 0n || feeBps > MAX_FEE_BPS) throw new Error('the release fee must be between 0% and 10%');
+  const bytes = typeof recipient === 'string' ? encodeUserAddress(recipient) : recipient;
+  if (bytes.length !== 32) throw new Error('the fee address must be 32 bytes');
+  if (feeBps > 0n && bytes.every((b) => b === 0)) throw new Error('a release fee needs an address');
+  return { feeBps, feeRecipient: { bytes } };
+}

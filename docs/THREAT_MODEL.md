@@ -32,6 +32,8 @@ or death-registry service), **any third party** (every trigger is permissionless
 | **Impersonating an heir** | Must prove the leaf is in the will *and* know the secret key behind its commitment | `claims.test.ts` "not the heir", "not in will", "tampered leaf" |
 | **Double claim** / heir and backup both claiming | One nullifier per leaf, shared by heir and backup | `claims.test.ts` "already claimed", backup suite |
 | **Over-allocated or malicious will / client** | Contract checks the payout division and caps total payouts at the snapshot | `claims.test.ts` "bad payout math", "estate exhausted" |
+| A hostile or buggy client **deploys the vault with a huge fee**, or a releaser lies about the fee | The constructor refuses more than 10% (`fee too high`). Rate and address are on the public ledger, so owner and heirs can check them. The circuit checks the fee division, and the fee is taken once, at release (D16) | `fee.test.ts` "above 10%", "wrong fee from a modified client", "once, at release" |
+| The fee **breaking the payouts** (dust lost, double paid, vault overdrawn) | Shares are taken of the snapshot after the fee, so fee + claims ≤ estate; both round down | `fee.test.ts` "what remains"; `properties.test.ts` "only rounding dust, whatever the fee" |
 | **Learning the will from the chain** | Only a salted Merkle root is public; claims reveal a nullifier | `claims.test.ts` "publishes a nullifier, not which leaf or heir" |
 | **Learning the owner's keys** | Only salted commitments are public; transcripts checked for key, salt and digest bytes | `lifecycle.test.ts` "what a check-in reveals" |
 | **Identifying guardians** | Membership proof plus an unlinkable per-round, per-vault nullifier | `guardians.test.ts` "unlinkable nullifier" |
@@ -59,3 +61,6 @@ or death-registry service), **any third party** (every trigger is permissionless
 - **Attestor trust.** An attestor's signature still only starts the challenge window. A compromised
   attestor can cause false alarms but cannot release funds by itself.
 - **Guardians and attestor are fixed at deployment** for now (D13).
+- **The release fee is fixed at deployment** and is only as binding as the app that deploys the
+  vault: an owner who deploys the contract themselves can set it to zero. Nobody, the operator
+  included, can raise it later.

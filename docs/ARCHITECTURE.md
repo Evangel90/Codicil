@@ -71,7 +71,7 @@ All of it is public. The design goal is that nothing here identifies a person
 | Owner | `ownerPasskeyCommit`, `ownerEdCommit` (salted commitments; zero = that key type disabled), `passkeyRpIdHash` (the website), `nonce` (owner actions so far) |
 | Will | `willRoot` (Merkle root of the heir entries), `willVersion` |
 | Timers | `phase`, `deadline`, `maxPeriod`, `challengeWindow`, `claimWindow`, `gracePeriod` (0 = none), `pendingUntil`, `releasedAt` |
-| Estate | `tokenColor`, `estateTotal`, `estateSnapshot` (frozen at release), `estatePaid` (capped at the snapshot) |
+| Estate | `tokenColor`, `estateTotal`, `estateSnapshot` (frozen at release, after the fee), `estatePaid` (capped at the snapshot), `feeBps` and `feeRecipient` (the optional release fee; 0 = none) |
 | Claims | `claimNullifiers` (one per claimed will entry) |
 | Guardians | `guardianRoot`, `guardianThreshold` (k), `guardianRound`, `guardianVotes`, `guardianNullifiers` |
 | Attestor | `attestorKeyCommit` |
@@ -87,7 +87,7 @@ All of it is public. The design goal is that nothing here identifies a person
 | `triggerTimeout()` | Anyone | The deadline and the grace period have passed | Starts the challenge window, counted from the end of the grace period |
 | `guardianAttest(asOf)` | A guardian | Merkle membership in `guardianRoot`, one nullifier per guardian per round | Counts a vote; the k-th vote starts the challenge window |
 | `triggerAttestation(asOf)` | Anyone holding an attestation | P-256 signature from the committed attestor over `attestationDigest(vault, round)` | Starts the challenge window |
-| `finalizeRelease()` | Anyone | Challenge window over | Releases; snapshots the estate; emits `codicil:released:v1` |
+| `finalizeRelease()` | Anyone | Challenge window over | Releases; sends the release fee, if one is set; snapshots what remains; emits `codicil:released:v1` |
 | `isReleasedForContract()` | Other contracts only | `kernel.caller()` must be a contract | Returns whether the vault is released |
 | `claim(to)` | An heir | Merkle membership in `willRoot`, knowledge of the heir key's secret, unlock date reached, unused nullifier | Pays `snapshot × shareBps / 10000` to `to` |
 | `claimAsBackup(to)` | A backup heir | Same, with the backup key, and only after `claimWindow` | Pays the same share; shares the nullifier, so heir and backup cannot both be paid |
@@ -148,6 +148,14 @@ without revealing it.
 The payout needs a division, which Compact lacks. The witness supplies quotient and remainder; the
 circuit checks `q × 10000 + r == snapshot × bps` and `r < 10000` ([D2](DECISIONS.md)), and that total
 payouts never exceed the snapshot.
+
+### Release fee
+
+A vault can be deployed with a release fee ([D16](DECISIONS.md)): `feeBps` basis points of the estate,
+at most 10%, sent to `feeRecipient` by `finalizeRelease`. The fee is computed with the same checked
+division, rounded down, and the snapshot becomes `estateTotal − fee`. Heirs' shares are taken of that
+snapshot, so the payout maths above is unchanged and `fee + all claims ≤ estateTotal`. With
+`feeBps = 0` there is no transfer and no witness call, and the snapshot is the whole estate.
 
 ### Heir letters
 
