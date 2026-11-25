@@ -25,7 +25,7 @@ found, add `~/.local/bin` to your `PATH`.
 npm test
 ```
 
-Expected: three suites, **179 + 34 + 22 = 235 passed**, in about 10 seconds. The contract suite
+Expected: three suites, **182 + 34 + 22 = 238 passed**, in about 10 seconds. The contract suite
 checks every successful call against the compiled ZK circuit, so these are calls a proof can be made
 for. Details: [TESTING.md](TESTING.md).
 
