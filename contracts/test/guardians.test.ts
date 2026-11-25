@@ -15,7 +15,7 @@ import {
   newP256Key,
   vaultId,
 } from '@codicil/sdk';
-import { collectBytes, containsBytes } from './support/harness.js';
+import { collectBytes, containsValue } from './support/harness.js';
 import {
   asGuardian,
   attestation,
@@ -105,8 +105,8 @@ describe('guardians', () => {
   it('publishes an unlinkable nullifier, not which guardian voted', async () => {
     const r = await vote(w, 2, T);
     const t = collectBytes(r.publicTranscript);
-    expect(containsBytes(t, w.guardians[2])).toBe(false);
-    expect(containsBytes(t, guardianLeaf(w.guardians[2]))).toBe(false);
+    expect(containsValue(t, w.guardians[2])).toBe(false);
+    expect(containsValue(t, guardianLeaf(w.guardians[2]))).toBe(false);
     const id = vaultId(w.sim.address);
     const n0 = pureCircuits.guardianNullifier(id, w.guardians[2], 0n);
     expect(L(w.sim).guardianNullifiers.member(n0)).toBe(true);

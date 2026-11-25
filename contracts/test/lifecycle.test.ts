@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { numberToBytesBE, numberToBytesLE } from '@noble/curves/utils.js';
 import { Phase, pureCircuits } from '@codicil/contracts/vault';
 import { checkInDigest, timeoutOpensAt, VAULT_EVENTS, vaultEventName, VAULT_OPTIONS_OFF } from '@codicil/sdk';
-import { collectBytes, containsAscii, containsBytes, eventBytes, unshieldedReceived } from './support/harness.js';
+import { collectBytes, containsAscii, containsBytes, containsValue, eventBytes, unshieldedReceived } from './support/harness.js';
 import {
   CHALLENGE,
   checkIn,
@@ -211,12 +211,12 @@ describe('what a check-in reveals on-chain', () => {
     expect(containsBytes(transcript, minimalLE(next, 8))).toBe(true);   // positive control
 
     const secret = via === 'passkey' ? w.owner.state.passkey! : w.owner.state.wallet!;
-    expect(containsBytes(transcript, secret.salt)).toBe(false);
+    expect(containsValue(transcript, secret.salt)).toBe(false);
     for (const coord of [secret.pk.x, secret.pk.y]) {
       expect(containsBytes(transcript, minimalLE(coord, 32))).toBe(false);
-      expect(containsBytes(transcript, numberToBytesLE(coord, 32))).toBe(false);
-      expect(containsBytes(transcript, numberToBytesBE(coord, 32))).toBe(false);
+      expect(containsValue(transcript, numberToBytesLE(coord, 32))).toBe(false);
+      expect(containsValue(transcript, numberToBytesBE(coord, 32))).toBe(false);
     }
-    expect(containsBytes(transcript, checkInDigest(w.sim.address, next, 0n))).toBe(false);
+    expect(containsValue(transcript, checkInDigest(w.sim.address, next, 0n))).toBe(false);
   });
 });

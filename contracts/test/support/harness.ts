@@ -145,6 +145,19 @@ export function containsBytes(haystack: Uint8Array, n: Uint8Array): boolean {
   return false;
 }
 
+/**
+ * Whether a ledger value (a `Bytes<32>` commitment, salt or secret) appears in
+ * a transcript. The runtime stores values with trailing zero bytes trimmed, so
+ * one value in 256 is a byte shorter there: search for the trimmed form, which
+ * also matches the full one.
+ */
+export function containsValue(haystack: Uint8Array, value: Uint8Array): boolean {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === 0) end--;
+  if (end === 0) throw new Error('cannot search a transcript for an all-zero value');
+  return containsBytes(haystack, value.subarray(0, end));
+}
+
 /** Amount this call asks the ledger to pay out to the given user address (hex). */
 export function unshieldedPaidTo(effects: Effects, userAddressHex: string): bigint {
   let total = 0n;
