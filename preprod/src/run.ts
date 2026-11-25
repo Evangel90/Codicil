@@ -39,6 +39,7 @@ import {
   payoutFor,
   rpIdHash,
   softwareSigners,
+  VAULT_OPTIONS_OFF,
   vaultId,
   verifyCip30Signature,
   verifyWebAuthnAssertion,
@@ -181,6 +182,8 @@ export function vaultConfigFor(cast: Cast, timers: Timers, deployedAt: number): 
     guardianRoot: 0n,
     guardianThreshold: 0n,
     attestorKeyCommit: new Uint8Array(32),
+    // No grace period, release fee or recovery key: the run covers the circuits it always did.
+    ...VAULT_OPTIONS_OFF,
   };
 }
 

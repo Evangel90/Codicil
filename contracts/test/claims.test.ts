@@ -17,7 +17,7 @@ import {
   vaultId,
   type CodicilPrivateState,
 } from '@codicil/sdk';
-import { collectBytes, containsBytes, unshieldedPaidTo } from './support/harness.js';
+import { collectBytes, containsValue, unshieldedPaidTo } from './support/harness.js';
 import {
   asClaimant,
   CLAIM_WINDOW,
@@ -124,10 +124,10 @@ describe('claims', () => {
     const t = collectBytes(r.publicTranscript);
     const leafHash = pureCircuits.heirLeafHash(w.will.leaves[1]);
     expect(L(w.sim).claimNullifiers.member(pureCircuits.claimNullifier(vaultId(w.sim.address), leafHash))).toBe(true);
-    expect(containsBytes(t, leafHash)).toBe(false);
-    expect(containsBytes(t, w.will.leaves[1].heirKeyCommit)).toBe(false);
-    expect(containsBytes(t, w.heirs[1].keySalt)).toBe(false);
-    expect(containsBytes(t, numberToBytesLE(w.heirs[1].key.pk.x, 32))).toBe(false);
+    expect(containsValue(t, leafHash)).toBe(false);
+    expect(containsValue(t, w.will.leaves[1].heirKeyCommit)).toBe(false);
+    expect(containsValue(t, w.heirs[1].keySalt)).toBe(false);
+    expect(containsValue(t, numberToBytesLE(w.heirs[1].key.pk.x, 32))).toBe(false);
   });
 });
 

@@ -11,7 +11,16 @@ import { randomBytes } from '@noble/hashes/utils.js';
 import { encodeRawTokenType, sampleRawTokenType } from '@midnight-ntwrk/compact-runtime';
 import { pureCircuits as vaultPure, type VaultConfig } from '@codicil/contracts/vault';
 import { pureCircuits as escrowPure } from '@codicil/contracts/escrow';
-import { buildWill, newEdKey, newHeirKey, newP256Key, newSalt, rpIdHash, witnesses as vaultWitnesses } from '@codicil/sdk';
+import {
+  buildWill,
+  newEdKey,
+  newHeirKey,
+  newP256Key,
+  newSalt,
+  rpIdHash,
+  VAULT_OPTIONS_OFF,
+  witnesses as vaultWitnesses,
+} from '@codicil/sdk';
 import { loadModule, TestChain, type Deployed } from './support/chain.js';
 import { unshieldedPaidTo } from './support/harness.js';
 import { CHALLENGE, CLAIM_WINDOW, DAY, FIRST_DEADLINE, MAX_PERIOD, newRecipient, RELEASED_AT, T0 } from './support/world.js';
@@ -48,6 +57,7 @@ async function deployWorld(): Promise<World> {
     guardianRoot: 0n,
     guardianThreshold: 0n,
     attestorKeyCommit: new Uint8Array(32),
+    ...VAULT_OPTIONS_OFF,
   };
   const vault = await chain.deploy(await loadModule('codicil_vault'), [config], vaultWitnesses);
   const secret = randomBytes(32);
@@ -91,6 +101,13 @@ describe('inheritable escrow (cross-contract hook)', () => {
       [w.escrow.address, 'withdrawToBeneficiary'],
     ]);
     await expect(withdraw(w.secret, to)).rejects.toThrow('already withdrawn');
+  });
+
+  it('takes no more deposits once it has paid out', async () => {
+    await releaseVault();
+    await withdraw(w.secret);
+    await expect(w.chain.call(w.escrow, 'deposit', { time: RELEASED_AT + 2 * DAY, witnesses: escrowWitnesses() }, 1n))
+      .rejects.toThrow('escrow closed');
   });
 
   it('rejects someone who does not know the beneficiary secret', async () => {

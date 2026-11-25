@@ -17,6 +17,11 @@ export const CONTRACT_ERRORS = {
   // Vault creation
   'vault needs an owner key': { audience: 'owner', message: 'Add a passkey or a wallet before creating the vault.' },
   'invalid vault settings': { audience: 'owner', message: 'The check-in period and challenge window must both be longer than zero.' },
+  'grace period too long': { audience: 'owner', message: 'The grace period cannot be longer than the longest check-in period.' },
+  'fee too high': { audience: 'owner', message: 'The release fee cannot be more than 10% of the estate.' },
+  'fee needs an address': { audience: 'owner', message: 'A release fee needs an address to be paid to.' },
+  'recovery delay too short': { audience: 'owner', message: 'The recovery delay must be at least one day.' },
+  'recovery delay too long': { audience: 'owner', message: 'The recovery delay must be shorter than the longest check-in period, or a recovery could never finish in time.' },
   // Owner: check-in and will updates
   'vault already released': { audience: 'owner', message: 'This vault has already been released to the heirs. It can no longer be changed.' },
   'switch already expired': { audience: 'owner', message: 'Your check-in deadline has passed. Start the challenge window, then check in to cancel it.' },
@@ -25,6 +30,7 @@ export const CONTRACT_ERRORS = {
   'unknown owner key': { audience: 'owner', message: 'This passkey or wallet is not the one registered as the owner of this vault.' },
   'bad owner signature': { audience: 'owner', message: 'The approval signature could not be verified. Please approve again.' },
   'will locked': { audience: 'owner', message: 'The will can only be changed while the vault is active.' },
+  'settings locked': { audience: 'owner', message: 'Guardians and the attestor can only be changed while the vault is active. If a countdown has started, check in first.' },
   // Passkey (WebAuthn) details
   'bad passkey data': { audience: 'owner', message: 'Your browser returned an approval this vault cannot read. Try again, or use another browser.' },
   'bad passkey challenge': { audience: 'owner', message: 'Your browser returned an approval this vault cannot read. Try again.' },
@@ -38,8 +44,10 @@ export const CONTRACT_ERRORS = {
   'vault closed': { audience: 'anyone', message: 'This vault no longer accepts deposits.' },
   'not armed': { audience: 'anyone', message: 'The countdown has already started or the vault was released.' },
   'owner is still alive': { audience: 'anyone', message: 'The owner checked in on time. Nothing to do yet.' },
+  'grace period open': { audience: 'anyone', message: 'The owner missed the deadline but is still within the grace period. The countdown can start when it ends.' },
   'not pending': { audience: 'anyone', message: 'The vault is not waiting for release.' },
   'challenge window open': { audience: 'anyone', message: 'The owner can still cancel. Release becomes possible when the challenge window ends.' },
+  'bad fee math': { audience: 'anyone', message: 'The release fee calculation was rejected. Please update the app and try again.' },
   // Heirs
   'vault not released': { audience: 'heir', message: 'This vault has not been released yet.' },
   'not in will': { audience: 'heir', message: 'This claim package is not part of the current will. The owner may have updated it.' },
@@ -57,6 +65,13 @@ export const CONTRACT_ERRORS = {
   'already voted': { audience: 'anyone', message: 'You have already reported this vault in the current round.' },
   'unknown attestor': { audience: 'anyone', message: 'This attestation is not from the attestor the owner chose (or the vault has none).' },
   'bad attestation': { audience: 'anyone', message: 'The attestation is invalid or out of date. The owner may have checked in since it was signed.' },
+  // Recovery key
+  'unknown recovery key': { audience: 'owner', message: 'This is not the recovery key for this vault (or the vault has none).' },
+  'too late to recover': { audience: 'owner', message: 'The recovery delay would end after your check-in deadline, so this recovery could not finish in time.' },
+  'recovery key retired': { audience: 'owner', message: 'The owner cancelled a recovery made with this key, so it can no longer be used.' },
+  'no recovery pending': { audience: 'anyone', message: 'No recovery is in progress.' },
+  'recovery cancelled': { audience: 'anyone', message: 'The owner acted after this recovery started, which cancelled it.' },
+  'recovery delay open': { audience: 'anyone', message: 'The recovery delay is not over yet. Until it is, anything the owner signs cancels it.' },
   // Integrators
   'callable by contracts only': { audience: 'integrator', message: 'This check is for other contracts, not for direct calls.' },
   // Example escrow (contracts/src/inheritable_escrow.compact)

@@ -12,6 +12,11 @@ from the catalogue or from this page, or if the catalogue has a stale entry.
 |---|---|---|
 | `vault needs an owner key` | owner | Add a passkey or a wallet before creating the vault. |
 | `invalid vault settings` | owner | The check-in period and challenge window must both be longer than zero. |
+| `grace period too long` | owner | The grace period cannot be longer than the longest check-in period. |
+| `fee too high` | owner | The release fee cannot be more than 10% of the estate. |
+| `fee needs an address` | owner | A release fee needs an address to be paid to. |
+| `recovery delay too short` | owner | The recovery delay must be at least one day. |
+| `recovery delay too long` | owner | The recovery delay must be shorter than the longest check-in period, or a recovery could never finish in time. |
 | `vault already released` | owner | This vault has already been released to the heirs. It can no longer be changed. |
 | `switch already expired` | owner | Your check-in deadline has passed. Start the challenge window, then check in to cancel it. |
 | `deadline must be in the future` | owner | Choose a next check-in date in the future. |
@@ -19,6 +24,7 @@ from the catalogue or from this page, or if the catalogue has a stale entry.
 | `unknown owner key` | owner | This passkey or wallet is not the one registered as the owner of this vault. |
 | `bad owner signature` | owner | The approval signature could not be verified. Please approve again. |
 | `will locked` | owner | The will can only be changed while the vault is active. |
+| `settings locked` | owner | Guardians and the attestor can only be changed while the vault is active. If a countdown has started, check in first. |
 | `bad passkey data` | owner | Your browser returned an approval this vault cannot read. Try again, or use another browser. |
 | `bad passkey challenge` | owner | Your browser returned an approval this vault cannot read. Try again. |
 | `passkey signed something else` | owner | The passkey approved a different action. Please approve again. |
@@ -29,8 +35,10 @@ from the catalogue or from this page, or if the catalogue has a stale entry.
 | `vault closed` | anyone | This vault no longer accepts deposits. |
 | `not armed` | anyone | The countdown has already started or the vault was released. |
 | `owner is still alive` | anyone | The owner checked in on time. Nothing to do yet. |
+| `grace period open` | anyone | The owner missed the deadline but is still within the grace period. The countdown can start when it ends. |
 | `not pending` | anyone | The vault is not waiting for release. |
 | `challenge window open` | anyone | The owner can still cancel. Release becomes possible when the challenge window ends. |
+| `bad fee math` | anyone | The release fee calculation was rejected. Please update the app and try again. |
 | `vault not released` | heir | This vault has not been released yet. |
 | `not in will` | heir | This claim package is not part of the current will. The owner may have updated it. |
 | `not the heir` | heir | This key does not match the heir named in this share. |
@@ -46,6 +54,12 @@ from the catalogue or from this page, or if the catalogue has a stale entry.
 | `already voted` | anyone | You have already reported this vault in the current round. |
 | `unknown attestor` | anyone | This attestation is not from the attestor the owner chose (or the vault has none). |
 | `bad attestation` | anyone | The attestation is invalid or out of date. The owner may have checked in since it was signed. |
+| `unknown recovery key` | owner | This is not the recovery key for this vault (or the vault has none). |
+| `too late to recover` | owner | The recovery delay would end after your check-in deadline, so this recovery could not finish in time. |
+| `recovery key retired` | owner | The owner cancelled a recovery made with this key, so it can no longer be used. |
+| `no recovery pending` | anyone | No recovery is in progress. |
+| `recovery cancelled` | anyone | The owner acted after this recovery started, which cancelled it. |
+| `recovery delay open` | anyone | The recovery delay is not over yet. Until it is, anything the owner signs cancels it. |
 | `callable by contracts only` | integrator | This check is for other contracts, not for direct calls. |
 | `escrow closed` | anyone | This escrow has already been paid out. |
 | `already withdrawn` | heir | This escrow has already been paid out. |

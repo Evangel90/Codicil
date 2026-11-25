@@ -30,7 +30,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import * as vaultModule from '@codicil/contracts/vault';
 import { ledger, type Ledger, type VaultConfig } from '@codicil/contracts/vault';
-import { createWitnesses, type CodicilPrivateState } from '@codicil/sdk';
+import { createWitnesses, vaultEventName, type CodicilPrivateState } from '@codicil/sdk';
 import { installBufferShim } from './buffer-shim.js';
 import { VERIFIER_KEY_TEMPLATE_BASE64 } from './verifier-template.js';
 
@@ -191,7 +191,7 @@ export class DemoChain implements ContractStateProvider, ContractModuleProvider 
     }
     return {
       publicTranscript: trace[trace.length - 1]?.publicTranscript,
-      events: context.events.map(() => ({ name: 'codicil:released:v1' })),
+      events: context.events.map((e) => ({ name: vaultEventName(e as { data: unknown }) ?? 'unknown' })),
       payouts,
       trace: trace.map((t) => ({ address: t.contractAddress, circuitId: t.circuitId })),
     };

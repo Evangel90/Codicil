@@ -36,6 +36,7 @@ import {
   newSalt,
   payoutFor,
   rpIdHash,
+  VAULT_OPTIONS_OFF,
   vaultId,
   willUpdateDigest,
   withPasskeyApproval,
@@ -407,6 +408,7 @@ class DemoStore {
       guardianRoot: guardianSet.root,
       guardianThreshold: guardianSet.threshold,
       attestorKeyCommit: new Uint8Array(32),
+      ...VAULT_OPTIONS_OFF,
     }, now);
     // The savings contract is fixed at deployment to this vault and to a
     // commitment to the beneficiary's secret. It holds its own token.

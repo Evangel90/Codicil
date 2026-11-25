@@ -303,3 +303,70 @@ hours), and what the indexer returns for the release event.
   - X25519 shared secrets agree whichever form is used.
 - **Note:** X25519 keys carry no x sign bit. An heir importing a bare X25519 key must also supply
   one bit, or the app tries both and matches against the commitment.
+
+## Circuit headroom (2026-11-25)
+
+Prover-key size follows the circuit's row count rounded up to a power of two, so what matters is
+how far each circuit is from the next power. `zkir-v3 mock-compile -v <circuit>.zkir` prints the
+row count in a few seconds, without generating keys.
+
+| Circuit | Rows used | Rows available | Spare |
+|---|---:|---:|---:|
+| `checkInEd25519` (as first built) | 131,063 | 131,063 (2^17 − 9) | **0** |
+| `updateWillEd25519` (as first built) | 130,899 | 131,063 | 164 |
+| `checkInPasskey` (as first built) | 254,797 | 262,135 (2^18 − 9) | 7,338 |
+| `updateWillPasskey` (as first built) | 254,633 | 262,135 | 7,502 |
+
+**Finding.** The wallet check-in filled its size class to the last row. One more constraint moves it
+to 2^18 rows, which doubles its prover key from 276 MB to 552 MB. Check-in is the circuit owners run
+most often.
+
+**What costs rows.** Each read of a ledger field costs about 13 rows, even if the same field was
+read a line earlier; the compiler does not merge them. A SHA-256 block costs about 2,000 rows.
+
+**Fix.** The owner circuits now read each ledger field once, into a `const`: `phase` in check-in (it
+was read three times), `maxPeriod` (twice) and the owner key commitment in both auth helpers
+(twice). Behaviour is unchanged; the transcript has fewer reads.
+
+| Circuit | Rows after | Spare |
+|---|---:|---:|
+| `checkInEd25519` | 131,006 | 57 |
+| `updateWillEd25519` (with the will-change event, 24 rows) | 130,907 | 156 |
+| `checkInPasskey` | 254,740 | 7,395 |
+| `updateWillPasskey` (with the will-change event) | 254,641 | 7,494 |
+
+**Rule for future changes.** Anything added to a wallet owner circuit has a budget of a few dozen
+rows. Run `mock-compile` on `checkInEd25519.zkir` before and after, and prefer designs that add
+nothing to the owner circuits.
+
+## Full compile after the contract improvements (2026-11-25)
+
+`npm run compile:full` on the vault with the will-change notice, grace period, release fee, settings
+update and recovery key (D14 to D18): **16 circuits, just under 4 minutes** (220 s and 235 s in two runs) on the same machine, 2.7 GB of
+proving keys in total (the 12-circuit vault was 2.0 GB). Every circuit produced keys.
+
+| Circuit | k | Rows | zkir | Prover key | Change |
+|---|---:|---:|---:|---:|---|
+| `checkInPasskey` | 18 | 254,768 | 287 KB | 448 MB | same size class; grace period check added |
+| `updateWillPasskey` | 18 | 254,641 | 283 KB | 448 MB | same size class; emits the will-change event |
+| `updateSettingsPasskey` | 18 | 254,633 | 284 KB | 448 MB | **new** |
+| `checkInEd25519` | 17 | 131,034 | 58 KB | 276 MB | same size class, 29 rows spare |
+| `updateWillEd25519` | 17 | 130,907 | 54 KB | 276 MB | same size class, 156 rows spare |
+| `updateSettingsEd25519` | 17 | 130,899 | 56 KB | 276 MB | **new**, 164 rows spare |
+| `triggerAttestation` | 17 | 73,062 | 16 KB | 224 MB | unchanged |
+| `claim` / `claimAsBackup` | 16 | 52,746 / 52,816 | 20 / 22 KB | 108 MB each | unchanged |
+| `guardianAttest` | 14 | 10,235 | 15 KB | 21.5 MB | unchanged |
+| `startRecovery` | 13 | 4,498 | 12 KB | 10.8 MB | **new** |
+| `finalizeRelease` | 9 | 440 | 11 KB | 0.4 MB | was k = 8 (0.2 MB); now computes the release fee |
+| `finishRecovery` | 9 | 298 | 7 KB | 0.4 MB | **new** |
+| `triggerTimeout`, `deposit`, `isReleasedForContract` | ≤ 8 | ≤ 196 | 2–4 KB | ≤ 0.2 MB | unchanged size class |
+
+- **No existing circuit changed size class** except `finalizeRelease`, from 0.2 MB to 0.4 MB.
+- **The three wallet circuits stay at k = 17.** That is also the largest size the in-process
+  WebAssembly prover handles (`WASM_MAX_K` in [`preprod/`](../preprod), V14), so the wallet check-in
+  can still be proven without a proof server.
+- **Two designs were measured and dropped because of this table.** A settings digest made of two
+  hashes put `updateSettingsEd25519` at k = 18 (552 MB), and cancelling a recovery with writes
+  inside the check-in put `checkInEd25519` at k = 18 (552 MB). Both are recorded in D17 and D18.
+- The V14 notes above (deploy size, 12 verifier keys, proving times) were taken on the 12-circuit
+  vault and have not been repeated on this one.

@@ -14,6 +14,7 @@ import type { Witnesses } from '@codicil/contracts/vault';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import type { Cip30Signature } from './cip30.js';
 import type { GuardianSecrets, P256Signature } from './guardians.js';
+import type { RecoverySecrets } from './recovery.js';
 import { BPS_TOTAL, type ClaimantSecrets } from './will.js';
 import type { WebAuthnAssertion } from './webauthn.js';
 
@@ -44,6 +45,7 @@ export interface CodicilPrivateState {
   claimant?: ClaimantSecrets;
   guardian?: GuardianSecrets;
   attestor?: Attestor;
+  recovery?: RecoverySecrets;
 }
 
 export class MissingSecretError extends Error {
@@ -100,6 +102,7 @@ export function createWitnesses(opts: WitnessOptions = {}): Witnesses<CodicilPri
     attestorSalt: ({ privateState: s }) => [s, need(s.attestor, 'attestation').salt],
     attestorSignature: ({ privateState: s }, digest) =>
       [s, approvalFor(need(s.attestor, 'attestation').approval, digest, strict, 'attestation')],
+    recoverySecret: ({ privateState: s }) => [s, need(s.recovery, 'recovery key').secret],
     payoutDivision: ({ privateState: s }, snapshot, bps) => {
       const product = snapshot * bps;
       return [s, [product / BPS_TOTAL, product % BPS_TOTAL]];

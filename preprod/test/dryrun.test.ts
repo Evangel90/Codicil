@@ -41,7 +41,7 @@ describe('dry run through Midnight.js', () => {
   it('reports what each step did to the vault', async () => {
     const report = await buildAll({ escrow: false, prove: false, artifacts: 'stub' });
     const detail = (name: string): string => report.steps.find((s) => s.name === name)?.detail ?? '';
-    expect(detail('deploy')).toMatch(/12 circuits, phase armed/);
+    expect(detail('deploy')).toMatch(/16 circuits, phase armed/);
     expect(detail('deposit')).toBe('estateTotal 10.000000');
     expect(detail('checkInPasskey')).toMatch(/nonce 1$/);
     expect(detail('checkInEd25519')).toMatch(/nonce 2$/);

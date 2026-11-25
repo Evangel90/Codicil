@@ -6,6 +6,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { sampleContractAddress } from '@midnight-ntwrk/compact-runtime';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { p256 } from '@noble/curves/nist.js';
 import { bytesToHex, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
@@ -18,24 +19,41 @@ import {
   clientDataLengths,
   COMPILED_CLIENT_DATA_LENGTHS,
   createWitnesses,
+  currentSettings,
   DEFAULT_ORIGIN,
   fromCoseSign1,
   guardianLeaf,
   guardianSecrets,
   heirKeyFromScalar,
+  isCurrentGuardian,
+  lastRecoveryStart,
+  MAX_FEE_BPS,
+  MIN_RECOVERY_DELAY,
   MissingSecretError,
   newEdKey,
   newGuardianSecret,
   newHeirKey,
   newP256Key,
+  newRecoverySecret,
   newSalt,
   parseDerSignature,
   payoutFor,
+  settingsDigest,
   publicKeyFromCoseKey,
+  recoveryCommitment,
+  recoveryConfig,
+  recoveryStatus,
+  releaseFeeConfig,
+  releaseFeeFor,
   signAttestation,
   signLikePasskey,
   signLikeWallet,
+  snapshotAfterFee,
+  timeoutOpensAt,
   toWebAuthnAssertion,
+  VAULT_EVENTS,
+  VAULT_OPTIONS_OFF,
+  vaultEventName,
   verifyCip30Signature,
   verifyWebAuthnAssertion,
 } from '../src/index.js';
@@ -194,6 +212,7 @@ describe('witnesses', () => {
     const w = createWitnesses();
     expect(() => w.ownerPasskey(ctx({}))).toThrow(MissingSecretError);
     expect(() => w.claimantLeaf(ctx({}))).toThrow('no claim package');
+    expect(() => w.recoverySecret(ctx({}))).toThrow('no recovery key');
   });
 
   it('only hand over an approval for the digest being proven', () => {
@@ -229,6 +248,37 @@ describe('guardian sets', () => {
     expect(() => guardianSecrets(set, newGuardianSecret())).toThrow('not one of the vault guardians');
   });
 
+  it('a guardian can tell whether their path is still current', () => {
+    const set = buildGuardianSet(leaves, 2);
+    const mine = guardianSecrets(set, secrets[0]);
+    expect(isCurrentGuardian(mine, set.root)).toBe(true);
+    // The owner replaced the set: even a guardian who was kept needs a new path.
+    const replaced = buildGuardianSet([leaves[0], guardianLeaf(newGuardianSecret())], 1);
+    expect(isCurrentGuardian(mine, replaced.root)).toBe(false);
+    expect(isCurrentGuardian(guardianSecrets(replaced, secrets[0]), replaced.root)).toBe(true);
+    // A path with someone else's secret is not a membership.
+    expect(isCurrentGuardian({ ...mine, secret: newGuardianSecret() }, set.root)).toBe(false);
+  });
+
+  it('the settings digest binds the vault, every setting and the nonce', () => {
+    const vault = sampleContractAddress();
+    const set = buildGuardianSet(leaves, 2);
+    const settings = { guardianRoot: set.root, guardianThreshold: 2n, attestorKeyCommit: new Uint8Array(32).fill(9) };
+    // Extra ledger fields are ignored: only the settings are signed.
+    expect(currentSettings({ ...settings, nonce: 5n } as typeof settings)).toEqual(settings);
+    const base = settingsDigest(vault, settings, 0n);
+    const others = [
+      settingsDigest(sampleContractAddress(), settings, 0n),
+      settingsDigest(vault, settings, 1n),
+      settingsDigest(vault, { ...settings, guardianRoot: set.root + 1n }, 0n),
+      settingsDigest(vault, { ...settings, guardianThreshold: 3n }, 0n),
+      settingsDigest(vault, { ...settings, attestorKeyCommit: new Uint8Array(32) }, 0n),
+    ];
+    const seen = new Set([base, ...others].map((d) => bytesToHex(d)));
+    expect(seen.size).toBe(others.length + 1);
+    expect(settingsDigest(vault, settings, 0n)).toEqual(base);
+  });
+
   it('leaves reveal nothing obvious about the secret', () => {
     expect(guardianLeaf(secrets[0])).not.toEqual(secrets[0]);
     expect(guardianLeaf(secrets[0])).toEqual(guardianLeaf(Uint8Array.from(secrets[0])));
@@ -240,5 +290,85 @@ describe('guardian sets', () => {
     const { r, s } = signAttestation(key.sk, digest);
     const pub = p256.Point.fromAffine({ x: key.pk.x, y: key.pk.y }).toBytes();
     expect(p256.verify(new p256.Signature(r, s).toBytes('compact'), digest, pub, { prehash: false, lowS: false })).toBe(true);
+  });
+});
+
+describe('vault events', () => {
+  /** A `Misc` event as the runtime reports it: one 288-byte value with trailing zeros trimmed. */
+  const misc = (name: string) => ({
+    version: 1,
+    eventType: 'misc',
+    data: { tag: 'cell', content: { value: [utf8ToBytes(name)], alignment: [{ tag: 'atom', value: { tag: 'bytes', length: 288 } }] } },
+  });
+
+  it('names the events the vault emits and ignores everything else', () => {
+    expect(vaultEventName(misc('codicil:released:v1'))).toBe(VAULT_EVENTS.released);
+    expect(vaultEventName(misc('codicil:will-changed:v1'))).toBe(VAULT_EVENTS.willChanged);
+    expect(vaultEventName(misc('codicil:recovery-started:v1'))).toBe(VAULT_EVENTS.recoveryStarted);
+    expect(vaultEventName(misc('someone-else:event'))).toBeUndefined();
+    expect(vaultEventName({ data: { tag: 'null' } })).toBeUndefined();
+    // A payload after the 32-byte name does not change the name.
+    const withPayload = new Uint8Array(288);
+    withPayload.set(utf8ToBytes(VAULT_EVENTS.willChanged));
+    withPayload[40] = 7;
+    expect(vaultEventName({ data: { content: { value: [withPayload] } } })).toBe(VAULT_EVENTS.willChanged);
+  });
+});
+
+describe('optional vault settings', () => {
+  it('the grace period is off by default, and the timeout opens at the deadline plus the grace period', () => {
+    expect(VAULT_OPTIONS_OFF.gracePeriod).toBe(0n);
+    expect(timeoutOpensAt({ deadline: 100n, ...VAULT_OPTIONS_OFF })).toBe(100n);
+    expect(timeoutOpensAt({ deadline: 100n, gracePeriod: 30n })).toBe(130n);
+  });
+
+  it('the release fee is off by default, capped like the contract, and rounds down', () => {
+    expect(VAULT_OPTIONS_OFF.feeBps).toBe(0n);
+    expect(releaseFeeFor(1_000_001n, VAULT_OPTIONS_OFF.feeBps)).toBe(0n);
+    expect(snapshotAfterFee(1_000_001n, 0n)).toBe(1_000_001n);
+    expect(releaseFeeFor(1_000_001n, 250n)).toBe(25_000n);
+    expect(snapshotAfterFee(1_000_001n, 250n)).toBe(975_001n);
+    expect(releaseFeeFor(39n, 250n)).toBe(0n);
+
+    const cap = readFileSync(VAULT_SOURCE, 'utf8').match(/assert\(c\.feeBps <= (\d+), "fee too high"\)/);
+    expect(cap && BigInt(cap[1])).toBe(MAX_FEE_BPS);
+
+    const address = new Uint8Array(32).fill(7);
+    expect(releaseFeeConfig(250n, address)).toEqual({ feeBps: 250n, feeRecipient: { bytes: address } });
+    expect(releaseFeeConfig(0n, new Uint8Array(32)).feeBps).toBe(0n);
+    expect(() => releaseFeeConfig(MAX_FEE_BPS + 1n, address)).toThrow('between 0% and 10%');
+    expect(() => releaseFeeConfig(-1n, address)).toThrow('between 0% and 10%');
+    expect(() => releaseFeeConfig(1n, new Uint8Array(32))).toThrow('needs an address');
+    expect(() => releaseFeeConfig(1n, new Uint8Array(31))).toThrow('32 bytes');
+  });
+
+  it('the recovery key is off by default; its limits match the contract', () => {
+    expect(VAULT_OPTIONS_OFF.recoveryKeyCommit).toEqual(new Uint8Array(32));
+    const untouched = { recoveryReadyAt: 0n, recoveryNonce: 0n, nonce: 7n };
+    expect(recoveryStatus({ ...VAULT_OPTIONS_OFF, ...untouched }, 0n)).toEqual({ state: 'off' });
+
+    const floor = readFileSync(VAULT_SOURCE, 'utf8').match(/c\.recoveryDelay >= (\d+), "recovery delay too short"/);
+    expect(floor && BigInt(floor[1])).toBe(MIN_RECOVERY_DELAY);
+
+    const secret = newRecoverySecret();
+    const config = recoveryConfig(secret, 3n * 86_400n, 30n * 86_400n);
+    expect(config).toEqual({ recoveryKeyCommit: recoveryCommitment(secret), recoveryDelay: 259_200n });
+    expect(config.recoveryKeyCommit).not.toEqual(secret);
+    expect(() => recoveryConfig(secret, 86_399n)).toThrow('at least one day');
+    expect(() => recoveryConfig(secret, 30n * 86_400n, 30n * 86_400n)).toThrow('shorter than');
+    expect(() => recoveryCommitment(new Uint8Array(16))).toThrow('32 bytes');
+
+    // Owner actions before any recovery (nonce 7) do not matter.
+    const ledger = { ...config, ...untouched, deadline: 1_000_000n };
+    expect(recoveryStatus(ledger, 0n)).toEqual({ state: 'idle' });
+    // Started at nonce 7: it stands while the nonce stays 7.
+    const started = { ...ledger, recoveryReadyAt: 500n, recoveryNonce: 7n };
+    expect(recoveryStatus(started, 499n)).toEqual({ state: 'waiting', readyAt: 500n });
+    expect(recoveryStatus(started, 500n)).toEqual({ state: 'ready', readyAt: 500n });
+    // Any owner action moves the nonce: the recovery is cancelled and the key retired.
+    expect(recoveryStatus({ ...started, nonce: 8n }, 499n)).toEqual({ state: 'retired' });
+    expect(recoveryStatus({ ...started, nonce: 8n }, 500n)).toEqual({ state: 'retired' });
+    // Started at this second, the recovery is ready one second before the deadline.
+    expect(lastRecoveryStart(ledger) + ledger.recoveryDelay).toBe(ledger.deadline - 1n);
   });
 });

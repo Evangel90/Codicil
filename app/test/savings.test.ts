@@ -8,7 +8,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { encodeRawTokenType, sampleRawTokenType } from '@midnight-ntwrk/compact-runtime';
 import { Phase, pureCircuits } from '@codicil/contracts/vault';
-import { buildWill, newHeirKey, newP256Key, newSalt, rpIdHash } from '@codicil/sdk';
+import { buildWill, newHeirKey, newP256Key, newSalt, rpIdHash, VAULT_OPTIONS_OFF } from '@codicil/sdk';
 import escrowSource from '../../contracts/src/inheritable_escrow.compact?raw';
 import { CHALLENGE, DAY, demo, ESTATE, POSITION } from '../src/demo/store.js';
 import { createDemoPasskey } from '../src/demo/passkey.js';
@@ -139,6 +139,7 @@ describe('the demo chain with two contracts', () => {
       guardianRoot: 0n,
       guardianThreshold: 0n,
       attestorKeyCommit: new Uint8Array(32),
+      ...VAULT_OPTIONS_OFF,
     }, now);
     await expect(chain.call('isReleasedForContract', {})).rejects.toThrow('callable by contracts only');
     await expect(chain.callContract('00'.repeat(32), 'deposit', {})).rejects.toThrow('nothing deployed');

@@ -12,7 +12,7 @@
 import { p256 } from '@noble/curves/nist.js';
 import { randomBytes } from '@noble/hashes/utils.js';
 import { pureCircuits } from '@codicil/contracts/vault';
-import { MAX_LEAVES, MerkleTree, type MerklePath } from './merkle.js';
+import { MAX_LEAVES, MerkleTree, rootFromPath, type MerklePath } from './merkle.js';
 import { vaultId } from './owner.js';
 
 /** A guardian's secret, created and kept on the guardian's device. */
@@ -50,6 +50,16 @@ export function guardianSecrets(set: GuardianSet, secret: Uint8Array): GuardianS
   const index = set.leaves.findIndex((l) => l.length === leaf.length && l.every((b, i) => b === leaf[i]));
   if (index < 0) throw new Error('this secret is not one of the vault guardians');
   return { secret, path: set.tree.pathFor(index) };
+}
+
+/**
+ * Whether a guardian's path still leads to the vault's guardian root. After
+ * the owner replaces the guardians it does not, even for a guardian who was
+ * kept: the owner must send them a new path.
+ */
+export function isCurrentGuardian(g: GuardianSecrets, guardianRoot: bigint): boolean {
+  const leaf = guardianLeaf(g.secret);
+  return leaf.every((b, i) => b === g.path.leaf[i]) && rootFromPath(g.path) === guardianRoot;
 }
 
 // ─── Attestation ────────────────────────────────────────────────────────────

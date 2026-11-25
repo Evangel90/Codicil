@@ -6,7 +6,7 @@
 // wallet to sign it, and stores the result as an approval in the private state.
 
 import { encodeContractAddress } from '@midnight-ntwrk/compact-runtime';
-import { pureCircuits } from '@codicil/contracts/vault';
+import { pureCircuits, type VaultSettings } from '@codicil/contracts/vault';
 import { signLikeWallet, type Cip30Signature } from './cip30.js';
 import type { EdKey, P256Key } from './keys.js';
 import { signLikePasskey, type WebAuthnAssertion } from './webauthn.js';
@@ -23,6 +23,32 @@ export function checkInDigest(address: string, nextDeadline: bigint, nonce: bigi
 /** Digest that approves replacing the will with `newRoot`; `nonce` from the ledger. */
 export function willUpdateDigest(address: string, newRoot: bigint, nonce: bigint): Uint8Array {
   return pureCircuits.willUpdateDigest(vaultId(address), newRoot, nonce);
+}
+
+/**
+ * When anyone may start the countdown by timeout: the deadline plus the grace
+ * period (unix seconds). Until then the owner can still check in normally.
+ */
+export function timeoutOpensAt(ledger: { deadline: bigint; gracePeriod: bigint }): bigint {
+  return ledger.deadline + ledger.gracePeriod;
+}
+
+/**
+ * The settings an owner can replace, as the ledger holds them now. To change
+ * one thing, start from this and override it: the owner always signs the
+ * complete new settings.
+ */
+export function currentSettings(ledger: VaultSettings): VaultSettings {
+  return {
+    guardianRoot: ledger.guardianRoot,
+    guardianThreshold: ledger.guardianThreshold,
+    attestorKeyCommit: ledger.attestorKeyCommit,
+  };
+}
+
+/** Digest that approves replacing the guardians and the attestor with `settings`; `nonce` from the ledger. */
+export function settingsDigest(address: string, settings: VaultSettings, nonce: bigint): Uint8Array {
+  return pureCircuits.settingsDigest(vaultId(address), settings, nonce);
 }
 
 /** Private state with a passkey approval attached. */

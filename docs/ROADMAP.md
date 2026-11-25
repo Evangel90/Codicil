@@ -29,13 +29,15 @@ results are written down ([VALIDATION.md](VALIDATION.md), [DECISIONS.md](DECISIO
 
 ## After that
 
-- **Contract improvements** (held until after the Preprod test so the deployed circuits are the
-  tested ones):
-  - notice to heirs' apps when the will changes (an event);
-  - an optional grace period between the deadline and the switch;
-  - an optional release fee ([BUSINESS.md](BUSINESS.md));
-  - owner-signed updates to guardians and the attestor ([D13](DECISIONS.md));
-  - a recovery key.
+- **Contract improvements.** They change the circuits, so a vault must be redeployed to get them;
+  each is merged only once it is built, tested and reviewed. ✅ marks the ones that are built:
+  - ✅ notice to heirs' apps when the will changes (an event, [D14](DECISIONS.md));
+  - ✅ an optional grace period between the deadline and the switch ([D15](DECISIONS.md));
+  - ✅ an optional release fee ([BUSINESS.md](BUSINESS.md), [D16](DECISIONS.md));
+  - ✅ owner-signed updates to guardians and the attestor ([D17](DECISIONS.md));
+  - ✅ a recovery key, in its smallest safe form ([D18](DECISIONS.md)). Still open: a recovery that
+    can outlast the deadline (for a loss discovered late), and owner-signed rotation of a single
+    lost key.
 - **Hiding payout amounts** with pre-split shielded coins or batched claims ([D8](DECISIONS.md)).
 
 ## Stretch (Phase 7)
