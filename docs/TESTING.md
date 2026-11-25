@@ -1,6 +1,6 @@
 # Testing
 
-210 unit and simulator tests plus 2 browser end-to-end tests, all run by CI on every push
+235 unit and simulator tests plus 2 browser end-to-end tests, all run by CI on every push
 ([workflow](../.github/workflows/ci.yml)). This page explains what each level proves, how to run
 it, and the bugs the tests caught.
 
@@ -15,11 +15,11 @@ npm run e2e          # builds the app and runs Playwright in Chrome
 
 | Level | Command | Count | Time |
 |---|---|---|---|
-| Contract simulator + ZK constraint checks | `npm test -w @codicil/contracts` | 155 | ~6 s |
-| SDK | `npm test -w @codicil/sdk` | 33 | ~1 s |
+| Contract simulator + ZK constraint checks | `npm test -w @codicil/contracts` | 179 | ~6 s |
+| SDK | `npm test -w @codicil/sdk` | 34 | ~1 s |
 | App logic (the demo store and helpers) | `npm test -w @codicil/app` | 22 | ~3 s |
 | Browser end-to-end | `npm run e2e` | 2 | ~30 s |
-| Full compile with proving keys | `npm run compile:full` | 14 circuits | several minutes |
+| Full compile with proving keys | `npm run compile:full` | 16 circuits | several minutes |
 
 Property tests run 12 cases per property by default. Run more with `FC_RUNS=500 npm test -w @codicil/contracts`.
 
@@ -44,11 +44,12 @@ in the SDK and a row in [ERRORS.md](ERRORS.md).
 | [`guardians.test.ts`](../contracts/test/guardians.test.ts) | 16 | k-of-n threshold, double votes, outsiders, stale timestamps, votes voided by a check-in, attestations bound to a round |
 | [`fee.test.ts`](../contracts/test/fee.test.ts) | 9 | The optional release fee: exact amount, one transfer, shares taken of what remains, dust, the 10% cap, a client lying about the fee, and no fee meaning no transfer |
 | [`lifecycle.test.ts`](../contracts/test/lifecycle.test.ts) | 20 | Deposits, timeout, release, the release event, the grace period (late check-ins, when the timeout opens, the veto window after it), and a byte search of the check-in transcript for keys, salts and digests |
+| [`recovery.test.ts`](../contracts/test/recovery.test.ts) | 23 | The recovery key: new owner keys after the public delay, cancellation by a check-in or will update, the retired key, restarts, timestamps, the deadline rules, no effect on the switch, guardians stopping a recovery, the delay limits, and a byte search of the transcripts for the secret |
 | [`settings.test.ts`](../contracts/test/settings.test.ts) | 28 | Owner-signed replacement of guardians, threshold and attestor, by passkey and by wallet: votes and attestations voided, replay, another vault, tampered values, approvals for other actions, wrong key, forged signature, when it is locked, and a byte search of the transcript |
 | [`webauthn-real.test.ts`](../contracts/test/webauthn-real.test.ts) | 6 | Real Touch ID assertions captured in Chrome on macOS, verified by the vault's own WebAuthn module, including Chrome's long `clientDataJSON` form |
 | [`escrow.test.ts`](../contracts/test/escrow.test.ts) | 4 | Cross-contract call: the escrow asks the vault, two proofs in one transaction |
 | [`errors.test.ts`](../contracts/test/errors.test.ts) | 5 | Every contract error is mapped and documented |
-| [`properties.test.ts`](../contracts/test/properties.test.ts) | 4 | fast-check: random wills, estates, fees and claim orders never overpay; a fully allocated will leaves only rounding dust, whatever the fee; the owner can always veto, with any grace period; during the grace period the owner can always check in |
+| [`properties.test.ts`](../contracts/test/properties.test.ts) | 5 | fast-check: random wills, estates, fees and claim orders never overpay; a fully allocated will leaves only rounding dust, whatever the fee; the owner can always veto, with any grace period; during the grace period the owner can always check in; a recovery never completes early and an owner with a key can always cancel it |
 
 ## 2. SDK tests
 

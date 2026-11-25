@@ -8,6 +8,7 @@ export * from './webauthn.js';
 export * from './cip30.js';
 export * from './will.js';
 export * from './guardians.js';
+export * from './recovery.js';
 export * from './witnesses.js';
 export * from './owner.js';
 export * from './errors.js';

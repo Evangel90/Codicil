@@ -253,3 +253,114 @@ D13 left guardians and the attestor fixed at deployment. `updateSettingsPasskey`
 fields), and therefore that a change happened and which of the three values changed. Not who the
 guardians or attestor are. **Cost:** two more heavy circuits, in the same size class as the two
 will-update circuits.
+
+## D18: Recovery key: new owner keys after a public delay, cancelled by any owner signature (2026-11-25)
+
+**Problem.** An owner who loses both the passkey and the wallet cannot check in. Nothing is stolen,
+but the vault releases to the heirs while the owner is alive, and the owner can never change the
+will again.
+
+**Options considered.**
+
+- *Let guardians rotate the owner keys.* Rejected. Today k colluding guardians can only start a
+  countdown that one check-in cancels. Giving them the keys would let them take the estate.
+- *A spare owner key that works immediately.* Rejected. It is one more key with full power and no
+  warning; stealing it is as good as stealing the passkey.
+- *A separate recovery key that works only after a public delay, which the owner can cancel.*
+  Chosen. It is strictly weaker than an owner key.
+
+**Design.**
+
+- **The recovery key is a secret, not a signing key.** 32 random bytes, kept offline (printed, in a
+  safe). The ledger holds `H("codicil:recovery:v1", secret)`. `startRecovery` proves knowledge of the
+  secret inside the circuit, the same way guardians and heirs prove theirs. The proof is bound to the
+  transaction's public values, so nobody can copy it and substitute other keys. This costs a small
+  circuit instead of another 200 to 450 MB signature circuit, and a recovery key is typed in from
+  paper once, not used daily.
+- **`startRecovery(newPasskeyCommit, newEdCommit, nextRecoveryKeyCommit, asOf)`** records the
+  proposal and sets `recoveryReadyAt = asOf + recoveryDelay`. `asOf` must be fresh (15 minutes, as
+  for the triggers), so the delay cannot be backdated. It emits `codicil:recovery-started:v1`.
+- **`finishRecovery()`** can be sent by anyone once `recoveryReadyAt` has passed. It installs exactly
+  what the start proposed, and replaces the recovery commitment with the one named at the start, so
+  the secret that was typed into a device is retired.
+- **Anything a current owner key signs cancels a recovery, and retires the recovery key**: a
+  check-in, a will update or a settings update (D17). Either the recovery key was stolen, and the
+  thief must not get a second attempt, or the owner has their keys after all. Without this a thief
+  could start again every time, and the owner would have to win every round. The price: after a
+  cancelled recovery the vault has no usable recovery key, and this version has no way to set a
+  new one (see "What is left").
+- **Cancellation works through the owner nonce.** A recovery records the owner `nonce` when it
+  starts (`recoveryNonce`). Every owner action already moves that nonce, so `finishRecovery`
+  requires the two to be equal (`recovery cancelled`), and `startRecovery` refuses a key whose
+  earlier recovery was cancelled (`recovery key retired`). The first version cleared the recovery
+  fields inside the check-in and will-update circuits. That cost about 100 rows in each, and the
+  wallet check-in has 29 to spare ([VALIDATION.md](VALIDATION.md), "Circuit headroom"); it would
+  have doubled that circuit's prover key. With the nonce the owner circuits are not touched at
+  all, and any owner action added later cancels a recovery without being told to. The cancelled
+  proposal and the dead commitment stay on the ledger; `recoveryStatus()` reads them as `retired`.
+- **Starting again is allowed** and replaces the proposal. The new date must be later than the
+  pending one (`stale timestamp`), which also makes a copied earlier transaction useless. If a thief
+  and a key-less owner both hold the secret, each can restart the other's delay, neither can finish,
+  and the estate goes to the heirs under the will at the deadline. Without restarts the first to
+  start would win.
+- **The recovery key never touches the switch.** Both circuits require the vault to be armed and
+  before the deadline. A recovery cannot delay a timeout, cannot veto a countdown, and stops working
+  the moment guardians or an attestor start one (so k guardians can stop a recovery they do not
+  believe). A start that could not finish before the deadline is refused (`too late to recover`),
+  because it would only announce that the owner has lost their keys.
+- **Limits in the constructor.** `recoveryDelay` must be at least one day
+  (`recovery delay too short`): the delay is the whole protection, and one second would make the
+  recovery key a spare owner key. It must be shorter than `maxPeriod` (`recovery delay too long`),
+  or no recovery could ever finish before a deadline. Zero commitment means no recovery key, and the
+  vault behaves exactly as before.
+- **Cost.** Two light circuits (16 in total after D17). No new signature circuit, and no change to
+  the owner circuits.
+
+**Why this does not weaken the vault.**
+
+1. A recovery key can never do more than an owner key already can, and only after a public wait in
+   which any owner signature stops it for good.
+2. It cannot delay, stop or veto a release, or act after the deadline. The heirs' position is
+   unchanged except through the new owner's own later actions.
+3. A vault with no recovery key is unchanged.
+
+**What it does add, stated plainly.** A second secret whose theft matters. If the recovery secret is
+stolen and no owner key signs anything for `recoveryDelay`, the thief becomes the owner. That happens
+if the owner is not watching, or if the owner has died with more than `recoveryDelay` left before the
+deadline, when nobody can cancel. A stolen owner key is still worse (it works at once and cannot be
+evicted), but an owner who would rather not carry this risk should not set a recovery key. Having
+one is visible on the ledger.
+
+**Choosing the delay.** It should be longer than the time in which the owner is sure to notice an
+alert, and short enough to fit between noticing a loss and the deadline. With a 30-day check-in
+period, 3 to 7 days is a reasonable range. The app should warn when the deadline is closer than the
+delay, because from then on a lost key cannot be recovered.
+
+**What is left (this is the smallest safe version).**
+
+1. *A loss discovered late.* A recovery must start at least `recoveryDelay` before the deadline.
+   Owners often find out they have lost a key when they try to check in, close to the deadline, and
+   then it is too late: the vault releases to the heirs. The fix is to let a recovery in progress
+   hold the timeout for a bounded time and let finishing it count as a check-in. That gives the
+   recovery key the power to delay a release, and makes "owner dead, secret stolen" worse (the thief
+   could always finish), so it needs its own analysis: a bound on the hold, and probably a guardian
+   override. Not done in this pass.
+2. *A delay longer than the check-in period.* With (1), the delay could be required to exceed
+   `maxPeriod`. Then a routine check-in would always cancel a thief's recovery, even if the owner
+   never saw the alert. Under the current rule the delay must be shorter than the period, so the
+   protection relies on the owner noticing.
+3. *Owner-signed key rotation.* An owner who lost one of two keys can use the recovery key to
+   replace it, but must not sign anything during the delay. A direct rotation signed by the
+   remaining key would be simpler; it also lets a thief with one key evict the owner at once, which
+   is why it is not here.
+4. *Setting a new recovery key.* The recovery key is set at deployment and replaced only by a
+   completed recovery. After a cancelled one the vault has none, for good. Letting an owner key set
+   it (through the settings update, D17) is the obvious fix and was left out on purpose: it would
+   give a thief holding one of the owner's two keys a way to lock the owner out (set a recovery key,
+   start a recovery, wait for one unanswered delay), where today that thief and the owner can only
+   overwrite each other. It would equally let the owner evict the thief. Which of those matters
+   more is a product decision, not a detail.
+5. *An alert the owner will see.* The event exists; the app does not yet watch for it, and an owner
+   who is not using the app needs another channel.
+6. *A hardware-held recovery key* (a signature instead of a secret), if paper secrets prove too
+   easy to copy. It would cost one more signature circuit.

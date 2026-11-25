@@ -11,6 +11,8 @@ export const VAULT_EVENTS = {
   released: 'codicil:released:v1',
   /** A will update: every letter issued before it is out of date. */
   willChanged: 'codicil:will-changed:v1',
+  /** `startRecovery`: someone with the recovery key proposed new owner keys. If it was not the owner, sign anything (a check-in will do). */
+  recoveryStarted: 'codicil:recovery-started:v1',
 } as const;
 
 export type VaultEventName = (typeof VAULT_EVENTS)[keyof typeof VAULT_EVENTS];

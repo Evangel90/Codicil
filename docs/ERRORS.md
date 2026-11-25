@@ -15,6 +15,8 @@ from the catalogue or from this page, or if the catalogue has a stale entry.
 | `grace period too long` | owner | The grace period cannot be longer than the longest check-in period. |
 | `fee too high` | owner | The release fee cannot be more than 10% of the estate. |
 | `fee needs an address` | owner | A release fee needs an address to be paid to. |
+| `recovery delay too short` | owner | The recovery delay must be at least one day. |
+| `recovery delay too long` | owner | The recovery delay must be shorter than the longest check-in period, or a recovery could never finish in time. |
 | `vault already released` | owner | This vault has already been released to the heirs. It can no longer be changed. |
 | `switch already expired` | owner | Your check-in deadline has passed. Start the challenge window, then check in to cancel it. |
 | `deadline must be in the future` | owner | Choose a next check-in date in the future. |
@@ -52,6 +54,12 @@ from the catalogue or from this page, or if the catalogue has a stale entry.
 | `already voted` | anyone | You have already reported this vault in the current round. |
 | `unknown attestor` | anyone | This attestation is not from the attestor the owner chose (or the vault has none). |
 | `bad attestation` | anyone | The attestation is invalid or out of date. The owner may have checked in since it was signed. |
+| `unknown recovery key` | owner | This is not the recovery key for this vault (or the vault has none). |
+| `too late to recover` | owner | The recovery delay would end after your check-in deadline, so this recovery could not finish in time. |
+| `recovery key retired` | owner | The owner cancelled a recovery made with this key, so it can no longer be used. |
+| `no recovery pending` | anyone | No recovery is in progress. |
+| `recovery cancelled` | anyone | The owner acted after this recovery started, which cancelled it. |
+| `recovery delay open` | anyone | The recovery delay is not over yet. Until it is, anything the owner signs cancels it. |
 | `callable by contracts only` | integrator | This check is for other contracts, not for direct calls. |
 | `escrow closed` | anyone | This escrow has already been paid out. |
 | `already withdrawn` | heir | This escrow has already been paid out. |

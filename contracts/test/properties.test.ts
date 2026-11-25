@@ -9,13 +9,16 @@
 //     leaves only rounding dust (less than one unit per heir);
 //   - nothing can be claimed before release;
 //   - the owner can always veto during the challenge window, with any grace period;
-//   - during the grace period the owner can always check in and no timeout can start.
+//   - during the grace period the owner can always check in and no timeout can start;
+//   - a recovery never completes before its delay, and an owner who still has a key
+//     can always cancel it.
 // Every call is also checked against the compiled ZK circuit.
 
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { Phase } from '@codicil/contracts/vault';
-import { payoutFor, releaseFeeConfig, releaseFeeFor } from '@codicil/sdk';
+import { newRecoverySecret, payoutFor, recoveryConfig, recoveryStatus, releaseFeeConfig, releaseFeeFor } from '@codicil/sdk';
+import { pureCircuits } from '@codicil/contracts/vault';
 import { unshieldedPaidTo } from './support/harness.js';
 import {
   asClaimant,
@@ -25,10 +28,12 @@ import {
   FIRST_DEADLINE,
   L,
   MAX_PERIOD,
+  newOwner,
   newPerson,
   newRecipient,
   nobody,
   RELEASED_AT,
+  T0,
   type Via,
 } from './support/world.js';
 
@@ -192,6 +197,47 @@ describe('properties of random wills', () => {
           await checkIn(w, via, t + extension, t);
           expect(L(w.sim).phase).toBe(Phase.armed);
           expect(L(w.sim).deadline).toBe(BigInt(t + extension));
+        },
+      ),
+      { numRuns: RUNS },
+    );
+  });
+
+  it('a recovery never completes early, and an owner who still has a key can always cancel it', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        // Any allowed delay, any start that can still finish before the deadline.
+        fc.integer({ min: DAY, max: 9 * DAY }),
+        fc.double({ min: 0, max: 1, maxExcluded: true, noNaN: true }),
+        fc.double({ min: 0, max: 1, maxExcluded: true, noNaN: true }),
+        fc.constantFrom<Via>('passkey', 'wallet'),
+        fc.boolean(),
+        async (delay, startAt, cancelAt, via, ownerStillHasKeys) => {
+          const secret = newRecoverySecret();
+          const w = await deployVault({ config: recoveryConfig(secret, BigInt(delay)) });
+          const thief = newOwner();
+          const start = T0 + Math.floor(startAt * (FIRST_DEADLINE - delay - T0));
+          const ready = start + delay;
+          await w.sim.call('startRecovery', { time: start, as: { recovery: { secret } } },
+            pureCircuits.passkeyCommitment(thief.passkey.pk, thief.state.passkey!.salt),
+            pureCircuits.edKeyCommitment(thief.wallet.pk, thief.state.wallet!.salt),
+            new Uint8Array(32), BigInt(start));
+
+          // Never before the delay is over, whoever asks.
+          const early = start + Math.floor(cancelAt * delay);
+          await expect(w.sim.call('finishRecovery', { time: early, as: nobody })).rejects.toThrow('recovery delay open');
+
+          if (ownerStillHasKeys) {
+            // One check-in at any moment of the delay ends it for good.
+            await checkIn(w, via, early + MAX_PERIOD, early);
+            await expect(w.sim.call('finishRecovery', { time: ready, as: nobody })).rejects.toThrow('recovery cancelled');
+            await expect(checkIn({ ...w, owner: thief }, via, ready + DAY, ready)).rejects.toThrow('unknown owner key');
+            expect(recoveryStatus(L(w.sim), BigInt(ready))).toEqual({ state: 'retired' });
+          } else {
+            await w.sim.call('finishRecovery', { time: ready, as: nobody });
+            await expect(checkIn(w, via, ready + DAY, ready)).rejects.toThrow('unknown owner key');
+            await checkIn({ ...w, owner: thief }, via, ready + DAY, ready);
+          }
         },
       ),
       { numRuns: RUNS },

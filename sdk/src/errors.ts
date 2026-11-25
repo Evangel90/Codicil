@@ -20,6 +20,8 @@ export const CONTRACT_ERRORS = {
   'grace period too long': { audience: 'owner', message: 'The grace period cannot be longer than the longest check-in period.' },
   'fee too high': { audience: 'owner', message: 'The release fee cannot be more than 10% of the estate.' },
   'fee needs an address': { audience: 'owner', message: 'A release fee needs an address to be paid to.' },
+  'recovery delay too short': { audience: 'owner', message: 'The recovery delay must be at least one day.' },
+  'recovery delay too long': { audience: 'owner', message: 'The recovery delay must be shorter than the longest check-in period, or a recovery could never finish in time.' },
   // Owner: check-in and will updates
   'vault already released': { audience: 'owner', message: 'This vault has already been released to the heirs. It can no longer be changed.' },
   'switch already expired': { audience: 'owner', message: 'Your check-in deadline has passed. Start the challenge window, then check in to cancel it.' },
@@ -63,6 +65,13 @@ export const CONTRACT_ERRORS = {
   'already voted': { audience: 'anyone', message: 'You have already reported this vault in the current round.' },
   'unknown attestor': { audience: 'anyone', message: 'This attestation is not from the attestor the owner chose (or the vault has none).' },
   'bad attestation': { audience: 'anyone', message: 'The attestation is invalid or out of date. The owner may have checked in since it was signed.' },
+  // Recovery key
+  'unknown recovery key': { audience: 'owner', message: 'This is not the recovery key for this vault (or the vault has none).' },
+  'too late to recover': { audience: 'owner', message: 'The recovery delay would end after your check-in deadline, so this recovery could not finish in time.' },
+  'recovery key retired': { audience: 'owner', message: 'The owner cancelled a recovery made with this key, so it can no longer be used.' },
+  'no recovery pending': { audience: 'anyone', message: 'No recovery is in progress.' },
+  'recovery cancelled': { audience: 'anyone', message: 'The owner acted after this recovery started, which cancelled it.' },
+  'recovery delay open': { audience: 'anyone', message: 'The recovery delay is not over yet. Until it is, anything the owner signs cancels it.' },
   // Integrators
   'callable by contracts only': { audience: 'integrator', message: 'This check is for other contracts, not for direct calls.' },
   // Example escrow (contracts/src/inheritable_escrow.compact)

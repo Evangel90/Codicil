@@ -31,6 +31,11 @@ or death-registry service), **any third party** (every trigger is permissionless
 | **Replayed owner approval** (check-in, will update or settings update) | Digest binds the vault address, the new value and the nonce, under a tag per kind of action; the nonce moves on every owner action | `auth.test.ts` "replayed approval", "another vault", "check-in approval to change the will"; `settings.test.ts` "replayed approval", "another vault", "differ from what was signed", "check-in or will approval" |
 | **Stolen phishing-site passkey assertion** | The circuit checks `rpIdHash` (the site) and that Face ID / Touch ID was used (UV flag) | `auth.test.ts` "another website", "requires user verification" |
 | **Coercion to push the deadline decades ahead** | A check-in can set the deadline at most `maxPeriod` from *now*; repeated check-ins cannot stack (D9) | `auth.test.ts` "cannot chain check-ins" |
+| The owner **loses every registered key** | A recovery key (a secret kept offline) proposes new owner keys, which take effect after a public delay (D18) | `recovery.test.ts` "after the public delay the new passkey owns the vault" |
+| A **stolen recovery key** used to take the vault over | The takeover waits `recoveryDelay` (at least a day) in public, with an event. Anything a current owner key signs cancels it and retires the recovery key, so a thief gets one attempt | `recovery.test.ts` "a check-in cancels a recovery", "a will update cancels it too"; `properties.test.ts` "an owner who still has a key can always cancel it" |
+| A recovery key used to **stall, veto or outlast a release** | It acts only while armed and before the deadline. It cannot delay a timeout or veto a countdown, and guardians can stop it by starting one | `recovery.test.ts` "never delays the switch", "cannot act once the deadline has passed", "guardians can stop a recovery" |
+| **Backdating or copying** a recovery start to shorten the delay | Fresh timestamp (15 minutes); a restart can only move the date later | `recovery.test.ts` "cannot be backdated", "can never bring the date forward" |
+| A thief and a key-less owner **both hold the recovery secret** | Either can restart the delay, so neither can finish against the other; the deadline passes and the estate goes to the heirs under the will, not to the thief | `recovery.test.ts` "starting again replaces the proposal" |
 | **Impersonating an heir** | Must prove the leaf is in the will *and* know the secret key behind its commitment | `claims.test.ts` "not the heir", "not in will", "tampered leaf" |
 | **Double claim** / heir and backup both claiming | One nullifier per leaf, shared by heir and backup | `claims.test.ts` "already claimed", backup suite |
 | **Over-allocated or malicious will / client** | Contract checks the payout division and caps total payouts at the snapshot | `claims.test.ts` "bad payout math", "estate exhausted" |
@@ -43,9 +48,19 @@ or death-registry service), **any third party** (every trigger is permissionless
 
 ## Known limits (stated honestly)
 
-- **Owner key loss.** If the owner loses *every* registered key, they cannot check in, and the vault
-  will release at the deadline. Mitigations: register both a passkey (synced via iCloud/Google) and a
-  wallet; a recovery key is on the roadmap.
+- **Owner key loss.** An owner who loses *every* registered key cannot check in. With a recovery key
+  they can install new keys, but only if they start at least `recoveryDelay` before the deadline; a
+  loss discovered later than that cannot be recovered and the vault releases to the heirs (D18).
+  Without a recovery key the vault always releases. Mitigations: register both a passkey (synced
+  via iCloud/Google) and a wallet, and keep a recovery key.
+- **A recovery key is a second secret to protect.** If it is stolen and the owner signs nothing for
+  `recoveryDelay` (because they are not watching, or because they have died with more than that left
+  before the deadline), the thief becomes the owner and can rewrite the will. The delay, the event
+  and the cancel-on-any-signature rule reduce this; they do not remove it. Keep the secret offline,
+  choose the delay with this in mind, and do not set a recovery key if that trade is not worth it.
+- **After a cancelled recovery the vault has no usable recovery key**, and this version has no way to
+  set a new one (D18, "What is left"). An owner who signs anything while their own recovery is waiting
+  cancels it the same way.
 - **Coercion of a living owner.** Someone who controls the owner's device can check in for them. That
   delays release (bounded by `maxPeriod`) but cannot redirect funds: the will cannot be changed once a
   countdown has started, and heirs are bound to their own keys.

@@ -58,6 +58,8 @@ export struct VaultConfig {
   guardianRoot: Field;            // Merkle root of guardianLeaf(secret) values
   guardianThreshold: Uint<8>;     // votes needed to start the countdown; 0 = no guardians
   attestorKeyCommit: Bytes<32>;   // attestorCommitment(pk, salt); all zeros = disabled
+  recoveryKeyCommit: Bytes<32>;   // recoveryCommitment(secret); all zeros = no recovery key
+  recoveryDelay: Uint<64>;        // public wait between starting and finishing a recovery
 }
 
 // What the owner can replace after deployment with a signed settings update.
@@ -97,6 +99,13 @@ export ledger guardianRound: Counter;     // bumped by every owner check-in and 
 export ledger guardianVotes: Counter;     // votes in the current round
 export ledger guardianNullifiers: Set<Bytes<32>>;
 export ledger attestorKeyCommit: Bytes<32>;
+export ledger recoveryKeyCommit: Bytes<32>;
+export ledger recoveryDelay: Uint<64>;
+export ledger recoveryReadyAt: Uint<64>;          // 0 = no recovery was started (or the last one completed)
+export ledger recoveryNonce: Uint<64>;            // owner nonce when it started; it stands only while they match
+export ledger recoveryPasskeyCommit: Bytes<32>;   // owner keys proposed by the recovery in progress
+export ledger recoveryEdCommit: Bytes<32>;
+export ledger recoveryNextKeyCommit: Bytes<32>;   // recovery key once it completes; zeros = none
 
 // ─── Witnesses (TypeScript in sdk/src/witnesses.ts; run on the user's device)
 witness ownerPasskey(): Secp256r1Point;
@@ -115,6 +124,7 @@ witness guardianPath(leaf: Bytes<32>): MerkleTreePath<10, Bytes<32>>;
 witness attestorKey(): Secp256r1Point;
 witness attestorSalt(): Bytes<32>;
 witness attestorSignature(digest: Bytes<32>): Secp256r1EcdsaSignature;
+witness recoverySecret(): Bytes<32>;
 
 // ─── Constructor ────────────────────────────────────────────────────────────
 constructor(config: VaultConfig) {
@@ -143,6 +153,13 @@ constructor(config: VaultConfig) {
   guardianRoot = c.guardianRoot;
   guardianThreshold = c.guardianThreshold;
   attestorKeyCommit = c.attestorKeyCommit;
+  // The delay is the whole protection against a stolen recovery key, so it
+  // has a floor of one day. It must also be shorter than the longest check-in
+  // period, or no recovery could finish before a deadline (D18).
+  assert(c.recoveryKeyCommit == default<Bytes<32>> || c.recoveryDelay >= 86400, "recovery delay too short");
+  assert(c.recoveryKeyCommit == default<Bytes<32>> || c.recoveryDelay < c.maxPeriod, "recovery delay too long");
+  recoveryKeyCommit = c.recoveryKeyCommit;
+  recoveryDelay = c.recoveryDelay;
   phase = Phase.armed;
 }
 
@@ -228,6 +245,13 @@ export pure circuit attestorCommitment(pk: Secp256r1Point, salt: Bytes<32>): Byt
 export pure circuit attestationDigest(vault: Bytes<32>, round: Uint<64>): Bytes<32> {
   return persistentHash<Vector<3, Bytes<32>>>(
     [pad(32, "codicil:attestation:v1"), vault, round as Bytes<32>]);
+}
+
+// Commitment to the recovery secret: 32 random bytes the owner keeps offline.
+// The secret is its own blinding, so it must be random and used for one vault
+// only (the same secret gives the same commitment everywhere).
+export pure circuit recoveryCommitment(secret: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "codicil:recovery:v1"), secret]);
 }
 
 // ─── Owner authentication ───────────────────────────────────────────────────
@@ -522,4 +546,71 @@ export circuit claimAsBackup(recipient: UserAddress): [] {
       && claimantKeyCommit() == leaf.backupKeyCommit, "not the backup heir");
   assert(blockTimeGte((releasedAt + claimWindow) as Uint<64>), "primary claim window open");
   pay(leaf, leafHash, recipient);
+}
+
+// ─── Recovery key ───────────────────────────────────────────────────────────
+// For an owner who has lost every registered key. Whoever knows the recovery
+// secret can propose new owner keys; they take effect only after a public
+// delay, and only if no current owner key has signed anything in the meantime.
+//
+// Cancellation costs the owner circuits nothing: a recovery records the owner
+// `nonce` when it starts, and every owner action (check-in, will update,
+// settings update) moves that nonce. A recovery whose nonce no longer matches
+// is cancelled, and so is its recovery key: either that key was stolen, or the
+// owner has their keys after all. The stale fields stay on the ledger.
+//
+// The recovery key never touches the switch: it acts only while the vault is
+// armed and before the deadline, and it cannot delay, stop or veto a countdown
+// (docs/DECISIONS.md D18).
+export circuit startRecovery(newPasskeyCommit: Bytes<32>, newEdCommit: Bytes<32>,
+                             nextRecoveryKeyCommit: Bytes<32>, asOf: Uint<64>): [] {
+  const passkeyCommit = disclose(newPasskeyCommit);
+  const edCommit = disclose(newEdCommit);
+  const nextKeyCommit = disclose(nextRecoveryKeyCommit);
+  const t = disclose(asOf);
+  assert(phase == Phase.armed, "not armed");
+  assert(blockTimeLt(deadline), "switch already expired");
+  freshTimestamp(t);
+  assert(recoveryKeyCommit != default<Bytes<32>>
+      && recoveryCommitment(recoverySecret()) == recoveryKeyCommit, "unknown recovery key");
+  // An owner action since the last start cancelled that recovery and retired
+  // this key for good: a stolen recovery key gets one attempt.
+  const n = nonce;
+  const pendingReadyAt = recoveryReadyAt;
+  assert(pendingReadyAt == 0 || recoveryNonce == n, "recovery key retired");
+  assert(passkeyCommit != default<Bytes<32>> || edCommit != default<Bytes<32>>,
+         "vault needs an owner key");
+
+  const readyAt = (t + recoveryDelay) as Uint<64>;
+  // A recovery that cannot finish before the deadline would only announce that
+  // the owner has lost their keys.
+  assert(readyAt < deadline, "too late to recover");
+  // Starting again replaces the proposal and restarts the delay. It can only
+  // move the date later, which also makes a copy of an earlier start useless.
+  assert(readyAt > pendingReadyAt, "stale timestamp");
+
+  recoveryReadyAt = readyAt;
+  recoveryNonce = n;
+  recoveryPasskeyCommit = passkeyCommit;
+  recoveryEdCommit = edCommit;
+  recoveryNextKeyCommit = nextKeyCommit;
+  emit(Misc { name: pad(32, "codicil:recovery-started:v1"), payload: default<Bytes<256>> });
+}
+
+// Anyone may complete a recovery once its delay has passed; what it installs
+// was fixed when it started.
+export circuit finishRecovery(): [] {
+  const readyAt = recoveryReadyAt;
+  assert(readyAt != 0, "no recovery pending");
+  assert(recoveryNonce == nonce, "recovery cancelled");
+  assert(phase == Phase.armed, "not armed");
+  assert(blockTimeLt(deadline), "switch already expired");
+  assert(blockTimeGte(readyAt), "recovery delay open");
+  ownerPasskeyCommit = recoveryPasskeyCommit;
+  ownerEdCommit = recoveryEdCommit;
+  recoveryKeyCommit = recoveryNextKeyCommit;   // the one named at the start replaces the used one
+  recoveryReadyAt = 0;
+  recoveryPasskeyCommit = default<Bytes<32>>;
+  recoveryEdCommit = default<Bytes<32>>;
+  recoveryNextKeyCommit = default<Bytes<32>>;
 }

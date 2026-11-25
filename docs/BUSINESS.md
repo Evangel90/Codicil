@@ -84,5 +84,5 @@ proof server.
 |---|---|
 | Regulation of inheritance and probate differs by country | Codicil executes the owner's instructions for assets they control; executors can prove facts with selective disclosure. Legal partners per market |
 | Users fear a false release | Every trigger only starts a challenge window that one touch cancels; reminders by calendar; the owner chooses the timers |
-| Key loss | Passkeys sync across devices; owners can register both a passkey and a wallet; a recovery key is on the roadmap |
+| Key loss | Passkeys sync across devices; owners can register both a passkey and a wallet; an optional recovery key installs new keys after a public delay ([D18](DECISIONS.md)) |
 | Adoption of a new chain | Cardano wallet support; integrations via wallets rather than a standalone app only |

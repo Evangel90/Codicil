@@ -35,7 +35,9 @@ results are written down ([VALIDATION.md](VALIDATION.md), [DECISIONS.md](DECISIO
   - ✅ an optional grace period between the deadline and the switch ([D15](DECISIONS.md));
   - ✅ an optional release fee ([BUSINESS.md](BUSINESS.md), [D16](DECISIONS.md));
   - ✅ owner-signed updates to guardians and the attestor ([D17](DECISIONS.md));
-  - a recovery key.
+  - ✅ a recovery key, in its smallest safe form ([D18](DECISIONS.md)). Still open: a recovery that
+    can outlast the deadline (for a loss discovered late), and owner-signed rotation of a single
+    lost key.
 - **Hiding payout amounts** with pre-split shielded coins or batched claims ([D8](DECISIONS.md)).
 
 ## Stretch (Phase 7)

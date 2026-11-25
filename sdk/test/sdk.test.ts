@@ -26,17 +26,23 @@ import {
   guardianSecrets,
   heirKeyFromScalar,
   isCurrentGuardian,
+  lastRecoveryStart,
   MAX_FEE_BPS,
+  MIN_RECOVERY_DELAY,
   MissingSecretError,
   newEdKey,
   newGuardianSecret,
   newHeirKey,
   newP256Key,
+  newRecoverySecret,
   newSalt,
   parseDerSignature,
   payoutFor,
   settingsDigest,
   publicKeyFromCoseKey,
+  recoveryCommitment,
+  recoveryConfig,
+  recoveryStatus,
   releaseFeeConfig,
   releaseFeeFor,
   signAttestation,
@@ -206,6 +212,7 @@ describe('witnesses', () => {
     const w = createWitnesses();
     expect(() => w.ownerPasskey(ctx({}))).toThrow(MissingSecretError);
     expect(() => w.claimantLeaf(ctx({}))).toThrow('no claim package');
+    expect(() => w.recoverySecret(ctx({}))).toThrow('no recovery key');
   });
 
   it('only hand over an approval for the digest being proven', () => {
@@ -297,6 +304,7 @@ describe('vault events', () => {
   it('names the events the vault emits and ignores everything else', () => {
     expect(vaultEventName(misc('codicil:released:v1'))).toBe(VAULT_EVENTS.released);
     expect(vaultEventName(misc('codicil:will-changed:v1'))).toBe(VAULT_EVENTS.willChanged);
+    expect(vaultEventName(misc('codicil:recovery-started:v1'))).toBe(VAULT_EVENTS.recoveryStarted);
     expect(vaultEventName(misc('someone-else:event'))).toBeUndefined();
     expect(vaultEventName({ data: { tag: 'null' } })).toBeUndefined();
     // A payload after the 32-byte name does not change the name.
@@ -332,5 +340,35 @@ describe('optional vault settings', () => {
     expect(() => releaseFeeConfig(-1n, address)).toThrow('between 0% and 10%');
     expect(() => releaseFeeConfig(1n, new Uint8Array(32))).toThrow('needs an address');
     expect(() => releaseFeeConfig(1n, new Uint8Array(31))).toThrow('32 bytes');
+  });
+
+  it('the recovery key is off by default; its limits match the contract', () => {
+    expect(VAULT_OPTIONS_OFF.recoveryKeyCommit).toEqual(new Uint8Array(32));
+    const untouched = { recoveryReadyAt: 0n, recoveryNonce: 0n, nonce: 7n };
+    expect(recoveryStatus({ ...VAULT_OPTIONS_OFF, ...untouched }, 0n)).toEqual({ state: 'off' });
+
+    const floor = readFileSync(VAULT_SOURCE, 'utf8').match(/c\.recoveryDelay >= (\d+), "recovery delay too short"/);
+    expect(floor && BigInt(floor[1])).toBe(MIN_RECOVERY_DELAY);
+
+    const secret = newRecoverySecret();
+    const config = recoveryConfig(secret, 3n * 86_400n, 30n * 86_400n);
+    expect(config).toEqual({ recoveryKeyCommit: recoveryCommitment(secret), recoveryDelay: 259_200n });
+    expect(config.recoveryKeyCommit).not.toEqual(secret);
+    expect(() => recoveryConfig(secret, 86_399n)).toThrow('at least one day');
+    expect(() => recoveryConfig(secret, 30n * 86_400n, 30n * 86_400n)).toThrow('shorter than');
+    expect(() => recoveryCommitment(new Uint8Array(16))).toThrow('32 bytes');
+
+    // Owner actions before any recovery (nonce 7) do not matter.
+    const ledger = { ...config, ...untouched, deadline: 1_000_000n };
+    expect(recoveryStatus(ledger, 0n)).toEqual({ state: 'idle' });
+    // Started at nonce 7: it stands while the nonce stays 7.
+    const started = { ...ledger, recoveryReadyAt: 500n, recoveryNonce: 7n };
+    expect(recoveryStatus(started, 499n)).toEqual({ state: 'waiting', readyAt: 500n });
+    expect(recoveryStatus(started, 500n)).toEqual({ state: 'ready', readyAt: 500n });
+    // Any owner action moves the nonce: the recovery is cancelled and the key retired.
+    expect(recoveryStatus({ ...started, nonce: 8n }, 499n)).toEqual({ state: 'retired' });
+    expect(recoveryStatus({ ...started, nonce: 8n }, 500n)).toEqual({ state: 'retired' });
+    // Started at this second, the recovery is ready one second before the deadline.
+    expect(lastRecoveryStart(ledger) + ledger.recoveryDelay).toBe(ledger.deadline - 1n);
   });
 });

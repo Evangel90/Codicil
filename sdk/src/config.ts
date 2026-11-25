@@ -46,6 +46,9 @@ export const VAULT_OPTIONS_OFF = {
   /** No release fee: nothing is taken from the estate and no extra transfer is made. */
   feeBps: 0n,
   feeRecipient: { bytes: new Uint8Array(32) },
+  /** No recovery key: an owner who loses every key cannot get back in. */
+  recoveryKeyCommit: new Uint8Array(32),
+  recoveryDelay: 0n,
 } as const satisfies Partial<VaultConfig>;
 
 /**
