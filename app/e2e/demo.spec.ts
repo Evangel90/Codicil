@@ -4,6 +4,7 @@
 // Runs the demo in a real browser. The owner's passkey is a Chrome virtual
 // authenticator, so check-ins go through Chrome's real WebAuthn stack and the
 // vault's in-circuit P-256 / clientDataJSON verification, compiled to WASM.
+// The savings contract runs next to the vault and calls into it, also in WASM.
 
 import { expect, test, type Page } from '@playwright/test';
 
@@ -74,6 +75,24 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
   await finish(page, /Check-in recorded/);
   await expect(page.getByText(/^Check-in · deadline moved/)).toBeVisible();
 
+  // Harbour Savings, a second contract that asks the vault before it pays.
+  // While the vault is armed, the escrow circuit calls the vault circuit and refuses.
+  const nav = page.getByRole('navigation', { name: 'Sections' });
+  const main = page.getByRole('main');
+  const actAs = page.getByRole('group', { name: 'Act as' });
+  await nav.getByRole('button', { name: 'Savings' }).click();
+  await expect(page.getByRole('heading', { name: 'Savings that follow the will' })).toBeVisible();
+  await expect(main.getByText('assert(vault.isReleasedForContract(), "vault not released");')).toBeVisible();
+  await main.getByRole('button', { name: 'Act as Ben' }).click();
+  await main.getByRole('button', { name: 'Withdraw 8,000 demo tokens' }).click();
+  const refusal = page.getByRole('dialog').getByRole('status');
+  await expect(refusal).toContainText('the vault said the will is not released', { timeout: 30_000 });
+  await expect(refusal).toContainText('vault not released');
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  await expect(main.getByRole('heading', { name: /^Refused on/ })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: /^Next/ })).toContainText('Harbour Savings refused, as it should.');
+  await actAs.getByRole('button', { name: 'Amara' }).click();
+
   // Change the will: Ada 40%, Ben 40%. Re-sealed with the passkey.
   await page.getByRole('button', { name: 'Will', exact: true }).click();
   await page.getByRole('button', { name: 'Change the will' }).click();
@@ -97,7 +116,6 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
   await expect(letter).toBeHidden();
 
   // Two guardians vote, each after confirming; the owner cancels.
-  const actAs = page.getByRole('group', { name: 'Act as' });
   const vote = async () => {
     await page.getByRole('button', { name: 'I confirm the owner has died' }).click();
     const cast = page.getByRole('button', { name: 'Cast my vote' });
@@ -145,10 +163,24 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
   await finish(page, /10,000 demo tokens sent/);
   await expect(page.getByRole('heading', { name: 'Thank you, Ben.' })).toBeVisible();
 
+  // The will is released, so the same withdrawal now pays: the escrow asks the
+  // vault and gets a yes, two circuits in one transaction.
+  await page.getByRole('button', { name: /Amara also named you in Harbour Savings/ }).click();
+  await main.getByRole('button', { name: 'Withdraw 8,000 demo tokens' }).click();
+  await finish(page, /8,000 demo tokens sent from Harbour Savings/);
+  await expect(main.getByRole('heading', { name: 'Paid to the beneficiary' })).toBeVisible();
+  await expect(main.getByText('vault.isReleasedForContract', { exact: true })).toBeVisible();
+  await expect(main.getByText('savings.withdrawToBeneficiary', { exact: true })).toBeVisible();
+  const publicSide = page.locator('.savings-public');
+  await expect(publicSide.locator('dl > div').filter({ hasText: 'Withdrawn' })).toContainText('yes');
+  await expect(publicSide).not.toContainText(/\b(Ada|Ben|Cleo|Kofi|Mensah|Sarah|Tomás|Amara)\b/);   // "Beneficiary" is a label, not a name
+
   // The public inspector: what anyone can learn, in plain words.
   await actAs.getByRole('button', { name: 'Anyone' }).click();
+  await nav.getByRole('button', { name: 'Inspect' }).click();
   await expect(page.getByRole('heading', { name: 'What anyone can learn.' })).toBeVisible();
   await expect(page.locator('.inspect-rows')).toContainText('1 one-time stamp');
+  await expect(page.locator('.inspect-rows')).toContainText('8,000 demo tokens, paid out');
   await expect(page.locator('.inspect-rows')).not.toContainText(/Ada|Ben|Cleo|Kofi|Mensah|Sarah|Tomás|Amara/);
 
   // The privacy lens: one nullifier, and no names on the public side.
@@ -156,6 +188,7 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
   const pub = page.locator('.lens-public');
   await expect(pub.getByText('claimNullifiers')).toBeVisible();
   await expect(pub.locator('.ledger')).toContainText('1 spent');
+  await expect(pub.locator('.ledger')).toContainText('8,000');
   await expect(pub.locator('.ledger')).not.toContainText(/Ada|Ben|Cleo|Kofi|Mensah|Sarah|Tomás|Amara/);
   await page.getByRole('button', { name: "Reveal Amara's view" }).first().click();
   await expect(page.locator('.lens-private .ledger')).toContainText('Ben claimed');

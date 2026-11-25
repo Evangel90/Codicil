@@ -6,9 +6,9 @@
 
 import { useState } from 'react';
 import { Icon, ICONS, short } from '../components/ui.js';
-import { days, demo, fmtShort, GUARDIANS, OWNER_FIRST, TOKEN, type Snapshot } from '../demo/store.js';
+import { days, demo, fmtShort, GUARDIANS, HEIRS, OWNER_FIRST, TOKEN, type Snapshot } from '../demo/store.js';
 
-type PubId = 'owner' | 'root' | 'deadline' | 'window' | 'counter' | 'guard' | 'nulls' | 'bal';
+type PubId = 'owner' | 'root' | 'deadline' | 'window' | 'counter' | 'guard' | 'nulls' | 'bal' | 'pos';
 type Active = { side: 'pub' | 'priv'; id: string } | undefined;
 
 const NOTES: Record<string, [string, string]> = {
@@ -23,6 +23,7 @@ const NOTES: Record<string, [string, string]> = {
   guard: ['Guardians → a root and a count', 'Guardian identities are leaves in their own tree. Votes are counted with nullifiers, so “1 of 2” is public but who voted never is.'],
   nulls: ['Nullifiers: one-time stamps', 'Each claim leaves a random-looking stamp so it can’t be repeated. The stamps can’t be linked to heirs.'],
   bal: ['The total is public, the split is not', 'Anyone can see what the vault holds. Only you know how it divides.'],
+  pos: ['A second contract, the same privacy', 'The savings contract stores the vault it asks, the amount and a commitment to its beneficiary. It asks the vault one question, released or not, and never learns who is in the will.'],
 };
 const IDLE: [string, string] = ['Point at, or tap, any row', 'Its counterpart on the other ledger lights up. Warm ink is private and stays on your device. Cool slate is public, on the chain.'];
 
@@ -53,6 +54,7 @@ export function LensView({ s }: { s: Snapshot }) {
     ['guard', 'guardianRoot · k · votes · round', `${short(s.chain.guardianRoot)} · ${s.guardianThreshold} · ${s.guardianVotes} · ${s.guardianRound + 1n}`, 'root, threshold, votes, round'],
     ['nulls', 'claimNullifiers', s.chain.claimNullifiers.length ? `${s.chain.claimNullifiers.length} spent · ${s.chain.claimNullifiers.map((n) => `0x${n.slice(0, 4)}…`).join(' ')}` : '{ } · 0 spent', 'set of stamps'],
     ['bal', 'estate', `${s.estate.toLocaleString()} ${TOKEN}`, 'balance'],
+    ['pos', `escrow ${short(s.position.address)}`, `${s.position.held.toLocaleString()} · ${short(s.position.beneficiaryCommit)} · ${s.position.withdrawn ? 'withdrawn' : 'not withdrawn'}`, 'linked contract: amount held, beneficiary commitment, withdrawn or not'],
   ];
   const priv: [string, PubId, string, string][] = [
     ['me', 'owner', 'Owner', `${OWNER_FIRST} · ${s.passkey?.kind === 'device' ? 'passkey on this device' : 'demo key in this tab'}`],
@@ -66,6 +68,7 @@ export function LensView({ s }: { s: Snapshot }) {
     ['g', 'guard', 'Guardians', GUARDIANS.map((g) => g.name).join(' · ')],
     ['cl', 'nulls', 'Claims', claimedNames.length ? `${claimedNames.map((h) => h.profile.name).join(', ')} claimed` : 'No one has claimed'],
     ['split', 'bal', 'How it splits', `Ada ${amt('ada')} · Ben ${amt('ben')} · Cleo ${amt('cleo')}`],
+    ['sav', 'pos', s.position.name, `${HEIRS.find((h) => h.id === s.position.beneficiary)!.name} is the beneficiary${s.position.withdrawn ? ' · paid out' : ''}`],
   ];
 
   const hiPub = active ? (active.side === 'pub' ? active.id : priv.find((p) => p[0] === active.id)?.[1]) : undefined;

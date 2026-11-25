@@ -40,6 +40,7 @@ flowchart TB
 | [`contracts/test/`](../contracts/test) | Simulator tests; every successful call is also checked against the ZK circuit |
 | [`sdk/src/`](../sdk/src) | Keys, commitments, will builder, witnesses, signing, letters, error catalogue |
 | [`app/src/`](../app/src) | Web app: landing page, setup wizard, owner / heir / guardian / public views, Privacy Lens |
+| [`preprod/`](../preprod) | Gate V14: the vault end to end on a real network with Midnight.js and the wallet SDK ([PREPROD.md](PREPROD.md)) |
 | [`codicil-spike/`](../codicil-spike) | Phase 0 validation spike, kept as a record ([VALIDATION.md](VALIDATION.md)) |
 | [`tools/webauthn-capture/`](../tools/webauthn-capture) | Page that captured the real passkey and wallet signatures used as test fixtures |
 
@@ -227,7 +228,9 @@ started one. A recovery that could not finish before the deadline is refused whe
 
 `inheritable_escrow` declares the vault's interface and calls `isReleasedForContract()` before paying
 its beneficiary. Any Midnight contract can make a position inheritable this way. Both proofs go in
-one transaction ([`escrow.test.ts`](../contracts/test/escrow.test.ts)).
+one transaction ([`escrow.test.ts`](../contracts/test/escrow.test.ts)). The demo's **Savings** tab
+runs this for real: the compiled escrow next to the compiled vault, refused before the release and
+paid after it.
 
 ## The SDK
 
@@ -262,13 +265,19 @@ same circuit code and produces the same public transcript a real transaction wou
 generation and network submission are skipped. The passkey is real when the browser supports it:
 Face ID / Touch ID signs, and the circuit verifies the signature.
 
+The same chain holds a second compiled contract, `inheritable_escrow` (shown as "Harbour Savings"),
+and is the state and module provider for cross-contract calls, so a withdrawal runs the escrow
+circuit and, inside it, the vault's `isReleasedForContract` circuit against the vault's current
+state. The runtime's cross-contract path uses Node's `Buffer` for hex, so
+[`buffer-shim.ts`](../app/src/demo/buffer-shim.ts) supplies those two conversions in the browser.
+
 [`app/src/demo/store.ts`](../app/src/demo/store.ts) holds the world (chain, keys, will, letters held
 by heirs) and exposes it to React through `useSyncExternalStore`. Every action goes through a
 transaction sheet with the real stages (prepare, approve, run the circuit, proof, record), so a
 failure shows where it happened and in plain words.
 
 Pure helpers keep the views simple and testable:
-[`guide.ts`](../app/src/demo/guide.ts) (who acts next, the will in plain words, presets),
+[`guide.ts`](../app/src/demo/guide.ts) (who acts next, what to try on the savings screen, the will in plain words, presets),
 [`commands.ts`](../app/src/demo/commands.ts) (the ⌘K palette),
 [`ics.ts`](../app/src/demo/ics.ts) (calendar reminders made on the device).
 
@@ -276,4 +285,5 @@ Pure helpers keep the views simple and testable:
 
 Going live replaces the in-memory chain with Midnight.js providers (wallet, proof server, indexer)
 and keeps the SDK, witnesses and views. That step is gate V14 ([VALIDATION.md](VALIDATION.md)) and
-is next on the [roadmap](ROADMAP.md).
+is next on the [roadmap](ROADMAP.md). The provider wiring already exists for a command-line run
+([`preprod/src/providers.ts`](../preprod/src/providers.ts), [PREPROD.md](PREPROD.md)).

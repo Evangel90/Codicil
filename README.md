@@ -16,7 +16,7 @@ owner has had a chance to veto.
 
 > **Status (Wave 3, in progress):** the vault contract, SDK and web app are built and tested. That
 > covers passkey and wallet check-ins, multi-heir wills with tranches and backup heirs, hidden k-of-n
-> guardians, the attestation trigger and the cross-contract hook: 238 tests, every contract call
+> guardians, the attestation trigger and the cross-contract hook: 340 tests, every contract call
 > checked against its ZK circuit, plus browser tests that check in with Chrome's real WebAuthn. The
 > Preprod deployment is next. See [What changed this Wave](#what-changed-this-wave).
 > Demo video and deck: *coming*.
@@ -62,12 +62,16 @@ generation and network fees are skipped.
    device checks it against the public will fingerprint and spots letters from an older will. Then
    claim his share to a fresh address. Try **Kofi** (backup heir: must wait
    30 days) and **Cleo** (her share unlocks on her 18th birthday).
-7. Open the **Privacy Lens** at any point: the real public ledger beside what only the owner's
+7. Open the **Savings** tab at any point: a second contract (the compiled `inheritable_escrow`)
+   holds tokens for Ben and calls the vault before it pays. Before the release it refuses with its
+   own error, `vault not released`; after, the same button pays. The screen shows the one line of
+   Compact that makes any contract inheritable.
+8. Open the **Privacy Lens** at any point: the real public ledger beside what only the owner's
    device knows. Or **Act as Anyone** for the public inspector: what a stranger can learn from the
    vault address alone.
-8. The owner can download check-in reminders as a calendar file, made on the device, so no server
+9. The owner can download check-in reminders as a calendar file, made on the device, so no server
    learns the deadline.
-9. Press **⌘K** (Ctrl+K) to do anything from the keyboard: check in, skip ahead, act as anyone.
+10. Press **⌘K** (Ctrl+K) to do anything from the keyboard: check in, skip ahead, act as anyone.
 
 `npm run compile:full` also generates the proving keys (several minutes; sizes in
 [docs/VALIDATION.md](docs/VALIDATION.md)).
@@ -195,8 +199,8 @@ this call can be generated", not just "the JavaScript ran".
 | [`webauthn-real.test.ts`](contracts/test/webauthn-real.test.ts) | Real Touch ID assertions verified by the vault's own WebAuthn module |
 | [`errors.test.ts`](contracts/test/errors.test.ts) | Every contract error has a friendly UI message and is documented |
 | [`sdk/test`](sdk/test) | Passkey/wallet format conversion, will builder, witnesses, heir letter encoding and checking against the will root |
-| [`app/test`](app/test/demo.test.ts) | The whole demo story through the app's own store: wizard setup and preview, check-ins, veto, guardian rounds, release, claims, tranche, backup, retries; who acts next, the plain-words summary and its warnings, presets, letters held by heirs (stale after a will change), calendar reminders, the command palette |
-| [`app/e2e`](app/e2e/demo.spec.ts) | In Chrome: the setup wizard with a passkey (virtual authenticator), check-in through the real WebAuthn API, will change and letter, guardian votes, release, loading and checking a letter, the command palette, claim, public inspector, privacy lens. `npm run e2e` |
+| [`app/test`](app/test/demo.test.ts) | The whole demo story through the app's own store: wizard setup and preview, check-ins, veto, guardian rounds, release, claims, tranche, backup, retries; who acts next, the plain-words summary and its warnings, presets, letters held by heirs (stale after a will change), calendar reminders, the command palette; the savings contract that calls the vault (refused before the release, paid after) |
+| [`app/e2e`](app/e2e/demo.spec.ts) | In Chrome: the setup wizard with a passkey (virtual authenticator), check-in through the real WebAuthn API, a refused and then a successful cross-contract withdrawal, will change and letter, guardian votes, release, loading and checking a letter, the command palette, claim, public inspector, privacy lens. `npm run e2e` |
 
 The property tests already found one design flaw, now fixed ([D9](docs/DECISIONS.md)). How to run each
 level, and the bugs the tests caught: [docs/TESTING.md](docs/TESTING.md).
@@ -236,10 +240,11 @@ Milestones and status: [docs/ROADMAP.md](docs/ROADMAP.md). Customers, go-to-mark
 - TypeScript SDK with witnesses, will builder, passkey/wallet conversion and an error catalogue.
 - Web app with a demo that runs the real contract in the browser: Face ID check-ins, changing the
   will, printable heir letters with QR codes that heirs check on their own device, a who-acts-next
-  guide, plain-words summary with warnings, presets, a public inspector, calendar reminders, a ⌘K command palette, guardian reports, veto, release, claims and a privacy
+  guide, plain-words summary with warnings, presets, a public inspector, calendar reminders, a ⌘K command palette, guardian reports, veto, release, claims, a second
+  contract that pays out through the cross-contract hook, and a privacy
   lens, in the Obsidian design, with a landing page whose 3D point field changes shape as you scroll. Dark and light themes,
   works on phones.
-- 238 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
+- 340 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
   CI on every push.
 - Docs: architecture, privacy (every field and transaction), a threat model mapping each threat to
   the test that covers it, testing, roadmap, business and a judges' quickstart. Details: [docs/WAVES.md](docs/WAVES.md).

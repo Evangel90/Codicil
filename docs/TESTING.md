@@ -1,6 +1,6 @@
 # Testing
 
-238 unit and simulator tests plus 2 browser end-to-end tests, all run by CI on every push
+340 unit and simulator tests plus 2 browser end-to-end tests, all run by CI on every push
 ([workflow](../.github/workflows/ci.yml)). This page explains what each level proves, how to run
 it, and the bugs the tests caught.
 
@@ -9,7 +9,7 @@ it, and the bugs the tests caught.
 ```bash
 npm ci
 npm run compile      # Compact → JS + ZK circuits (--skip-zk: no proving keys, seconds)
-npm test             # contracts, SDK and app: about 10 seconds
+npm test             # contracts, SDK, app and the network script's offline tests: about 15 seconds
 npm run e2e          # builds the app and runs Playwright in Chrome
 ```
 
@@ -17,7 +17,8 @@ npm run e2e          # builds the app and runs Playwright in Chrome
 |---|---|---|---|
 | Contract simulator + ZK constraint checks | `npm test -w @codicil/contracts` | 182 | ~6 s |
 | SDK | `npm test -w @codicil/sdk` | 34 | ~1 s |
-| App logic (the demo store and helpers) | `npm test -w @codicil/app` | 22 | ~3 s |
+| App logic (the demo store and helpers) | `npm test -w @codicil/app` | 37 | ~4 s |
+| Network script, offline parts | `npm test -w @codicil/preprod` | 87 (one more when the proving keys are present) | ~3 s |
 | Browser end-to-end | `npm run e2e` | 2 | ~30 s |
 | Full compile with proving keys | `npm run compile:full` | 16 circuits | several minutes |
 
@@ -69,14 +70,31 @@ letter, older will, another vault, which key opens it).
 - [`guide.test.ts`](../app/test/guide.test.ts): who acts next at every stage, the plain-words
   summary and its warnings, presets, letters held by heirs (a letter goes stale when the will
   changes and then cannot claim), calendar reminders (which never mention heirs), the ⌘K palette.
+- [`savings.test.ts`](../app/test/savings.test.ts): the escrow next to the vault, with the real
+  cross-contract call. Refused with `vault not released` while armed or pending, refused for anyone
+  without the beneficiary secret, paid after the release with both circuits in the transaction's
+  trace, the vault hook closed to direct calls, the guidance and palette commands for the savings
+  screen, the code shown on screen checked against the contract source, and the `Buffer` stand-in
+  the browser needs.
 
-## 4. Browser end-to-end
+## 4. Network script tests
+
+[`preprod/test/`](../preprod/test) covers the parts of the Preprod script ([PREPROD.md](PREPROD.md))
+that need no network: environment and endpoint selection, secret redaction, timer selection, the
+resumable state file, the results table, the preflight (with a fake `fetch`), and
+[`dryrun.test.ts`](../preprod/test/dryrun.test.ts), which builds every transaction of the real run
+through Midnight.js, including the cross-contract withdrawal. Nothing in these tests opens a
+connection. The run itself is opt-in: `npm run preprod:check`, `preprod:dust` and `preprod:run`.
+
+## 5. Browser end-to-end
 
 [`app/e2e/demo.spec.ts`](../app/e2e/demo.spec.ts) runs in Chrome with a **CDP virtual authenticator**,
 so the passkey goes through the browser's real WebAuthn API and is verified by the circuit. The story:
-landing page → wizard with a passkey → check in → change the will → open a letter → guardian votes
+landing page → wizard with a passkey → check in → a withdrawal from the savings contract, refused
+because the vault is armed → change the will → open a letter → guardian votes
 and veto → the ⌘K palette → timeout and release → Ben loads and checks his letter (a bad letter is
-rejected first) → claim → public inspector (no names on the page) → Privacy Lens.
+rejected first) → claim → the same withdrawal, now paid through the cross-contract call → public
+inspector (no names on the page) → Privacy Lens.
 
 Run against your local Chrome with `PW_CHANNEL=chrome npm run e2e`. On failure CI uploads Playwright
 traces.

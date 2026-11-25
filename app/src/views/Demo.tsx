@@ -12,7 +12,7 @@ import { jumpsFor, type CommandContext, type Tab } from '../demo/commands.js';
 import { calendarFile, downloadCalendar, remindersFor } from '../demo/ics.js';
 import { IS_MAC, Palette, usePaletteShortcut } from './Palette.js';
 import { DAY, demo, GUARDIANS, HEIRS, OWNER_FIRST, useDemo, type Actor, type Snapshot } from '../demo/store.js';
-import { nextUp, sameActor, type NextUp } from '../demo/guide.js';
+import { nextUp, positionNext, positionStage, sameActor, type NextUp } from '../demo/guide.js';
 import { Wizard } from './Wizard.js';
 import { OwnerView } from './OwnerView.js';
 import { WillView } from './WillView.js';
@@ -20,6 +20,7 @@ import { HeirView } from './HeirView.js';
 import { GuardianView } from './GuardianView.js';
 import { LensView } from './LensView.js';
 import { InspectView } from './InspectView.js';
+import { SavingsView } from './SavingsView.js';
 
 export type { Tab };
 
@@ -28,7 +29,7 @@ const upper = (t: number) =>
 
 function Nav({ s, tab, setTab }: { s: Snapshot; tab: Tab; setTab: (t: Tab) => void }) {
   const first = s.actor.kind === 'owner' ? 'Vault' : s.actor.kind === 'heir' ? 'Your share' : s.actor.kind === 'guardian' ? 'Guardian' : 'Inspect';
-  const items: [Tab, string][] = [['vault', first], ...(s.actor.kind === 'owner' ? [['will', 'Will'] as [Tab, string]] : []), ['lens', 'Privacy Lens']];
+  const items: [Tab, string][] = [['vault', first], ...(s.actor.kind === 'owner' ? [['will', 'Will'] as [Tab, string]] : []), ['savings', 'Savings'], ['lens', 'Privacy Lens']];
   return (
     <nav className="pillnav" aria-label="Sections">
       {items.map(([id, label]) => (
@@ -84,8 +85,9 @@ function ActAs({ s, up }: { s: Snapshot; up: NextUp }) {
   );
 }
 
-function DemoBar({ s, onReset }: { s: Snapshot; onReset: () => void }) {
-  const up = nextUp(s);
+function DemoBar({ s, tab, setTab, onReset }: { s: Snapshot; tab: Tab; setTab: (t: Tab) => void; onReset: () => void }) {
+  // The savings screen has its own next step; everywhere else the vault's story leads.
+  const up = tab === 'savings' ? positionNext(s) : nextUp(s);
   const jumps = jumpsFor(s);
   const day = Math.floor((s.now - s.deployedAt) / DAY) + 1;
   return (
@@ -104,13 +106,13 @@ function DemoBar({ s, onReset }: { s: Snapshot; onReset: () => void }) {
           <button type="button" className="btn btn-ghost btn-sm" onClick={onReset}>Reset</button>
         </div>
       </div>
-      <NextBar s={s} up={up} />
+      <NextBar s={s} up={up} openSavings={tab !== 'savings' && positionStage(s) === 'open' ? () => setTab('savings') : undefined} />
     </div>
   );
 }
 
 /** Where the story is, whose turn it is, and what anyone can do right now. */
-function NextBar({ s, up }: { s: Snapshot; up: NextUp }) {
+function NextBar({ s, up, openSavings }: { s: Snapshot; up: NextUp; openSavings?: () => void }) {
   const who = s.actor.kind === 'public' ? 'Someone' : actorName(s.actor);
   const busy = s.tx?.status === 'running';
   const others = up.who.filter((w) => !sameActor(w, s.actor) && w.kind !== 'public').slice(0, 3);
@@ -118,7 +120,10 @@ function NextBar({ s, up }: { s: Snapshot; up: NextUp }) {
     <div className={`nextbar tone-${up.tone}`} role="status" aria-live="polite">
       <div className="wrap nextbar-row">
         <span className={`dot ${up.tone === 'attention' ? 'pulse' : ''}`} aria-hidden="true" />
-        <span className="nextbar-text"><span className="mono eyebrow-inline">Next</span> {up.text}</span>
+        <span className="nextbar-text">
+          <span className="mono eyebrow-inline">Next</span> {up.text}
+          {openSavings && <>{' '}<button type="button" className="linkish" onClick={openSavings}>{s.position.name} can pay out now too.</button></>}
+        </span>
         <span className="nextbar-actions">
           {up.action === 'startSwitch' && (
             <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void demo.startCountdown(who)}>
@@ -186,14 +191,15 @@ export function Demo() {
           <ThemeToggle />
         </div>
       </header>
-      {inApp && <DemoBar s={s} onReset={reset} />}
+      {inApp && <DemoBar s={s} tab={tab} setTab={setTab} onReset={reset} />}
 
       {!inApp ? <Wizard s={s} onDone={() => setSealed(true)} /> : (
         <main className="wrap page" id="main">
           {tab === 'lens' ? <LensView s={s} />
+            : tab === 'savings' ? <SavingsView s={s} />
             : tab === 'will' && s.actor.kind === 'owner' ? <WillView s={s} />
             : s.actor.kind === 'owner' ? <OwnerView s={s} openTab={setTab} />
-            : s.actor.kind === 'heir' ? <HeirView s={s} id={s.actor.id} />
+            : s.actor.kind === 'heir' ? <HeirView s={s} id={s.actor.id} openTab={setTab} />
             : s.actor.kind === 'guardian' ? <GuardianView s={s} id={s.actor.id} />
             : <InspectView s={s} />}
         </main>
@@ -202,7 +208,7 @@ export function Demo() {
         <footer className="wrap appfoot">
           <Icon d={ICONS.lens} size={14} stroke={1.6} />
           <span>
-            This demo runs the real Codicil vault contract in your browser, on a simulated chain with a clock you control.
+            This demo runs the real Codicil vault contract, and the savings contract that calls it, in your browser, on a simulated chain with a clock you control.
             It skips proof generation and fees. Everything else is the same code.
           </span>
         </footer>
