@@ -33,7 +33,7 @@ flowchart TB
 
 | Path | Role |
 |---|---|
-| [`contracts/src/codicil_vault.compact`](../contracts/src/codicil_vault.compact) | The vault: 12 exported circuits, 10 pure helpers |
+| [`contracts/src/codicil_vault.compact`](../contracts/src/codicil_vault.compact) | The vault: 14 exported circuits, 11 pure helpers |
 | [`contracts/src/lib/WebAuthn.compact`](../contracts/src/lib/WebAuthn.compact) | Passkey assertion verification, generic over the site origin's lengths |
 | [`contracts/src/lib/Cip30.compact`](../contracts/src/lib/Cip30.compact) | Cardano CIP-30 `signData` verification (COSE_Sign1, plain Ed25519) |
 | [`contracts/src/inheritable_escrow.compact`](../contracts/src/inheritable_escrow.compact) | Example integrator using a cross-contract call |
@@ -52,6 +52,7 @@ stateDiagram-v2
     [*] --> Armed: constructor(VaultConfig)
     Armed --> Armed: checkInPasskey / checkInEd25519
     Armed --> Armed: updateWillPasskey / updateWillEd25519
+    Armed --> Armed: updateSettingsPasskey / updateSettingsEd25519
     Armed --> Armed: deposit, guardianAttest (below threshold)
     Armed --> Pending: triggerTimeout (deadline + grace period passed)
     Armed --> Pending: guardianAttest (k-th vote)
@@ -83,6 +84,7 @@ All of it is public. The design goal is that nothing here identifies a person
 | `checkInPasskey(next)` | Owner | WebAuthn assertion over `aliveDigest(vault, next, nonce)`, from the committed passkey, on the committed website, with Face ID / Touch ID | Moves the deadline (at most `maxPeriod` from now), bumps the nonce, voids guardian votes; vetoes a pending switch. Allowed until the deadline plus the grace period, and during any challenge window |
 | `checkInEd25519(next)` | Owner | CIP-30 signature over the same digest from the committed wallet key | Same |
 | `updateWillPasskey(root)` / `updateWillEd25519(root)` | Owner | Signature over `willUpdateDigest(vault, root, nonce)` | Replaces the will root; only while armed and before the deadline. Emits `codicil:will-changed:v1` |
+| `updateSettingsPasskey(settings)` / `updateSettingsEd25519(settings)` | Owner | Signature over `settingsDigest(vault, settings, nonce)` | Replaces the guardian root, the threshold and the attestor commitment together; starts a new guardian round; only while armed and before the deadline |
 | `deposit(amount)` | Anyone | None | Receives unshielded tokens while armed |
 | `triggerTimeout()` | Anyone | The deadline and the grace period have passed | Starts the challenge window, counted from the end of the grace period |
 | `guardianAttest(asOf)` | A guardian | Merkle membership in `guardianRoot`, one nullifier per guardian per round | Counts a vote; the k-th vote starts the challenge window |
@@ -92,8 +94,8 @@ All of it is public. The design goal is that nothing here identifies a person
 | `claim(to)` | An heir | Merkle membership in `willRoot`, knowledge of the heir key's secret, unlock date reached, unused nullifier | Pays `snapshot × shareBps / 10000` to `to` |
 | `claimAsBackup(to)` | A backup heir | Same, with the backup key, and only after `claimWindow` | Pays the same share; shares the nullifier, so heir and backup cannot both be paid |
 
-The 10 exported pure circuits (`passkeyCommitment`, `edKeyCommitment`, `heirLeafHash`, `aliveDigest`,
-`willUpdateDigest`, `claimNullifier`, `guardianLeaf`, `guardianNullifier`, `attestorCommitment`,
+The 11 exported pure circuits (`passkeyCommitment`, `edKeyCommitment`, `heirLeafHash`, `aliveDigest`,
+`willUpdateDigest`, `settingsDigest`, `claimNullifier`, `guardianLeaf`, `guardianNullifier`, `attestorCommitment`,
 `attestationDigest`) are called by the SDK, so TypeScript never re-implements a hash.
 
 ### Grace period
@@ -180,6 +182,13 @@ round and differs between vaults, so votes cannot be linked to each other or to 
 check-in bumps the round, which voids all earlier votes and attestations ([D13](DECISIONS.md)).
 Guardians vote in separate transactions to keep each proof small ([D6](DECISIONS.md)).
 
+The owner can replace the guardian root, the threshold and the attestor commitment with a signed
+settings update ([D17](DECISIONS.md)). The owner signs the complete new settings, so to change one
+value the app starts from `currentSettings(ledger)`. Every settings update starts a new guardian
+round: votes cast under the old set or threshold stop counting, and so do attestations signed
+before it. A guardian who was kept needs a new Merkle path from the owner; their app can tell with
+`isCurrentGuardian`.
+
 ### Cross-contract hook
 
 `inheritable_escrow` declares the vault's interface and calls `isReleasedForContract()` before paying
@@ -193,7 +202,7 @@ one transaction ([`escrow.test.ts`](../contracts/test/escrow.test.ts)).
 | [`keys.ts`](../sdk/src/keys.ts) | P-256 and Ed25519 keys and salts in the runtime's exact shapes |
 | [`webauthn.ts`](../sdk/src/webauthn.ts), [`cip30.ts`](../sdk/src/cip30.ts) | Convert real passkey assertions and wallet `signData` results to circuit inputs |
 | [`config.ts`](../sdk/src/config.ts) | Origin, relying party id and the two `clientDataJSON` lengths |
-| [`owner.ts`](../sdk/src/owner.ts) | Digests the owner signs, computed by the contract's pure circuits |
+| [`owner.ts`](../sdk/src/owner.ts) | Digests the owner signs (check-in, will, settings), computed by the contract's pure circuits |
 | [`will.ts`](../sdk/src/will.ts), [`merkle.ts`](../sdk/src/merkle.ts) | Will builder, Merkle tree and paths, `rootFromPath` |
 | [`guardians.ts`](../sdk/src/guardians.ts) | Guardian set and per-guardian paths |
 | [`witnesses.ts`](../sdk/src/witnesses.ts) | `CodicilPrivateState` and the witness functions the circuits call |

@@ -24,9 +24,11 @@ or death-registry service), **any third party** (every trigger is permissionless
 | Guardians **colluding** (fewer than k) | k-of-n threshold; one vote per guardian per round | `guardians.test.ts` "k−1 votes do nothing", "already voted" |
 | Guardians **colluding** (k or more) | Still only starts the challenge window; the owner vetoes. Owners should pick k so a quorum is hard to buy. | `guardians.test.ts` "owner veto" |
 | Votes **accumulating slowly** over months | Any check-in voids all votes so far (D13) | `guardians.test.ts` "any check-in voids votes" |
+| A guardian **turns hostile or loses their secret**; the attestor is **compromised or closes** | The owner replaces the guardian set, the threshold and the attestor with a signed settings update (D17) | `settings.test.ts` "replaces the guardians", "replaces the attestor" |
+| **Old votes counted against a new threshold**, or an old attestation used after the settings changed | Every settings update starts a new round: votes are reset and earlier attestations are void | `settings.test.ts` "voids a vote round in progress", "voids attestations signed before the update" |
 | **Pre-signed or replayed attestation** | Bound to `guardianRound`, which every check-in bumps | `guardians.test.ts` "signed before the owner last checked in", "cannot be replayed after the owner vetoes" |
 | **Backdating** a trigger to shorten the veto window | `asOf` must be within the last 15 minutes | `guardians.test.ts` "stale timestamps" |
-| **Replayed owner approval** (check-in or will update) | Digest binds the vault address, the new value and the nonce; the nonce moves on every owner action | `auth.test.ts` "replayed approval", "another vault", "check-in approval to change the will" |
+| **Replayed owner approval** (check-in, will update or settings update) | Digest binds the vault address, the new value and the nonce, under a tag per kind of action; the nonce moves on every owner action | `auth.test.ts` "replayed approval", "another vault", "check-in approval to change the will"; `settings.test.ts` "replayed approval", "another vault", "differ from what was signed", "check-in or will approval" |
 | **Stolen phishing-site passkey assertion** | The circuit checks `rpIdHash` (the site) and that Face ID / Touch ID was used (UV flag) | `auth.test.ts` "another website", "requires user verification" |
 | **Coercion to push the deadline decades ahead** | A check-in can set the deadline at most `maxPeriod` from *now*; repeated check-ins cannot stack (D9) | `auth.test.ts` "cannot chain check-ins" |
 | **Impersonating an heir** | Must prove the leaf is in the will *and* know the secret key behind its commitment | `claims.test.ts` "not the heir", "not in will", "tampered leaf" |
@@ -60,7 +62,11 @@ or death-registry service), **any third party** (every trigger is permissionless
   Windows are days long, except for the 15-minute freshness window on triggers.
 - **Attestor trust.** An attestor's signature still only starts the challenge window. A compromised
   attestor can cause false alarms but cannot release funds by itself.
-- **Guardians and attestor are fixed at deployment** for now (D13).
+- **Changing guardians needs the owner's key and an armed vault.** Once a countdown has started the
+  settings are locked: the owner vetoes first, then replaces the guardians (D17). Someone holding an
+  owner key can also replace them; that is the same power the key already has over the will.
+- **A removed guardian is not told.** Their vote simply stops working. A guardian who was kept needs
+  a new path from the owner.
 - **The release fee is fixed at deployment** and is only as binding as the app that deploys the
   vault: an owner who deploys the contract themselves can set it to zero. Nobody, the operator
   included, can raise it later.

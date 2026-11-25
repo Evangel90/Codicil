@@ -25,7 +25,7 @@ found, add `~/.local/bin` to your `PATH`.
 npm test
 ```
 
-Expected: three suites, **127 + 31 + 22 = 180 passed**, in about 10 seconds. The contract suite
+Expected: three suites, **155 + 33 + 22 = 210 passed**, in about 10 seconds. The contract suite
 checks every successful call against the compiled ZK circuit, so these are calls a proof can be made
 for. Details: [TESTING.md](TESTING.md).
 
@@ -69,7 +69,7 @@ Shortcuts: **⌘K** (Ctrl+K) opens a command palette to check in, skip time or a
 Optional, slower:
 
 ```bash
-npm run compile:full          # proving keys for all 12 circuits (several minutes, about 2 GB of keys)
+npm run compile:full          # proving keys for all 14 circuits (several minutes, about 2 GB of keys)
 PW_CHANNEL=chrome npm run e2e  # the browser test with Chrome's real WebAuthn API
 FC_RUNS=500 npm test -w @codicil/contracts   # longer property tests
 ```

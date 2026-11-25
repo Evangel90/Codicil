@@ -6,6 +6,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { sampleContractAddress } from '@midnight-ntwrk/compact-runtime';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { p256 } from '@noble/curves/nist.js';
 import { bytesToHex, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
@@ -18,11 +19,13 @@ import {
   clientDataLengths,
   COMPILED_CLIENT_DATA_LENGTHS,
   createWitnesses,
+  currentSettings,
   DEFAULT_ORIGIN,
   fromCoseSign1,
   guardianLeaf,
   guardianSecrets,
   heirKeyFromScalar,
+  isCurrentGuardian,
   MAX_FEE_BPS,
   MissingSecretError,
   newEdKey,
@@ -32,6 +35,7 @@ import {
   newSalt,
   parseDerSignature,
   payoutFor,
+  settingsDigest,
   publicKeyFromCoseKey,
   releaseFeeConfig,
   releaseFeeFor,
@@ -235,6 +239,37 @@ describe('guardian sets', () => {
     const set = buildGuardianSet(leaves, 2);
     expect(guardianSecrets(set, secrets[1]).path).toEqual(set.tree.pathFor(1));
     expect(() => guardianSecrets(set, newGuardianSecret())).toThrow('not one of the vault guardians');
+  });
+
+  it('a guardian can tell whether their path is still current', () => {
+    const set = buildGuardianSet(leaves, 2);
+    const mine = guardianSecrets(set, secrets[0]);
+    expect(isCurrentGuardian(mine, set.root)).toBe(true);
+    // The owner replaced the set: even a guardian who was kept needs a new path.
+    const replaced = buildGuardianSet([leaves[0], guardianLeaf(newGuardianSecret())], 1);
+    expect(isCurrentGuardian(mine, replaced.root)).toBe(false);
+    expect(isCurrentGuardian(guardianSecrets(replaced, secrets[0]), replaced.root)).toBe(true);
+    // A path with someone else's secret is not a membership.
+    expect(isCurrentGuardian({ ...mine, secret: newGuardianSecret() }, set.root)).toBe(false);
+  });
+
+  it('the settings digest binds the vault, every setting and the nonce', () => {
+    const vault = sampleContractAddress();
+    const set = buildGuardianSet(leaves, 2);
+    const settings = { guardianRoot: set.root, guardianThreshold: 2n, attestorKeyCommit: new Uint8Array(32).fill(9) };
+    // Extra ledger fields are ignored: only the settings are signed.
+    expect(currentSettings({ ...settings, nonce: 5n } as typeof settings)).toEqual(settings);
+    const base = settingsDigest(vault, settings, 0n);
+    const others = [
+      settingsDigest(sampleContractAddress(), settings, 0n),
+      settingsDigest(vault, settings, 1n),
+      settingsDigest(vault, { ...settings, guardianRoot: set.root + 1n }, 0n),
+      settingsDigest(vault, { ...settings, guardianThreshold: 3n }, 0n),
+      settingsDigest(vault, { ...settings, attestorKeyCommit: new Uint8Array(32) }, 0n),
+    ];
+    const seen = new Set([base, ...others].map((d) => bytesToHex(d)));
+    expect(seen.size).toBe(others.length + 1);
+    expect(settingsDigest(vault, settings, 0n)).toEqual(base);
   });
 
   it('leaves reveal nothing obvious about the secret', () => {

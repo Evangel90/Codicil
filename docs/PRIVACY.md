@@ -33,7 +33,7 @@ leaks we have not removed yet. To see it live, open the **Privacy Lens** or **Ac
 | `passkeyRpIdHash` | SHA-256 of the website's domain | Which website the passkey belongs to (the Codicil app) |
 | `willRoot` | Merkle root of salted heir entries | Nothing about the will. It changes when the will changes |
 | `willVersion` | Counter | How many times the will was changed |
-| `nonce` | Counter of owner actions | How many check-ins and will changes so far |
+| `nonce` | Counter of owner actions | How many check-ins, will changes and settings changes so far |
 | `deadline`, `maxPeriod`, `challengeWindow`, `claimWindow`, `gracePeriod` | Timers | The owner's check-in rhythm and how much slack they chose. The contract must enforce time, so time is public |
 | `phase`, `pendingUntil`, `releasedAt` | State machine | Whether the switch has started or the will was released |
 | `guardianRoot`, `guardianThreshold` | Merkle root, k | k, but not n and not who |
@@ -53,6 +53,7 @@ transcript bytes for the secret values.
 |---|---|---|---|
 | `checkInPasskey` / `checkInEd25519` | The new deadline; that a passkey or a wallet was used | Public key, salt, signature, signed digest | `lifecycle.test.ts` "what a check-in reveals" |
 | `updateWillPasskey` / `updateWillEd25519` | The new will root; a `codicil:will-changed:v1` event with no payload | Heirs, shares, dates, the old will, what changed | `auth.test.ts` "emits a notice" |
+| `updateSettingsPasskey` / `updateSettingsEd25519` | The new guardian root, threshold and attestor commitment; that a passkey or a wallet was used | Owner key, salt, signature, signed digest; who the guardians or the attestor are, old or new | `settings.test.ts` "publishes the new root" |
 | `deposit` | Amount; the depositing address (unshielded input) | — | `lifecycle.test.ts` |
 | `triggerTimeout`, `finalizeRelease` | That the switch started / the will was released. With a release fee: the fee amount and the fee address | — | `lifecycle.test.ts`; `fee.test.ts` "public by design" |
 | A check-in during the grace period | The same as any check-in. Because block time is public, everyone can see that it came after the deadline | — | `lifecycle.test.ts` "grace period" |
@@ -74,13 +75,17 @@ We state these plainly rather than hide them ([D4](DECISIONS.md), [D8](DECISIONS
 4. **Will changes are visible.** `willRoot` and `willVersion` change, and an event is emitted, so
    anyone can see *that* and *when* a will was changed, and how often. Nobody can see what changed.
    An heir who was removed is not told by the chain; they find out only because no new letter arrives.
-5. **A fee address links vaults to an operator.** A vault deployed with a release fee names its fee
+5. **Settings changes are visible.** A settings update shows that, and when, the owner changed
+   guardians or the attestor. Comparing the old and new values shows which of the three changed
+   (root, threshold, attestor commitment). It does not show who was added or removed, or how many
+   guardians there are.
+6. **A fee address links vaults to an operator.** A vault deployed with a release fee names its fee
    address on the ledger from day one. Every vault that pays the same operator carries the same
    address, so observers can list them and see how large each estate is. They still learn nothing
    about owners or heirs. A vault with no fee has a zero address and is not linked this way.
-6. **Activity rhythm.** The deadline moves at each check-in, so observers can see how often *some*
+7. **Activity rhythm.** The deadline moves at each check-in, so observers can see how often *some*
    vault is renewed. Unlinkable check-ins are a stretch goal.
-7. **Network metadata.** Like any transaction, a check-in is sent from somewhere and pays a fee.
+8. **Network metadata.** Like any transaction, a check-in is sent from somewhere and pays a fee.
    What a Midnight fee payment reveals about the payer is checked as part of the Preprod test (V14).
    Until then, assume an owner should check in from a wallet that is not publicly theirs.
 

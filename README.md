@@ -16,7 +16,7 @@ owner has had a chance to veto.
 
 > **Status (Wave 3, in progress):** the vault contract, SDK and web app are built and tested. That
 > covers passkey and wallet check-ins, multi-heir wills with tranches and backup heirs, hidden k-of-n
-> guardians, the attestation trigger and the cross-contract hook: 180 tests, every contract call
+> guardians, the attestation trigger and the cross-contract hook: 210 tests, every contract call
 > checked against its ZK circuit, plus browser tests that check in with Chrome's real WebAuthn. The
 > Preprod deployment is next. See [What changed this Wave](#what-changed-this-wave).
 > Demo video and deck: *coming*.
@@ -110,6 +110,8 @@ flowchart LR
   and path.
 - **Check-in** signs `aliveDigest(vault, nextDeadline, nonce)`. The circuit checks the signature
   against the committed key without revealing it. Replays fail because the nonce moves.
+- **Settings**: the owner can replace the guardians, the threshold and the attestor with a signed
+  update. It starts a new guardian round, so earlier votes and attestations stop counting.
 - **Release**: the countdown starts after a missed deadline plus an optional grace period (anyone
   can trigger it), when k of n
   hidden guardians vote, or with an attestation from a trusted signer. In every case the owner can
@@ -185,6 +187,7 @@ this call can be generated", not just "the JavaScript ran".
 | [`fee.test.ts`](contracts/test/fee.test.ts) | Optional release fee: exact amount, shares taken of what remains, the 10% cap, malicious fee witness, no fee means no transfer |
 | [`properties.test.ts`](contracts/test/properties.test.ts) | fast-check: random wills, estates, fees and claim orders; the owner can always veto |
 | [`guardians.test.ts`](contracts/test/guardians.test.ts) | k-of-n threshold, double votes, non-members, stale timestamps, votes voided by check-ins, attestation replay across rounds |
+| [`settings.test.ts`](contracts/test/settings.test.ts) | Owner-signed replacement of guardians and attestor: votes and attestations voided, replay, other vault, tampered values, wrong key, when it is locked |
 | [`escrow.test.ts`](contracts/test/escrow.test.ts) | Cross-contract hook: two proofs in one transaction |
 | [`webauthn-real.test.ts`](contracts/test/webauthn-real.test.ts) | Real Touch ID assertions verified by the vault's own WebAuthn module |
 | [`errors.test.ts`](contracts/test/errors.test.ts) | Every contract error has a friendly UI message and is documented |
@@ -213,7 +216,7 @@ Design decisions: [docs/DECISIONS.md](docs/DECISIONS.md). Error catalogue: [docs
 
 1. End-to-end deployment on Preprod, with the app talking to Lace and the proof server.
 2. In the app: writing a will from scratch, and heirs creating their own keys on their own devices.
-3. Owner-signed updates to guardians and the attestor; a recovery key.
+3. A recovery key.
 4. Stretch: unlinkable check-ins, a sealed digital legacy (encrypted letters with keys split among
    guardians), and executor disclosures for courts and tax authorities.
 
@@ -232,7 +235,7 @@ Milestones and status: [docs/ROADMAP.md](docs/ROADMAP.md). Customers, go-to-mark
   guide, plain-words summary with warnings, presets, a public inspector, calendar reminders, a ⌘K command palette, guardian reports, veto, release, claims and a privacy
   lens, in the Obsidian design, with a landing page whose 3D point field changes shape as you scroll. Dark and light themes,
   works on phones.
-- 180 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
+- 210 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
   CI on every push.
 - Docs: architecture, privacy (every field and transaction), a threat model mapping each threat to
   the test that covers it, testing, roadmap, business and a judges' quickstart. Details: [docs/WAVES.md](docs/WAVES.md).

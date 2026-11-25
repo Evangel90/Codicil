@@ -34,7 +34,7 @@ results are written down ([VALIDATION.md](VALIDATION.md), [DECISIONS.md](DECISIO
   - ✅ notice to heirs' apps when the will changes (an event, [D14](DECISIONS.md));
   - ✅ an optional grace period between the deadline and the switch ([D15](DECISIONS.md));
   - ✅ an optional release fee ([BUSINESS.md](BUSINESS.md), [D16](DECISIONS.md));
-  - owner-signed updates to guardians and the attestor ([D13](DECISIONS.md));
+  - ✅ owner-signed updates to guardians and the attestor ([D17](DECISIONS.md));
   - a recovery key.
 - **Hiding payout amounts** with pre-split shielded coins or batched claims ([D8](DECISIONS.md)).
 

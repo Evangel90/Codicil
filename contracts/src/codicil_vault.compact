@@ -60,6 +60,15 @@ export struct VaultConfig {
   attestorKeyCommit: Bytes<32>;   // attestorCommitment(pk, salt); all zeros = disabled
 }
 
+// What the owner can replace after deployment with a signed settings update.
+// The owner signs all of it at once, so one approval can never be read as a
+// different change (docs/DECISIONS.md D17).
+export struct VaultSettings {
+  guardianRoot: Field;
+  guardianThreshold: Uint<8>;     // 0 = no guardians
+  attestorKeyCommit: Bytes<32>;   // all zeros = no attestor
+}
+
 // ─── Public ledger ──────────────────────────────────────────────────────────
 export ledger phase: Phase;
 export ledger ownerPasskeyCommit: Bytes<32>;
@@ -84,7 +93,7 @@ export ledger feeRecipient: UserAddress;
 export ledger claimNullifiers: Set<Bytes<32>>;
 export ledger guardianRoot: Field;
 export ledger guardianThreshold: Uint<8>;
-export ledger guardianRound: Counter;     // bumped by every owner check-in
+export ledger guardianRound: Counter;     // bumped by every owner check-in and settings update
 export ledger guardianVotes: Counter;     // votes in the current round
 export ledger guardianNullifiers: Set<Bytes<32>>;
 export ledger attestorKeyCommit: Bytes<32>;
@@ -170,6 +179,23 @@ export pure circuit aliveDigest(vault: Bytes<32>, next: Uint<64>, n: Uint<64>): 
 export pure circuit willUpdateDigest(vault: Bytes<32>, newRoot: Field, n: Uint<64>): Bytes<32> {
   return persistentHash<Vector<4, Bytes<32>>>(
     [pad(32, "codicil:will:v1"), vault, newRoot as Bytes<32>, n as Bytes<32>]);
+}
+
+// What the owner signs to replace the guardians and the attestor: one hash
+// over a fixed-layout message holding the tag, the vault, the complete new
+// settings and the nonce. Its 137 bytes cost the same three SHA-256 blocks as
+// the other owner digests; hashing the settings on their own first would add
+// a block and push the wallet circuit into the next size class (D17).
+struct SettingsApproval {
+  tag: Bytes<32>;
+  vault: Bytes<32>;
+  settings: VaultSettings;
+  nonce: Uint<64>;
+}
+
+export pure circuit settingsDigest(vault: Bytes<32>, s: VaultSettings, n: Uint<64>): Bytes<32> {
+  return persistentHash<SettingsApproval>(
+    SettingsApproval { tag: pad(32, "codicil:settings:v1"), vault: vault, settings: s, nonce: n });
 }
 
 // One per will leaf, shared by the heir and their backup so only one can claim.
@@ -305,6 +331,41 @@ export circuit updateWillEd25519(newRoot: Field): [] {
   willUpdatePreconditions();
   approvedByWallet(willUpdateDigest(kernel.self().bytes, root, nonce));
   applyWillUpdate(root);
+}
+
+// ─── Settings update (guardians and attestor) ──────────────────────────────
+// Same window as a will update: only a living owner, before any countdown.
+// An owner facing a false guardian report vetoes it first, then changes the
+// guardians.
+circuit settingsPreconditions(): [] {
+  assert(phase == Phase.armed, "settings locked");
+  assert(blockTimeLt(deadline), "switch already expired");
+}
+
+circuit applySettings(s: VaultSettings): [] {
+  guardianRoot = s.guardianRoot;
+  guardianThreshold = s.guardianThreshold;
+  attestorKeyCommit = s.attestorKeyCommit;
+  nonce.increment(1);
+  // Always a new round: votes cast under the old guardian set or threshold must
+  // not count towards the new one, and attestations signed so far (they are
+  // bound to the round) stop working, whoever signed them.
+  guardianRound.increment(1);
+  guardianVotes.resetToDefault();
+}
+
+export circuit updateSettingsPasskey(settings: VaultSettings): [] {
+  const s = disclose(settings);
+  settingsPreconditions();
+  approvedByPasskey(settingsDigest(kernel.self().bytes, s, nonce));
+  applySettings(s);
+}
+
+export circuit updateSettingsEd25519(settings: VaultSettings): [] {
+  const s = disclose(settings);
+  settingsPreconditions();
+  approvedByWallet(settingsDigest(kernel.self().bytes, s, nonce));
+  applySettings(s);
 }
 
 // ─── Funding and release ────────────────────────────────────────────────────

@@ -209,3 +209,47 @@ address). `finalizeRelease` sends `floor(estateTotal × feeBps / 10000)` to that
 release. That is unavoidable for a fee. The cost is a link: every vault that pays the same operator
 shows the same address ([PRIVACY.md](PRIVACY.md), known leaks). **Limits:** the fee address is a
 user address, not a contract; and the fee binds only owners who deploy through an app that sets it.
+
+## D17: One signed settings update replaces guardians and attestor together (2026-11-25)
+
+D13 left guardians and the attestor fixed at deployment. `updateSettingsPasskey` and
+`updateSettingsEd25519` now let the owner replace `guardianRoot`, `guardianThreshold` and
+`attestorKeyCommit`, authenticated exactly like a check-in.
+
+- **One circuit per auth method, not one per setting.** A passkey circuit costs about 450 MB of
+  prover key and a wallet circuit about 280 MB. Separate circuits for "guardians" and "attestor"
+  would add four heavy circuits; one settings update adds two. The circuit count goes from 12 to 14.
+- **The owner signs the complete new settings**, not a change. The digest is one SHA-256 over a
+  fixed-layout message: tag `"codicil:settings:v1"`, vault, the three settings, nonce (137 bytes).
+  One approval cannot be read as a different change, and there is no action tag to get wrong. To
+  change one value the app starts from the current ledger values.
+- **One hash, not two.** Hashing the settings first and then the usual four-part digest was the
+  first version. It cost two extra SHA-256 blocks, about 4,000 rows, which pushed the wallet
+  circuit past 2^17 rows and doubled its prover key to 552 MB. The single message fits the same
+  three blocks as the check-in and will digests, so `updateSettingsEd25519` is the size of
+  `updateWillEd25519` ([VALIDATION.md](VALIDATION.md), "Circuit headroom"). Folding this into the will update was
+  rejected: it would change two tested circuits and make every will change re-sign the guardians.
+- **Replay.** Same rules as D5: the vault address stops use on another vault, the nonce stops reuse
+  on this one, and the domain tag stops a check-in or will approval being used here or the reverse.
+  All are tested for both auth methods.
+- **A vote round in progress is always voided.** Every settings update bumps `guardianRound` and
+  resets `guardianVotes`, whether or not the guardian values changed. Otherwise one vote out of two
+  could become "one out of one" by lowering the threshold, or votes from removed guardians could
+  count towards the new set. Because attestations are bound to the round (D13), any attestation
+  signed before the update is void too, even from an attestor who was kept; they sign again. This
+  is the simplest rule that is safe, and only the owner can cause it.
+- **Only while armed and before the deadline** (`settings locked`, `switch already expired`), like
+  a will update. During a countdown the owner must veto first. This stops settings being changed
+  under a countdown that guardians or an attestor started, and keeps "a check-in is the only owner
+  action during a countdown" true.
+- **No validation of the values.** The contract cannot know how many guardians are behind a root, so
+  a threshold above the set size makes the guardian trigger unusable until the next update; the SDK
+  (`buildGuardianSet`) refuses to build one. Threshold 0 and a zero attestor commitment switch each
+  trigger off.
+- **No event.** A guardian's app can compare its path with `guardianRoot` on the ledger
+  (`isCurrentGuardian`).
+
+**What it makes public:** the new root, threshold and attestor commitment (all already public
+fields), and therefore that a change happened and which of the three values changed. Not who the
+guardians or attestor are. **Cost:** two more heavy circuits, in the same size class as the two
+will-update circuits.

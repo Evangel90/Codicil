@@ -22,6 +22,7 @@ from the catalogue or from this page, or if the catalogue has a stale entry.
 | `unknown owner key` | owner | This passkey or wallet is not the one registered as the owner of this vault. |
 | `bad owner signature` | owner | The approval signature could not be verified. Please approve again. |
 | `will locked` | owner | The will can only be changed while the vault is active. |
+| `settings locked` | owner | Guardians and the attestor can only be changed while the vault is active. If a countdown has started, check in first. |
 | `bad passkey data` | owner | Your browser returned an approval this vault cannot read. Try again, or use another browser. |
 | `bad passkey challenge` | owner | Your browser returned an approval this vault cannot read. Try again. |
 | `passkey signed something else` | owner | The passkey approved a different action. Please approve again. |

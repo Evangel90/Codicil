@@ -28,6 +28,7 @@ export const CONTRACT_ERRORS = {
   'unknown owner key': { audience: 'owner', message: 'This passkey or wallet is not the one registered as the owner of this vault.' },
   'bad owner signature': { audience: 'owner', message: 'The approval signature could not be verified. Please approve again.' },
   'will locked': { audience: 'owner', message: 'The will can only be changed while the vault is active.' },
+  'settings locked': { audience: 'owner', message: 'Guardians and the attestor can only be changed while the vault is active. If a countdown has started, check in first.' },
   // Passkey (WebAuthn) details
   'bad passkey data': { audience: 'owner', message: 'Your browser returned an approval this vault cannot read. Try again, or use another browser.' },
   'bad passkey challenge': { audience: 'owner', message: 'Your browser returned an approval this vault cannot read. Try again.' },
