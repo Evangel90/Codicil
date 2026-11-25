@@ -6,7 +6,7 @@
 
 import { Phase } from '@codicil/contracts/vault';
 import { CLAIM_WINDOW, DAY, demo, GUARDIANS, HEIRS, OWNER_FIRST, type Actor, type Snapshot } from './store.js';
-import { nextUp, sameActor } from './guide.js';
+import { nextUp, positionStage, sameActor } from './guide.js';
 
 export interface Jump { label: string; to: number }
 
@@ -24,7 +24,7 @@ export function jumpsFor(s: Snapshot): Jump[] {
   return out;
 }
 
-export type Tab = 'vault' | 'will' | 'lens';
+export type Tab = 'vault' | 'will' | 'savings' | 'lens';
 
 export interface Command {
   id: string;
@@ -78,6 +78,19 @@ export function commands(s: Snapshot, ctx: CommandContext): Command[] {
     if (owner && s.phase === Phase.armed && s.now < s.deadline) {
       out.push({ id: 'ics', label: 'Download check-in reminders', group: 'Do', hint: '.ics', keywords: 'calendar reminder', run: ctx.downloadReminders });
     }
+    // The savings contract: refused until the will is released, then paid once.
+    const stage = positionStage(s);
+    if (stage !== 'paid') {
+      const beneficiary: Actor = { kind: 'heir', id: s.position.beneficiary };
+      out.push({
+        id: 'withdraw',
+        label: `Withdraw from ${s.position.name} as ${HEIRS.find((h) => h.id === s.position.beneficiary)!.name}`,
+        group: 'Do',
+        hint: stage === 'locked' ? 'will be refused' : undefined,
+        keywords: 'escrow inheritable position payout hook',
+        run: () => { demo.setActor(beneficiary); ctx.setTab('savings'); void demo.withdrawPosition(beneficiary); },
+      });
+    }
   }
 
   const [day, ...skips] = jumpsFor(s);
@@ -102,6 +115,7 @@ export function commands(s: Snapshot, ctx: CommandContext): Command[] {
   const first = owner ? 'Vault' : s.actor.kind === 'heir' ? 'Your share' : s.actor.kind === 'guardian' ? 'Guardian' : 'Inspector';
   out.push({ id: 'go:vault', label: first, group: 'Go to', keywords: 'home dashboard', run: () => ctx.setTab('vault') });
   if (owner) out.push({ id: 'go:will', label: 'Will and heir letters', group: 'Go to', keywords: 'edit change letters qr', run: () => ctx.setTab('will') });
+  out.push({ id: 'go:savings', label: s.position.name, group: 'Go to', hint: 'inheritable position', keywords: 'inheritable position escrow cross-contract integration developer hook', run: () => ctx.setTab('savings') });
   out.push({ id: 'go:lens', label: 'Privacy Lens', group: 'Go to', keywords: 'ledger public private', run: () => ctx.setTab('lens') });
 
   out.push({ id: 'theme', label: 'Switch theme', group: 'Demo', keywords: 'dark light appearance', run: ctx.toggleTheme });

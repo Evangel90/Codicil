@@ -362,3 +362,45 @@
   .rules > div, .inspect-rows > div { grid-template-columns: minmax(0, 1fr); }
   .inspect h1 { font-size: 34px; }
 }
+
+/* ───────── savings: the inheritable position ───────── */
+.savings { display: flex; flex-direction: column; gap: 40px; }
+.savings-main { gap: 16px; }
+.savings-label { font-size: 14px; font-weight: 400; color: var(--o-text-2); }
+.savings-note { font-size: 15px; line-height: 1.6; color: var(--o-text-2); max-width: 560px; }
+.attempt { padding: 22px 24px; display: flex; gap: 16px; align-items: flex-start; }
+.attempt > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; font-size: 15px; line-height: 1.55; }
+.attempt h2 { font-size: 16px; font-weight: 500; letter-spacing: -0.01em; }
+.attempt-code { display: inline-block; padding: 2px 8px; border-radius: var(--o-r-xs); font-size: 13px; color: var(--o-danger); background: var(--o-danger-soft); border: 1px solid color-mix(in srgb, var(--o-danger) 28%, transparent); white-space: nowrap; }
+.calls { list-style: none; display: flex; flex-direction: column; margin-top: 4px; }
+.calls li { display: flex; gap: 14px; padding: 12px 0; border-top: 1px solid var(--o-line); }
+.calls li > span:last-child { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.calls code { font-size: 13px; color: var(--o-public); overflow-wrap: anywhere; }
+.calls-n { font-size: 12px; color: var(--o-text-3); padding-top: 2px; }
+.savings-side { padding: 20px 24px; display: flex; flex-direction: column; gap: 10px; }
+.savings-side h2 { display: inline-flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 500; }
+.savings-side dl > div { display: flex; justify-content: space-between; align-items: center; gap: 16px; min-height: 46px; padding: 8px 0; border-bottom: 1px solid var(--o-line); }
+.savings-side dt { font-size: 13px; color: var(--o-text-2); }
+.savings-side dd { font-size: 14px; text-align: right; }
+.savings-side p { color: var(--o-text-2); }
+.savings-public { background: var(--o-public-soft); border-bottom: 1px solid var(--o-line-2); }
+.savings-public h2, .savings-public dd { color: var(--o-public); }
+.savings-private { background: var(--o-private-soft); }
+.savings-private h2, .savings-private dd { color: var(--o-private); }
+.savings-row { width: 100%; display: flex; align-items: center; gap: 16px; padding: 18px 24px; border: 0; border-top: 1px solid var(--o-line); background: transparent; text-align: left; cursor: pointer; }
+.savings-row-icon { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--o-line-2); color: var(--o-text-2); flex: none; }
+.card.savings-row { border: 1px solid var(--o-line); }
+.code { margin: 0; padding: 16px 0; border: 1px solid var(--o-line); border-radius: var(--o-r-md); background: var(--o-surface); box-shadow: var(--o-hi); overflow-x: auto; font: 400 13px/1.75 var(--o-mono); color: var(--o-text-2); tab-size: 2; }
+.code code { display: inline-block; min-width: 100%; font: inherit; }
+.code-line { display: block; padding: 0 22px 0 calc(22px + var(--indent, 0) * 1ch); white-space: pre; border-left: 2px solid transparent; }
+.code-line.is-key { background: var(--o-signal-soft); border-left-color: var(--o-signal); color: var(--o-text); }
+.savings-src { max-width: 640px; }
+
+@media (max-width: 820px) {
+  .savings { gap: 32px; }
+  .attempt { padding: 20px; }
+  .savings-side { padding: 18px 20px; }
+  /* Narrow screens wrap the code, so the key line is never cut off. */
+  .code { font-size: 12px; }
+  .code-line { padding: 0 16px 0 calc(16px + var(--indent, 0) * 1ch + 2ch); text-indent: -2ch; white-space: pre-wrap; overflow-wrap: anywhere; }
+}

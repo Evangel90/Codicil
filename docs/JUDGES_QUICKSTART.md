@@ -38,8 +38,8 @@ npm run dev
 Open **http://localhost:5173** exactly (passkeys are bound to the site they were made on, and the
 vault is compiled for this address). Click **Launch the demo**.
 
-The demo runs the real compiled vault in your browser on a simulated chain whose clock you can move
-forward. Only proof generation and network fees are skipped.
+The demo runs the real compiled vault, and an example contract that calls it, in your browser on a
+simulated chain whose clock you can move forward. Only proof generation and network fees are skipped.
 
 | Step | What to do | What it shows |
 |---|---|---|
@@ -48,7 +48,8 @@ forward. Only proof generation and network fees are skipped.
 | 3 | Follow the **Next** line under the demo bar; it says whose turn it is | Guardians vote anonymously; Amara cancels with one touch |
 | 4 | **Skip to deadline** → **Start the switch** → **Skip challenge window** → **Release the will** | Anyone can trigger; the owner always has a window to veto |
 | 5 | Act as **Ben**: **Use the letter Amara gave me**, then **Claim my share** | His device checks the letter against the public will root; the claim reveals a one-time stamp, not who |
-| 6 | **Privacy Lens**, then **Act as Anyone** | The public ledger beside what only the owner's device knows; what a stranger can learn |
+| 6 | **Savings** tab: as **Ben**, **Withdraw 8,000 demo tokens** before the release, and again after it | A second contract (`inheritable_escrow`) runs beside the vault and calls it. It refuses with its own error, `vault not released`, then pays once the vault says yes. The screen shows the one line of Compact a developer writes |
+| 7 | **Privacy Lens**, then **Act as Anyone** | The public ledger beside what only the owner's device knows; what a stranger can learn |
 
 Shortcuts: **⌘K** (Ctrl+K) opens a command palette to check in, skip time or act as anyone.
 **Reset** starts again.

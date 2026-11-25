@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Codicil Authors
 //
-// Pure guidance, no I/O: who should act next in the demo, the will's rules in
-// plain words with warnings for risky choices, and the setup presets.
+// Pure guidance, no I/O: who should act next in the demo, what to try on the
+// savings screen, the will's rules in plain words with warnings for risky
+// choices, and the setup presets.
 
 import { Phase } from '@codicil/contracts/vault';
-import { CLAIM_WINDOW, DAY, GUARDIANS, OWNER_FIRST, type Actor, type Snapshot, type VaultSetup } from './store.js';
+import { CLAIM_WINDOW, DAY, GUARDIANS, HEIRS, OWNER_FIRST, type Actor, type Snapshot, type VaultSetup } from './store.js';
 
 const d = (seconds: number) => {
   const n = Math.round(seconds / DAY);
@@ -68,6 +69,36 @@ export function nextUp(s: Snapshot): NextUp {
 
 export const sameActor = (a: Actor, b: Actor) =>
   a.kind === b.kind && (a.kind === 'owner' || a.kind === 'public' || (a as { id: unknown }).id === (b as { id: unknown }).id);
+
+// ─── The savings screen ─────────────────────────────────────────────────────
+/** Where the inheritable position is: locked, open to its beneficiary, or paid. */
+export type PositionStage = 'locked' | 'open' | 'paid';
+
+export const positionStage = (s: Snapshot): PositionStage =>
+  s.position.withdrawn ? 'paid' : s.phase === Phase.released ? 'open' : 'locked';
+
+/**
+ * What to try on the savings screen. Before the release it invites one
+ * withdrawal that the contract refuses; once that has been seen, it hands back
+ * to the vault's own story, because only a release unlocks the savings.
+ */
+export function positionNext(s: Snapshot): NextUp {
+  const p = s.position;
+  const beneficiary: Actor = { kind: 'heir', id: p.beneficiary };
+  const name = HEIRS.find((h) => h.id === p.beneficiary)!.name;
+  const stage = positionStage(s);
+  if (stage === 'paid') {
+    return { tone: 'done', who: [], text: `${p.name} has paid out. It asked the vault first and got a yes, both in one transaction.` };
+  }
+  if (stage === 'open') {
+    return { tone: 'attention', who: [beneficiary], text: `The will is released, so ${p.name} will pay. ${name} can withdraw now.` };
+  }
+  if (p.lastAttempt?.code === 'vault not released') {
+    const up = nextUp(s);
+    return { ...up, text: `${p.name} refused, as it should. ${up.text}` };
+  }
+  return { tone: 'attention', who: [beneficiary], text: `${p.name} pays ${name} only after the will is released. Try a withdrawal as ${name} now and watch it refuse.` };
+}
 
 // ─── The will in plain words ────────────────────────────────────────────────
 export interface Rule { topic: string; rule: string; meaning: string }

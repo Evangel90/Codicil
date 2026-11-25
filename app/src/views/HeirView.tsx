@@ -9,10 +9,11 @@ import { sampleUserAddress } from '@midnight-ntwrk/compact-runtime';
 import { duration, Icon, ICONS, Logo } from '../components/ui.js';
 import { LetterBox } from './LetterBox.js';
 import { CLAIM_WINDOW, demo, fmtDate, fmtShort, OWNER_FIRST, TOKEN, type HeirProfile, type Snapshot } from '../demo/store.js';
+import type { Tab } from '../demo/commands.js';
 
 type Status = 'removed' | 'locked' | 'pending' | 'waiting' | 'claimable' | 'claimed';
 
-export function HeirView({ s, id }: { s: Snapshot; id: HeirProfile['id'] }) {
+export function HeirView({ s, id, openTab }: { s: Snapshot; id: HeirProfile['id']; openTab: (t: Tab) => void }) {
   const me = s.heirs.find((h) => h.profile.id === id)!;
   const [to, setTo] = useState(() => sampleUserAddress());
   const busy = s.tx?.status === 'running';
@@ -136,6 +137,20 @@ export function HeirView({ s, id }: { s: Snapshot; id: HeirProfile['id'] }) {
             </p>
           </div>
         </section>
+      )}
+
+      {id === s.position.beneficiary && (
+        <button type="button" className="card rowlink savings-row" onClick={() => openTab('savings')}>
+          <span className="savings-row-icon" aria-hidden="true"><Icon d={ICONS.chain} size={17} stroke={1.5} /></span>
+          <span className="lens-text">
+            <span>{OWNER_FIRST} also named you in {s.position.name}</span>
+            <span>
+              {s.position.withdrawn
+                ? `${s.position.held.toLocaleString()} ${TOKEN}, paid to you`
+                : `${s.position.held.toLocaleString()} ${TOKEN} in another contract, ${released ? 'ready to withdraw' : 'paid out when the will is released'}`}
+            </span>
+          </span>
+        </button>
       )}
 
       <p className="small muted heir-foot">

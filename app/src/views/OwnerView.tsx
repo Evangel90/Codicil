@@ -6,7 +6,7 @@
 
 import { useState } from 'react';
 import { Phase } from '@codicil/contracts/vault';
-import { Countdown, duration, FACE_ID, HashChip, Icon, PHASE } from '../components/ui.js';
+import { Countdown, duration, FACE_ID, HashChip, Icon, ICONS, PHASE } from '../components/ui.js';
 import { days, demo, fmtDate, fmtShort, OWNER_FIRST, TOKEN, type Snapshot } from '../demo/store.js';
 import { Activity } from './Activity.js';
 import { calendarFile, downloadCalendar, remindersFor } from '../demo/ics.js';
@@ -198,6 +198,13 @@ export function OwnerView({ s, openTab }: { s: Snapshot; openTab: (t: Tab) => vo
             <span className="lens-icon" aria-hidden="true"><span /><span /></span>
             <span className="lens-text"><span>Open the Privacy Lens</span><span>See exactly what the chain knows</span></span>
             <span aria-hidden="true" className="muted">→</span>
+          </button>
+          <button type="button" className="rowlink savings-row" onClick={() => openTab('savings')}>
+            <span className="savings-row-icon" aria-hidden="true"><Icon d={ICONS.chain} size={17} stroke={1.5} /></span>
+            <span className="lens-text">
+              <span>{s.position.name}</span>
+              <span>{s.position.held.toLocaleString()} {TOKEN} · {s.position.withdrawn ? 'paid to its beneficiary' : 'opens when this will is released'}</span>
+            </span>
           </button>
         </aside>
       </div>

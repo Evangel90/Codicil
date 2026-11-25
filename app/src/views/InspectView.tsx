@@ -24,6 +24,7 @@ export function InspectView({ s }: { s: Snapshot }) {
       ? `Pending. The switch started; whoever controls the vault can cancel until ${fmtDate(s.pendingUntil)}.`
       : `Released on ${fmtDate(s.releasedAt)}. Heirs may claim.`;
 
+  const p = s.position;
   const rows: [string, React.ReactNode, string][] = [
     ['State', state, 'The contract must enforce time, so the clock is public by design.'],
     ['Owner', <HashChip key="o" value={s.chain.ownerPasskeyCommit} />, 'A sealed commitment to a passkey. Not a name, a wallet or a device; two vaults by the same person look unrelated.'],
@@ -33,6 +34,7 @@ export function InspectView({ s }: { s: Snapshot }) {
     ['Challenge window', <span key="w" className="mono">{days(s.setup!.window)} days</span>, 'How long the owner has to cancel once the switch starts.'],
     ['Claims', <span key="c" className="mono">{claims} one-time stamp{claims === 1 ? '' : 's'}</span>, claims ? 'Each stamp stops a share being claimed twice. It says nothing about who claimed or which share it was.' : 'Nobody has claimed.'],
     ['Balance', <span key="b" className="mono">{s.estate.toLocaleString()} {TOKEN}</span>, s.phase === Phase.released ? `Payouts went to fresh addresses, so they can't be tied to the heirs or to each other.` : 'The total is public; how it divides is not.'],
+    ['Linked contracts', <span key="l"><HashChip value={p.address} /> · <span className="mono">{p.held.toLocaleString()} {TOKEN}{p.withdrawn ? ', paid out' : ''}</span></span>, `Another contract, ${p.name}, asks this vault "released?" before it pays. The link and the amount are public. Its beneficiary is a sealed commitment, not a name or an address.`],
   ];
 
   return (

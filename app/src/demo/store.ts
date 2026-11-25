@@ -6,10 +6,18 @@
 // shares, the backup, the guardian threshold and the timers in the setup
 // wizard, and every action runs the real vault circuit on the in-browser
 // DemoChain.
+//
+// Next to the vault sits one more contract, Harbour Savings: the example
+// escrow from contracts/src/inheritable_escrow.compact, holding tokens for a
+// beneficiary and paying out only when it has asked the vault "released?".
 
 import { useSyncExternalStore } from 'react';
-import { encodeRawTokenType, encodeUserAddress, sampleRawTokenType, sampleUserAddress } from '@midnight-ntwrk/compact-runtime';
+import {
+  encodeContractAddress, encodeRawTokenType, encodeUserAddress, sampleRawTokenType, sampleUserAddress, type ContractAddress,
+} from '@midnight-ntwrk/compact-runtime';
+import { randomBytes } from '@noble/hashes/utils.js';
 import { Phase, pureCircuits, type HeirLeaf } from '@codicil/contracts/vault';
+import * as escrowModule from '@codicil/contracts/escrow';
 import {
   buildGuardianSet,
   buildWill,
@@ -71,6 +79,43 @@ export const GUARDIANS = [
   { id: 1, name: 'Sarah Lin', relation: 'Lawyer' },
   { id: 2, name: 'Tomás', relation: 'Old friend' },
 ];
+
+// ─── The inheritable position ───────────────────────────────────────────────
+/** Amara's savings in a contract written by someone else, made inheritable. */
+export const POSITION = {
+  name: 'Harbour Savings',
+  amount: 8_000n,
+  /** Known to Amara and to the beneficiary; the chain holds only a commitment. */
+  beneficiary: 'ben' as HeirProfile['id'],
+};
+
+/** The assert messages of the savings contract, as the vault's are in the SDK. */
+export type PositionRefusal = 'vault not released' | 'not the beneficiary' | 'already withdrawn';
+
+export interface PositionAttempt {
+  at: number;
+  /** Who tried, by first name; never published. */
+  by: string;
+  ok: boolean;
+  /** The contract's own assert message when it refused. */
+  code?: string;
+  /** The circuits the transaction ran, in the order they finished. */
+  calls?: { contract: 'vault' | 'savings'; circuit: string }[];
+}
+
+export interface PositionView {
+  name: string;
+  address: string;
+  // The savings contract's public ledger.
+  vault: string;
+  beneficiaryCommit: string;
+  held: bigint;
+  withdrawn: boolean;
+  // Off-chain knowledge.
+  beneficiary: HeirProfile['id'];
+  paidTo?: string;
+  lastAttempt?: PositionAttempt;
+}
 
 export type Actor =
   | { kind: 'owner' }
@@ -197,6 +242,8 @@ export interface Snapshot {
     guardianNullifierCount: number;
   };
   heirs: HeirView[];
+  /** The savings contract that pays out when this vault is released. */
+  position: PositionView;
   /** Leaf hashes, computed on the owner's device only. */
   leafHashes: string[];
   votedThisRound: number[];
@@ -211,8 +258,9 @@ class InputError extends Error {
 }
 
 /** Plain-language message for anything an action can throw. */
-function describeFailure(e: unknown): string {
-  if (contractErrorCode(e)) return explainError(e);
+function describeFailure(e: unknown, explain?: (code: string) => string | undefined): string {
+  const code = contractErrorCode(e);
+  if (code) return explain?.(code) ?? explainError(e);
   if (e instanceof Error && e.name === 'InputError') return e.message.charAt(0).toUpperCase() + e.message.slice(1) + '.';
   if (e instanceof Error && e.name === 'NotAllowedError') return 'Face ID was cancelled or timed out. Nothing was sent and nothing changed.';
   return explainError(e);
@@ -231,7 +279,30 @@ interface Keys {
   ownerSalt: Uint8Array;
   heirKeys: Record<HeirProfile['id'], { key: HeirKey; salt: Uint8Array }>;
   guardianSecretsList: Uint8Array[];
+  /** Made on the beneficiary's device; Amara only ever receives its commitment. */
+  beneficiarySecret: Uint8Array;
 }
+
+/** What `run` may change for an action that is not a plain vault call. */
+interface RunOptions {
+  stages?: Partial<Record<TxStageId, Pick<TxStage, 'label' | 'detail'>>>;
+  /** A message that fits this action better than the general one for a contract error. */
+  explain?: (code: string) => string | undefined;
+}
+
+/** Witnesses for the savings contract: the secret comes from the caller's own device. */
+const savingsWitnesses = (secret?: Uint8Array) => ({
+  beneficiarySecret: (ctx: { privateState: unknown }): [unknown, Uint8Array] => {
+    if (!secret) throw new Error('no beneficiary secret on this device');
+    return [ctx.privateState, secret];
+  },
+});
+
+const POSITION_REFUSALS: Record<PositionRefusal, string> = {
+  'vault not released': `${POSITION.name} asked the vault, and the vault said the will is not released. Nothing was paid. Try again once the will is released.`,
+  'not the beneficiary': `${POSITION.name} refused: that secret does not match its beneficiary. Nothing was paid. Only the beneficiary's own device can withdraw.`,
+  'already withdrawn': `${POSITION.name} has already paid out. There is nothing left to withdraw.`,
+};
 
 interface World extends Keys {
   chain: DemoChain;
@@ -241,6 +312,8 @@ interface World extends Keys {
   guardianSet: GuardianSet;
   deployedAt: number;
   lastCheckIn: number;
+  /** The savings contract deployed next to the vault. */
+  position: { address: ContractAddress; paidTo?: string; lastAttempt?: PositionAttempt };
   claimed: Map<number, string>;   // leaf → nullifier hex
   /** Letters each heir has loaded on their own device. */
   held: Map<HeirProfile['id'], string>;
@@ -285,6 +358,7 @@ class DemoStore {
       ownerSalt: newSalt(),
       heirKeys: Object.fromEntries(HEIRS.map((h) => [h.id, { key: newHeirKey(), salt: newSalt() }])) as Keys['heirKeys'],
       guardianSecretsList: GUARDIANS.map(() => newGuardianSecret()),
+      beneficiarySecret: randomBytes(32),
     };
     return this.keys;
   }
@@ -334,8 +408,17 @@ class DemoStore {
       guardianThreshold: guardianSet.threshold,
       attestorKeyCommit: new Uint8Array(32),
     }, now);
+    // The savings contract is fixed at deployment to this vault and to a
+    // commitment to the beneficiary's secret. It holds its own token.
+    const position = await chain.deployContract(
+      'inheritable_escrow', escrowModule, savingsWitnesses(),
+      { bytes: encodeContractAddress(chain.address) },
+      encodeRawTokenType(sampleRawTokenType()),
+      escrowModule.pureCircuits.beneficiaryCommitment(k.beneficiarySecret),
+    );
     this.world = {
       ...k, chain, passkey, setup, will, guardianSet, deployedAt: now, lastCheckIn: now, claimed: new Map(), votedRound: new Map(), held: new Map(),
+      position: { address: position },
     };
     this.activity = [{
       at: now, who: OWNER_NAME, what: 'Vault deployed and will sealed', tone: 'plain',
@@ -344,6 +427,10 @@ class DemoStore {
     }];
     await chain.call('deposit', {}, ESTATE);
     this.log(OWNER_NAME, `Deposit · ${ESTATE.toLocaleString()} ${TOKEN}`, 'public', ['The amount'], []);
+    await chain.callContract(position, 'deposit', { witnesses: savingsWitnesses() }, POSITION.amount);
+    this.log(OWNER_NAME, `${POSITION.name} made inheritable · ${POSITION.amount.toLocaleString()} ${TOKEN}`, 'public', [
+      'The address of the vault it asks before paying', 'A commitment to its beneficiary', 'The amount it holds',
+    ], ['Who the beneficiary is', "The beneficiary's secret, which never left their device"]);
     this.emit();
   }
 
@@ -429,12 +516,13 @@ class DemoStore {
     title: string,
     stageIds: TxStageId[],
     body: (stage: (id: TxStageId) => Promise<void>) => Promise<string>,
+    options: RunOptions = {},
   ): Promise<boolean> {
     if (!this.world || this.tx?.status === 'running') return false;
-    this.lastAction = () => this.run(title, stageIds, body);
+    this.lastAction = () => this.run(title, stageIds, body, options);
     const stages = stageIds.map((id) => id === 'approve' && this.world!.passkey.kind === 'demo'
       ? { ...STAGES.approve, label: 'Signing with the demo key', detail: 'A software key signs in the exact passkey format. With a device passkey this is Face ID or Touch ID.' }
-      : STAGES[id]);
+      : { ...STAGES[id], ...options.stages?.[id] });
     const t0 = performance.now();
     let mark = t0;
     this.tx = { title, stages, current: 0, status: 'running', startedAt: t0, times: [] };
@@ -461,7 +549,7 @@ class DemoStore {
       return true;
     } catch (e) {
       if (!contractErrorCode(e)) console.warn('[codicil demo]', e);
-      this.tx = { ...this.tx!, status: 'error', message: describeFailure(e), code: contractErrorCode(e), endedAt: performance.now() };
+      this.tx = { ...this.tx!, status: 'error', message: describeFailure(e, options.explain), code: contractErrorCode(e), endedAt: performance.now() };
       this.emit();
       return false;
     }
@@ -631,6 +719,69 @@ class DemoStore {
     });
   }
 
+  /**
+   * Ask the savings contract to pay out to `to`. The contract checks the
+   * caller's secret against its beneficiary commitment, then calls the vault's
+   * `isReleasedForContract` circuit, and pays only if the vault says yes.
+   *
+   * Only the beneficiary's device holds the secret. Anyone else can only
+   * guess one, which the contract refuses.
+   */
+  withdrawPosition(actor: Actor = this.actor, to: string = sampleUserAddress()) {
+    const holder = actor.kind === 'heir' && actor.id === POSITION.beneficiary;
+    const by = actor.kind === 'owner' ? OWNER_FIRST : actor.kind === 'heir' ? HEIRS.find((h) => h.id === actor.id)!.name
+      : actor.kind === 'guardian' ? GUARDIANS[actor.id].name : 'Someone';
+    return this.run(`Withdrawing from ${POSITION.name}`, ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
+      const w = this.world!;
+      if (!/^[0-9a-f]{64}$/i.test(to)) throw new InputError('that does not look like an address. It should be 64 hexadecimal characters');
+      await stage('circuit');
+      const secret = holder ? w.beneficiarySecret : randomBytes(32);
+      const attempt = { at: w.chain.now, by };
+      try {
+        const out = await w.chain.callContract(
+          w.position.address, 'withdrawToBeneficiary', { witnesses: savingsWitnesses(secret) }, { bytes: encodeUserAddress(to.toLowerCase()) },
+        );
+        const paid = out.payouts.reduce((a, [, v]) => a + v, 0n);
+        w.position.paidTo = to.toLowerCase();
+        w.position.lastAttempt = {
+          ...attempt, ok: true,
+          calls: out.trace.map((t) => ({ contract: t.address === w.chain.address ? 'vault' as const : 'savings' as const, circuit: t.circuitId })),
+        };
+        this.log('The beneficiary', `${POSITION.name} paid out · ${paid.toLocaleString()} ${TOKEN}`, 'released', [
+          'That the savings contract asked this vault whether it is released', `${paid.toLocaleString()} ${TOKEN} to a fresh address`, 'Withdrawn: yes',
+        ], [`That it was ${by}`, "The beneficiary's secret"]);
+        return `${paid.toLocaleString()} ${TOKEN} sent from ${POSITION.name} to 0x${to.slice(0, 4)}…${to.slice(-4)}. The vault confirmed the release in the same transaction.`;
+      } catch (e) {
+        w.position.lastAttempt = { ...attempt, ok: false, code: contractErrorCode(e) };
+        throw e;
+      }
+    }, {
+      stages: {
+        circuit: {
+          label: `Running ${POSITION.name}, which calls the vault`,
+          detail: 'Two compiled circuits run on this device: the savings contract and, inside it, the vault\'s "is it released?" check.',
+        },
+        proof: { label: 'Generating two zero-knowledge proofs', detail: 'On Midnight this step proves both circuits ran correctly, one proof each, in one transaction.' },
+      },
+      explain: (code) => POSITION_REFUSALS[code as PositionRefusal],
+    });
+  }
+
+  private positionView(w: World): PositionView {
+    const l = escrowModule.ledger(w.chain.ledgerOf(w.position.address));
+    return {
+      name: POSITION.name,
+      address: w.position.address,
+      vault: hex(l.vault.bytes),
+      beneficiaryCommit: hex(l.beneficiaryCommit),
+      held: l.held,
+      withdrawn: l.withdrawn,
+      beneficiary: POSITION.beneficiary,
+      paidTo: w.position.paidTo,
+      lastAttempt: w.position.lastAttempt,
+    };
+  }
+
   private heldLetter(w: World, id: HeirProfile['id']): HeldLetter | undefined {
     const text = w.held.get(id);
     if (!text) return undefined;
@@ -653,6 +804,7 @@ class DemoStore {
         guardianRound: 0n, guardianVotes: 0n, guardianThreshold: 0n,
         chain: { address: '', willRoot: '', guardianRoot: '', ownerPasskeyCommit: '', claimNullifiers: [], guardianNullifierCount: 0 },
         heirs: [], leafHashes: [], votedThisRound: [], activity: [], tx: this.tx, toast: this.toast,
+        position: { name: POSITION.name, address: '', vault: '', beneficiaryCommit: '', held: 0n, withdrawn: false, beneficiary: POSITION.beneficiary },
       };
     }
     const l = w.chain.ledger;
@@ -699,6 +851,7 @@ class DemoStore {
           letter: this.heldLetter(w, profile.id),
         };
       }),
+      position: this.positionView(w),
       leafHashes: leaves.map((leaf) => hex(pureCircuits.heirLeafHash(leaf))),
       votedThisRound: [...w.votedRound].filter(([, r]) => r === l.guardianRound).map(([id]) => id),
       activity: this.activity,
