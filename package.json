@@ -8,16 +8,23 @@
   "workspaces": [
     "contracts",
     "sdk",
-    "app"
+    "app",
+    "preprod"
   ],
   "scripts": {
     "compile": "npm run compile -w @codicil/contracts",
     "compile:full": "npm run compile:full -w @codicil/contracts",
     "typecheck": "npm run typecheck --workspaces",
-    "test": "npm test -w @codicil/contracts -w @codicil/sdk -w @codicil/app",
+    "test": "npm test -w @codicil/contracts -w @codicil/sdk -w @codicil/app -w @codicil/preprod",
     "dev": "npm run dev -w @codicil/app",
     "build": "npm run build -w @codicil/app",
-    "e2e": "npm run build -w @codicil/app && npm run e2e -w @codicil/app"
+    "e2e": "npm run build -w @codicil/app && npm run e2e -w @codicil/app",
+    "preprod:init": "npm run cli -w @codicil/preprod -- init",
+    "preprod:check": "npm run cli -w @codicil/preprod -- check",
+    "preprod:dust": "npm run cli -w @codicil/preprod -- dust",
+    "preprod:run": "npm run cli -w @codicil/preprod -- run",
+    "preprod:status": "npm run cli -w @codicil/preprod -- status",
+    "preprod:dryrun": "npm run cli -w @codicil/preprod -- dryrun"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

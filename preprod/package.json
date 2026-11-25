@@ -1,0 +1,31 @@
+{
+  "name": "@codicil/preprod",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Codicil gate V14: the vault end to end on a real Midnight network (Preprod, Preview or local)",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "cli": "tsx src/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@codicil/contracts": "0.1.0",
+    "@codicil/sdk": "0.1.0",
+    "@midnight-ntwrk/compact-runtime": "0.21.0",
+    "@midnight-ntwrk/midnight-js": "5.0.1",
+    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "5.0.1",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "5.0.1",
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "5.0.1",
+    "@midnight-ntwrk/midnight-js-protocol": "5.0.1",
+    "@midnightntwrk/wallet-sdk": "2.0.1",
+    "@midnightntwrk/zkir-v3": "3.2.1",
+    "rxjs": "7.8.2",
+    "ws": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.2",
+    "tsx": "4.23.15"
+  }
+}
