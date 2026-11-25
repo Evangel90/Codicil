@@ -264,3 +264,38 @@ is ready to report upstream.
   - X25519 shared secrets agree whichever form is used.
 - **Note:** X25519 keys carry no x sign bit. An heir importing a bare X25519 key must also supply
   one bit, or the app tries both and matches against the commitment.
+
+## Circuit headroom (2026-11-25)
+
+Prover-key size follows the circuit's row count rounded up to a power of two, so what matters is
+how far each circuit is from the next power. `zkir-v3 mock-compile -v <circuit>.zkir` prints the
+row count in a few seconds, without generating keys.
+
+| Circuit | Rows used | Rows available | Spare |
+|---|---:|---:|---:|
+| `checkInEd25519` (as first built) | 131,063 | 131,063 (2^17 − 9) | **0** |
+| `updateWillEd25519` (as first built) | 130,899 | 131,063 | 164 |
+| `checkInPasskey` (as first built) | 254,797 | 262,135 (2^18 − 9) | 7,338 |
+| `updateWillPasskey` (as first built) | 254,633 | 262,135 | 7,502 |
+
+**Finding.** The wallet check-in filled its size class to the last row. One more constraint moves it
+to 2^18 rows, which doubles its prover key from 276 MB to 552 MB. Check-in is the circuit owners run
+most often.
+
+**What costs rows.** Each read of a ledger field costs about 13 rows, even if the same field was
+read a line earlier; the compiler does not merge them. A SHA-256 block costs about 2,000 rows.
+
+**Fix.** The owner circuits now read each ledger field once, into a `const`: `phase` in check-in (it
+was read three times), `maxPeriod` (twice) and the owner key commitment in both auth helpers
+(twice). Behaviour is unchanged; the transcript has fewer reads.
+
+| Circuit | Rows after | Spare |
+|---|---:|---:|
+| `checkInEd25519` | 131,006 | 57 |
+| `updateWillEd25519` (with the will-change event, 24 rows) | 130,907 | 156 |
+| `checkInPasskey` | 254,740 | 7,395 |
+| `updateWillPasskey` (with the will-change event) | 254,641 | 7,494 |
+
+**Rule for future changes.** Anything added to a wallet owner circuit has a budget of a few dozen
+rows. Run `mock-compile` on `checkInEd25519.zkir` before and after, and prefer designs that add
+nothing to the owner circuits.

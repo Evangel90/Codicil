@@ -188,25 +188,31 @@ export pure circuit attestationDigest(vault: Bytes<32>, round: Uint<64>): Bytes<
 }
 
 // ─── Owner authentication ───────────────────────────────────────────────────
+// The owner circuits read each ledger field once, into a `const`. A ledger
+// read costs about 13 rows, and the wallet check-in fills its circuit size
+// (2^17 rows) to the last row: one row more doubles its prover key
+// (docs/VALIDATION.md, "Circuit headroom").
 circuit approvedByPasskey(digest: Bytes<32>): [] {
   const pk = ownerPasskey();
-  assert(ownerPasskeyCommit != default<Bytes<32>>
-      && passkeyCommitment(pk, ownerPasskeySalt()) == ownerPasskeyCommit, "unknown owner key");
+  const commit = ownerPasskeyCommit;
+  assert(commit != default<Bytes<32>>
+      && passkeyCommitment(pk, ownerPasskeySalt()) == commit, "unknown owner key");
   assert(webauthnVerify(ownerPasskeyAssertion(digest), digest, passkeyRpIdHash, pk),
          "bad owner signature");
 }
 
 circuit approvedByWallet(digest: Bytes<32>): [] {
   const pk = ownerEdKey();
-  assert(ownerEdCommit != default<Bytes<32>>
-      && edKeyCommitment(pk, ownerEdSalt()) == ownerEdCommit, "unknown owner key");
+  const commit = ownerEdCommit;
+  assert(commit != default<Bytes<32>>
+      && edKeyCommitment(pk, ownerEdSalt()) == commit, "unknown owner key");
   assert(cip30Verify(ownerEdSignature(digest), digest, pk), "bad owner signature");
 }
 
 // ─── Check-in (proof of life) ───────────────────────────────────────────────
-circuit checkInPreconditions(next: Uint<64>): [] {
-  assert(phase != Phase.released, "vault already released");
-  if (phase == Phase.armed) {
+circuit checkInPreconditions(p: Phase, next: Uint<64>): [] {
+  assert(p != Phase.released, "vault already released");
+  if (p == Phase.armed) {
     assert(blockTimeLt(deadline), "switch already expired");
   }
   assert(blockTimeLt(next), "deadline must be in the future");
@@ -214,34 +220,37 @@ circuit checkInPreconditions(next: Uint<64>): [] {
   // deadline: otherwise repeated check-ins could push the deadline arbitrarily
   // far, and a long challenge window could leave the owner unable to veto
   // (found by the property tests; docs/DECISIONS.md D9).
-  const earliest = next > maxPeriod ? (next - maxPeriod) as Uint<64> : 0 as Uint<64>;
+  const longest = maxPeriod;
+  const earliest = next > longest ? (next - longest) as Uint<64> : 0 as Uint<64>;
   assert(blockTimeGte(earliest), "deadline too far");
 }
 
-circuit applyCheckIn(next: Uint<64>): [] {
+circuit applyCheckIn(p: Phase, next: Uint<64>): [] {
   deadline = next;
   nonce.increment(1);
   // Proof of life voids every guardian vote and attestation made so far
   // (docs/DECISIONS.md D13), not just those that triggered a countdown.
   guardianRound.increment(1);
   guardianVotes.resetToDefault();
-  if (phase == Phase.pending) {
+  if (p == Phase.pending) {
     phase = Phase.armed;   // owner veto during the challenge window
   }
 }
 
 export circuit checkInPasskey(nextDeadline: Uint<64>): [] {
   const next = disclose(nextDeadline);
-  checkInPreconditions(next);
+  const p = phase;
+  checkInPreconditions(p, next);
   approvedByPasskey(aliveDigest(kernel.self().bytes, next, nonce));
-  applyCheckIn(next);
+  applyCheckIn(p, next);
 }
 
 export circuit checkInEd25519(nextDeadline: Uint<64>): [] {
   const next = disclose(nextDeadline);
-  checkInPreconditions(next);
+  const p = phase;
+  checkInPreconditions(p, next);
   approvedByWallet(aliveDigest(kernel.self().bytes, next, nonce));
-  applyCheckIn(next);
+  applyCheckIn(p, next);
 }
 
 // ─── Will update ────────────────────────────────────────────────────────────
