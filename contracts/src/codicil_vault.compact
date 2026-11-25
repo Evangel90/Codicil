@@ -254,6 +254,10 @@ circuit applyWillUpdate(root: Field): [] {
   willRoot = root;
   willVersion.increment(1);
   nonce.increment(1);
+  // Notice for heirs' apps: every letter issued before this is out of date
+  // (its Merkle path leads to the old root). The event carries no payload;
+  // the new root and version are already on the ledger.
+  emit(Misc { name: pad(32, "codicil:will-changed:v1"), payload: default<Bytes<256>> });
 }
 
 export circuit updateWillPasskey(newRoot: Field): [] {

@@ -36,6 +36,8 @@ import {
   signLikePasskey,
   signLikeWallet,
   toWebAuthnAssertion,
+  VAULT_EVENTS,
+  vaultEventName,
   verifyCip30Signature,
   verifyWebAuthnAssertion,
 } from '../src/index.js';
@@ -240,5 +242,26 @@ describe('guardian sets', () => {
     const { r, s } = signAttestation(key.sk, digest);
     const pub = p256.Point.fromAffine({ x: key.pk.x, y: key.pk.y }).toBytes();
     expect(p256.verify(new p256.Signature(r, s).toBytes('compact'), digest, pub, { prehash: false, lowS: false })).toBe(true);
+  });
+});
+
+describe('vault events', () => {
+  /** A `Misc` event as the runtime reports it: one 288-byte value with trailing zeros trimmed. */
+  const misc = (name: string) => ({
+    version: 1,
+    eventType: 'misc',
+    data: { tag: 'cell', content: { value: [utf8ToBytes(name)], alignment: [{ tag: 'atom', value: { tag: 'bytes', length: 288 } }] } },
+  });
+
+  it('names the events the vault emits and ignores everything else', () => {
+    expect(vaultEventName(misc('codicil:released:v1'))).toBe(VAULT_EVENTS.released);
+    expect(vaultEventName(misc('codicil:will-changed:v1'))).toBe(VAULT_EVENTS.willChanged);
+    expect(vaultEventName(misc('someone-else:event'))).toBeUndefined();
+    expect(vaultEventName({ data: { tag: 'null' } })).toBeUndefined();
+    // A payload after the 32-byte name does not change the name.
+    const withPayload = new Uint8Array(288);
+    withPayload.set(utf8ToBytes(VAULT_EVENTS.willChanged));
+    withPayload[40] = 7;
+    expect(vaultEventName({ data: { content: { value: [withPayload] } } })).toBe(VAULT_EVENTS.willChanged);
   });
 });

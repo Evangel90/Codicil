@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { numberToBytesBE, numberToBytesLE } from '@noble/curves/utils.js';
 import { Phase, pureCircuits } from '@codicil/contracts/vault';
-import { checkInDigest } from '@codicil/sdk';
+import { checkInDigest, VAULT_EVENTS, vaultEventName } from '@codicil/sdk';
 import { collectBytes, containsAscii, containsBytes, eventBytes, unshieldedReceived } from './support/harness.js';
 import {
   CHALLENGE,
@@ -89,6 +89,7 @@ describe('vault lifecycle', () => {
     expect(l.estateSnapshot).toBe(1_000_001n);
     expect(r.events).toHaveLength(1);
     expect(containsAscii(eventBytes(r.events[0]), 'codicil:released:v1')).toBe(true);
+    expect(vaultEventName(r.events[0])).toBe(VAULT_EVENTS.released);
   });
 
   it('rejects direct user calls to the integrator hook', async () => {

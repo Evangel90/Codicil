@@ -29,9 +29,9 @@ results are written down ([VALIDATION.md](VALIDATION.md), [DECISIONS.md](DECISIO
 
 ## After that
 
-- **Contract improvements** (held until after the Preprod test so the deployed circuits are the
-  tested ones):
-  - notice to heirs' apps when the will changes (an event);
+- **Contract improvements.** They change the circuits, so a vault must be redeployed to get them;
+  each is merged only once it is built, tested and reviewed. ✅ marks the ones that are built:
+  - ✅ notice to heirs' apps when the will changes (an event, [D14](DECISIONS.md));
   - an optional grace period between the deadline and the switch;
   - an optional release fee ([BUSINESS.md](BUSINESS.md));
   - owner-signed updates to guardians and the attestor ([D13](DECISIONS.md));

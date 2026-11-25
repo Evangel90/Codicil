@@ -1,6 +1,6 @@
 # Testing
 
-154 unit and simulator tests plus 2 browser end-to-end tests, all run by CI on every push
+157 unit and simulator tests plus 2 browser end-to-end tests, all run by CI on every push
 ([workflow](../.github/workflows/ci.yml)). This page explains what each level proves, how to run
 it, and the bugs the tests caught.
 
@@ -15,8 +15,8 @@ npm run e2e          # builds the app and runs Playwright in Chrome
 
 | Level | Command | Count | Time |
 |---|---|---|---|
-| Contract simulator + ZK constraint checks | `npm test -w @codicil/contracts` | 104 | ~6 s |
-| SDK | `npm test -w @codicil/sdk` | 28 | ~1 s |
+| Contract simulator + ZK constraint checks | `npm test -w @codicil/contracts` | 106 | ~6 s |
+| SDK | `npm test -w @codicil/sdk` | 29 | ~1 s |
 | App logic (the demo store and helpers) | `npm test -w @codicil/app` | 22 | ~3 s |
 | Browser end-to-end | `npm run e2e` | 2 | ~30 s |
 | Full compile with proving keys | `npm run compile:full` | 12 circuits | several minutes |
@@ -39,7 +39,7 @@ in the SDK and a row in [ERRORS.md](ERRORS.md).
 
 | File | Tests | What it covers |
 |---|---|---|
-| [`auth.test.ts`](../contracts/test/auth.test.ts) | 43 | Check-ins and will updates by passkey and by wallet, each against: replay, wrong deadline, another vault, wrong key, forged signature, another website, Face ID not used, the `maxPeriod` limit, veto |
+| [`auth.test.ts`](../contracts/test/auth.test.ts) | 45 | Check-ins and will updates by passkey and by wallet, each against: replay, wrong deadline, another vault, wrong key, forged signature, another website, Face ID not used, the `maxPeriod` limit, veto; the will-change notice |
 | [`claims.test.ts`](../contracts/test/claims.test.ts) | 18 | Claims, tranches, backup heirs, exact payout maths, over-allocated wills, a client lying about the payout division |
 | [`guardians.test.ts`](../contracts/test/guardians.test.ts) | 16 | k-of-n threshold, double votes, outsiders, stale timestamps, votes voided by a check-in, attestations bound to a round |
 | [`lifecycle.test.ts`](../contracts/test/lifecycle.test.ts) | 10 | Deposits, timeout, release, the release event, and a byte search of the check-in transcript for keys, salts and digests |
@@ -51,7 +51,7 @@ in the SDK and a row in [ERRORS.md](ERRORS.md).
 ## 2. SDK tests
 
 [`sdk/test/`](../sdk/test): key shapes, commitments computed by the contract's pure circuits,
-passkey and CIP-30 format conversion, the will builder and Merkle paths, witnesses, heir letter
+passkey and CIP-30 format conversion, the will builder and Merkle paths, witnesses, event names, heir letter
 encoding (every entry round-trips; it fits a QR code), and the on-device letter check (current
 letter, older will, another vault, which key opens it).
 

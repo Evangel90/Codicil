@@ -7,7 +7,18 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { randomBytes } from '@noble/hashes/utils.js';
 import { Phase } from '@codicil/contracts/vault';
-import { ApprovalMismatchError, buildWill, checkInDigest, FLAG_UP, newSalt } from '@codicil/sdk';
+import {
+  ApprovalMismatchError,
+  buildWill,
+  checkHeirLetter,
+  checkInDigest,
+  claimPackage,
+  FLAG_UP,
+  newSalt,
+  VAULT_EVENTS,
+  vaultEventName,
+} from '@codicil/sdk';
+import { eventBytes } from './support/harness.js';
 import {
   approve,
   asClaimant,
@@ -204,6 +215,23 @@ describe.each(VIAS)('will update via %s', (via) => {
     await expect(w.sim.call('claim', { time: t, as: asClaimant(w.will, 0, w.heirs[0]) }, newRecipient().address))
       .rejects.toThrow('not in will');
     await w.sim.call('claim', { time: t, as: asClaimant(next, 0, newcomer) }, newRecipient().address);
+  });
+
+  it("emits a notice so heirs' apps know their letters are out of date", async () => {
+    const letter = { vault: w.sim.address, ...claimPackage(w.will, 0) };
+    const current = () => ({ vault: w.sim.address, willRoot: L(w.sim).willRoot });
+    expect(checkHeirLetter(letter, current()).inCurrentWill).toBe(true);
+
+    // The same heirs and shares still make a new tree, so every old letter is stale.
+    const next = buildWill([{ heir: { pk: w.heirs[0].key.pk, salt: w.heirs[0].keySalt }, shareBps: 5000n }]);
+    const r = await updateWill(w, via, next.root, T0);
+    expect(r.events.map(vaultEventName)).toEqual([VAULT_EVENTS.willChanged]);
+    expect(checkHeirLetter(letter, current()).inCurrentWill).toBe(false);
+    // The event is only a name: no root, no version, nothing about the will.
+    expect(eventBytes(r.events[0])).toEqual(new TextEncoder().encode(VAULT_EVENTS.willChanged));
+
+    // A check-in is not a will change.
+    expect((await checkIn(w, via, T0 + 20 * DAY, T0)).events).toEqual([]);
   });
 
   it('rejects a replayed or mismatched will approval', async () => {

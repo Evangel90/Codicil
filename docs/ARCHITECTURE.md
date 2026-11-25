@@ -82,7 +82,7 @@ All of it is public. The design goal is that nothing here identifies a person
 |---|---|---|---|
 | `checkInPasskey(next)` | Owner | WebAuthn assertion over `aliveDigest(vault, next, nonce)`, from the committed passkey, on the committed website, with Face ID / Touch ID | Moves the deadline (at most `maxPeriod` from now), bumps the nonce, voids guardian votes; vetoes a pending switch |
 | `checkInEd25519(next)` | Owner | CIP-30 signature over the same digest from the committed wallet key | Same |
-| `updateWillPasskey(root)` / `updateWillEd25519(root)` | Owner | Signature over `willUpdateDigest(vault, root, nonce)` | Replaces the will root; only while armed and before the deadline |
+| `updateWillPasskey(root)` / `updateWillEd25519(root)` | Owner | Signature over `willUpdateDigest(vault, root, nonce)` | Replaces the will root; only while armed and before the deadline. Emits `codicil:will-changed:v1` |
 | `deposit(amount)` | Anyone | None | Receives unshielded tokens while armed |
 | `triggerTimeout()` | Anyone | Deadline has passed | Starts the challenge window |
 | `guardianAttest(asOf)` | A guardian | Merkle membership in `guardianRoot`, one nullifier per guardian per round | Counts a vote; the k-th vote starts the challenge window |
@@ -152,6 +152,10 @@ The heir's device checks a letter using public data only (`checkHeirLetter`): th
 matches, the path leads to the current `willRoot` (an old letter fails after the will changes), and
 the heir's own key opens the leaf as heir or as backup. Nothing is sent anywhere.
 
+Every will update emits a `codicil:will-changed:v1` event ([D14](DECISIONS.md)). An heir's app that
+follows the vault can then re-run the check and tell the heir to ask the owner for a new letter. The
+event has no payload: it says that the will changed, never how.
+
 ### Guardians and the attestor
 
 A guardian holds a random secret. The guardian root is a Merkle tree of `guardianLeaf(secret)`.
@@ -179,6 +183,7 @@ one transaction ([`escrow.test.ts`](../contracts/test/escrow.test.ts)).
 | [`witnesses.ts`](../sdk/src/witnesses.ts) | `CodicilPrivateState` and the witness functions the circuits call |
 | [`letter.ts`](../sdk/src/letter.ts) | Heir letter encoding, decoding, fingerprint and on-device check |
 | [`errors.ts`](../sdk/src/errors.ts) | Every contract `assert` message mapped to plain language ([ERRORS.md](ERRORS.md)) |
+| [`events.ts`](../sdk/src/events.ts) | Names of the events the vault emits, and `vaultEventName()` to recognise one |
 
 ## The app
 

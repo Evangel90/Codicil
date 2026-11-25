@@ -129,3 +129,19 @@ replayed as an approval.
   Otherwise a trigger could backdate `asOf` and shorten the owner's challenge window.
 - **Not yet supported:** changing guardians or the attestor after deployment. That needs an
   owner-signed settings update like `updateWill`; it is on the roadmap.
+
+## D14: The will-change notice is an event with no payload (2026-11-25)
+
+Every will update emits `codicil:will-changed:v1`, next to the existing `codicil:released:v1`.
+A letter holds a Merkle path to the will root, so *every* letter issued before an update stops
+working, including those of heirs whose share did not change. The event lets an heir's app notice
+without polling, re-run `checkHeirLetter` against the new root, and tell the heir to ask the owner
+for a new letter.
+
+- **No payload.** The new root and version are already on the ledger, and the will update was
+  already visible there (`willRoot`, `willVersion`). The event adds a signal, not information.
+- **Not per heir.** A notice addressed to particular heirs would say who is in the will. Everyone
+  following the vault gets the same event.
+- **What it does not do.** It does not deliver the new letter; the owner still sends that
+  privately. The demo app does not listen for it yet (its in-browser chain labels every event as
+  the release event; that is fixed with live mode).
