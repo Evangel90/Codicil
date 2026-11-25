@@ -5,15 +5,21 @@
 // time jumps the demo bar offers. Built from a snapshot; no DOM here.
 
 import { Phase } from '@codicil/contracts/vault';
-import { CLAIM_WINDOW, DAY, demo, GUARDIANS, HEIRS, OWNER_FIRST, type Actor, type Snapshot } from './store.js';
-import { nextUp, positionStage, sameActor } from './guide.js';
+import { ATTESTOR, CLAIM_WINDOW, DAY, demo, guardianById, HEIRS, OWNER_FIRST, type Actor, type Snapshot } from './store.js';
+import { checkInState, nextUp, positionStage, recoveryLive, sameActor } from './guide.js';
 
 export interface Jump { label: string; to: number }
 
 /** The useful places to skip to from here. */
 export function jumpsFor(s: Snapshot): Jump[] {
   const out: Jump[] = [{ label: '+1 day', to: s.now + DAY }];
-  if (s.phase === Phase.armed && s.now < s.deadline) out.push({ label: 'Skip to deadline', to: s.deadline });
+  if (s.phase === Phase.armed) {
+    const due = checkInState(s);
+    // A recovery always ends before the deadline, so its jump comes first.
+    if (recoveryLive(s) && s.recovery.state === 'waiting') out.push({ label: 'Skip the recovery delay', to: s.recovery.readyAt });
+    if (due === 'onTime') out.push({ label: 'Skip to deadline', to: s.deadline });
+    if (due === 'grace') out.push({ label: 'Skip the grace period', to: s.switchOpensAt });
+  }
   if (s.phase === Phase.pending && s.now < s.pendingUntil) out.push({ label: 'Skip challenge window', to: s.pendingUntil });
   if (s.phase === Phase.released) {
     const cleo = s.heirs.find((h) => h.profile.id === 'cleo')!;
@@ -24,7 +30,7 @@ export function jumpsFor(s: Snapshot): Jump[] {
   return out;
 }
 
-export type Tab = 'vault' | 'will' | 'savings' | 'lens';
+export type Tab = 'vault' | 'will' | 'settings' | 'savings' | 'lens';
 
 export interface Command {
   id: string;
@@ -51,7 +57,7 @@ export function actorLabel(a: Actor): string {
     const h = HEIRS.find((x) => x.id === a.id)!;
     return `${h.name} (${h.backup ? 'backup heir' : 'heir'})`;
   }
-  return `${GUARDIANS[a.id].name} (guardian)`;
+  return `${guardianById(a.id).name} (guardian)`;
 }
 
 export function commands(s: Snapshot, ctx: CommandContext): Command[] {
@@ -61,13 +67,20 @@ export function commands(s: Snapshot, ctx: CommandContext): Command[] {
   const owner = s.actor.kind === 'owner';
   const me = s.actor.kind === 'public' ? 'Someone' : actorLabel(s.actor).replace(/ \(.*\)$/, '');
   const as = (a: Actor, then?: () => void) => () => { demo.setActor(a); ctx.setTab('vault'); then?.(); };
+  const armed = s.phase === Phase.armed;
+  const due = checkInState(s);
+  const recovering = recoveryLive(s);
 
   // What moves the story forward right now.
   if (!busy) {
-    if (s.phase !== Phase.released) {
+    // Once the grace period is over, a check-in alone is refused until the switch has started.
+    if (s.phase === Phase.pending || (armed && due !== 'expired')) {
       out.push({
         id: 'checkin',
-        label: s.phase === Phase.pending ? `Cancel the switch as ${OWNER_FIRST}` : `Check in as ${OWNER_FIRST}`,
+        label: s.phase === Phase.pending ? `Cancel the switch as ${OWNER_FIRST}`
+          : recovering ? `Cancel the recovery as ${OWNER_FIRST}, with a check-in`
+          : due === 'grace' ? `Check in late as ${OWNER_FIRST}, inside the grace period`
+          : `Check in as ${OWNER_FIRST}`,
         group: 'Do',
         keywords: "i'm alive alive proof of life veto",
         run: as({ kind: 'owner' }, () => void demo.checkIn()),
@@ -75,7 +88,28 @@ export function commands(s: Snapshot, ctx: CommandContext): Command[] {
     }
     if (up.action === 'startSwitch') out.push({ id: 'start', label: 'Start the switch', group: 'Do', hint: 'anyone', keywords: 'timeout countdown', run: () => void demo.startCountdown(me) });
     if (up.action === 'release') out.push({ id: 'release', label: 'Release the will', group: 'Do', hint: 'anyone', run: () => void demo.release(me) });
-    if (owner && s.phase === Phase.armed && s.now < s.deadline) {
+    if (up.action === 'finishRecovery') out.push({ id: 'finish-recovery', label: 'Finish the recovery', group: 'Do', hint: 'anyone', keywords: 'recovery key new passkey', run: () => void demo.finishRecovery(me) });
+    if (armed && due === 'onTime' && s.recovery.state === 'idle') {
+      out.push({
+        id: 'recover',
+        label: `Start a recovery as ${OWNER_FIRST}, who lost her passkey`,
+        group: 'Do',
+        hint: 'saved key',
+        keywords: 'recovery key lost keys phone new passkey',
+        run: () => { demo.setActor({ kind: 'owner' }); ctx.setTab('settings'); void demo.startRecovery(); },
+      });
+    }
+    if (armed && s.setup?.attestor) {
+      out.push({
+        id: 'attest',
+        label: `Send a notice signed by ${ATTESTOR.name}`,
+        group: 'Do',
+        hint: 'starts the switch',
+        keywords: 'attestor attestation death notice registry notary',
+        run: () => void demo.attest(me),
+      });
+    }
+    if (owner && armed && due === 'onTime') {
       out.push({ id: 'ics', label: 'Download check-in reminders', group: 'Do', hint: '.ics', keywords: 'calendar reminder', run: ctx.downloadReminders });
     }
     // The savings contract: refused until the will is released, then paid once.
@@ -101,7 +135,7 @@ export function commands(s: Snapshot, ctx: CommandContext): Command[] {
   const people: Actor[] = [
     { kind: 'owner' },
     ...HEIRS.map((h): Actor => ({ kind: 'heir', id: h.id })),
-    ...GUARDIANS.map((g): Actor => ({ kind: 'guardian', id: g.id })),
+    ...s.guardians.map((g): Actor => ({ kind: 'guardian', id: g.id })),
     { kind: 'public' },
   ];
   // Whoever's turn it is comes first.
@@ -115,6 +149,7 @@ export function commands(s: Snapshot, ctx: CommandContext): Command[] {
   const first = owner ? 'Vault' : s.actor.kind === 'heir' ? 'Your share' : s.actor.kind === 'guardian' ? 'Guardian' : 'Inspector';
   out.push({ id: 'go:vault', label: first, group: 'Go to', keywords: 'home dashboard', run: () => ctx.setTab('vault') });
   if (owner) out.push({ id: 'go:will', label: 'Will and heir letters', group: 'Go to', keywords: 'edit change letters qr', run: () => ctx.setTab('will') });
+  if (owner) out.push({ id: 'go:settings', label: 'Guardians, attestor and recovery key', group: 'Go to', keywords: 'settings change add remove replace threshold lost passkey recover', run: () => ctx.setTab('settings') });
   out.push({ id: 'go:savings', label: s.position.name, group: 'Go to', hint: 'inheritable position', keywords: 'inheritable position escrow cross-contract integration developer hook', run: () => ctx.setTab('savings') });
   out.push({ id: 'go:lens', label: 'Privacy Lens', group: 'Go to', keywords: 'ledger public private', run: () => ctx.setTab('lens') });
 

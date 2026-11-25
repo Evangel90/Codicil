@@ -11,7 +11,7 @@ import { decodeHeirLetter, letterFingerprint } from '@codicil/sdk';
 import { demo, fmtDate, HEIRS, OWNER_NAME, type HeirProfile, type Snapshot } from '../demo/store.js';
 import { Logo } from '../components/ui.js';
 
-function Qr({ text, label }: { text: string; label: string }) {
+export function Qr({ text, label }: { text: string; label: string }) {
   const { size, path } = useMemo(() => {
     const qr = encode(text, { ecc: 'M', border: 2 });
     let d = '';

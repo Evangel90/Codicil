@@ -20,7 +20,8 @@ export function HeirView({ s, id, openTab }: { s: Snapshot; id: HeirProfile['id'
   const released = s.phase === Phase.released;
   const backupOpensAt = s.releasedAt + CLAIM_WINDOW;
   const opensAt = me.profile.backup ? backupOpensAt : Math.max(me.unlockAt, s.releasedAt);
-  const earliest = s.phase === Phase.pending ? s.pendingUntil : s.deadline + s.setup!.window;
+  // The earliest a release can happen by timeout: deadline, grace period, then the challenge window.
+  const earliest = s.phase === Phase.pending ? s.pendingUntil : s.switchOpensAt + s.setup!.window;
   const leafTaken = s.heirs.some((h) => h.profile.leaf === me.profile.leaf && h.claimed);
 
   let status: Status;
@@ -33,6 +34,8 @@ export function HeirView({ s, id, openTab }: { s: Snapshot; id: HeirProfile['id'
 
   // The heir knows their share only from the letter they hold.
   const letterOk = !!me.letter && me.letter.vaultMatches && me.letter.inCurrentWill && me.letter.role !== 'none';
+  // The vault announced a will change and the letter on this device no longer leads to the will's fingerprint.
+  const letterStale = !!me.letter && me.letter.vaultMatches && !me.letter.inCurrentWill;
   const shareText = me.letter ? `${Number(me.letter.shareBps) / 100}%` : '';
   const copy: Record<Status, [string, string]> = {
     removed: ['You are no longer in this will.', `${OWNER_FIRST} removed the backup heir in a later version of the will. Your key can no longer claim anything, and nobody else can tell you were ever in it.`],
@@ -68,6 +71,29 @@ export function HeirView({ s, id, openTab }: { s: Snapshot; id: HeirProfile['id'
         <h1 className="disp">{title}</h1>
         <p className="lede">{body}</p>
       </div>
+
+      {letterStale && status !== 'removed' && status !== 'claimed' && (
+        <section className="notice-card is-warn" role="status" aria-labelledby="wc-h">
+          <span className="warn-ring" aria-hidden="true"><Icon d={ICONS.letter} size={18} stroke={1.6} /></span>
+          <div className="alert-body">
+            <h2 id="wc-h">{OWNER_FIRST} changed the will{s.willChangedAt ? ` on ${fmtDate(s.willChangedAt)}` : ''}, so your letter is out of date.</h2>
+            <p>
+              A letter proves your place in one version of the will. When the will changes, every letter stops working,
+              including those of heirs whose share stayed the same. The letter on this device can no longer claim anything.
+            </p>
+            <p>
+              <strong>What to do:</strong> ask {OWNER_FIRST} for your new letter and load it here. If no new letter comes, you
+              may no longer be named. The vault announces that the will changed, never what changed or for whom.
+            </p>
+            <div className="btn-row">
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => void demo.holdLetter(id)}>
+                Load the new letter from {OWNER_FIRST} (demo)
+              </button>
+            </div>
+            <p className="small muted">This device saw the vault's public “will changed” notice and re-checked your letter here. Nothing was sent anywhere.</p>
+          </div>
+        </section>
+      )}
 
       {status !== 'removed' && (
         <>

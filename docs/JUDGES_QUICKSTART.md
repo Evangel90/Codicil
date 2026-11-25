@@ -43,13 +43,17 @@ simulated chain whose clock you can move forward. Only proof generation and netw
 
 | Step | What to do | What it shows |
 |---|---|---|
-| 1 | In the wizard, **Register Face ID or Touch ID** (or use a demo key), then Continue through the steps and **Seal & deploy vault** | The side panel shows the real values that would go on-chain: commitments and roots, no names |
+| 1 | In the wizard, **Register Face ID or Touch ID** (or use a demo key), then Continue through the steps and **Seal & deploy vault**. To try the newest features, choose a **3 days** grace period in step 5 and **Create a recovery key** in step 6 (both are off by default) | The side panel shows the real values that would go on-chain: commitments and roots, no names. The recovery key is shown once, to print or download |
 | 2 | Press **I'm alive** | Your passkey signs; the circuit verifies the signature, the website and that Face ID was used |
 | 3 | Follow the **Next** line under the demo bar; it says whose turn it is | Guardians vote anonymously; Amara cancels with one touch |
 | 4 | **Skip to deadline** → **Start the switch** → **Skip challenge window** → **Release the will** | Anyone can trigger; the owner always has a window to veto |
 | 5 | Act as **Ben**: **Use the letter Amara gave me**, then **Claim my share** | His device checks the letter against the public will root; the claim reveals a one-time stamp, not who |
 | 6 | **Savings** tab: as **Ben**, **Withdraw 8,000 demo tokens** before the release, and again after it | A second contract (`inheritable_escrow`) runs beside the vault and calls it. It refuses with its own error, `vault not released`, then pays once the vault says yes. The screen shows the one line of Compact a developer writes |
-| 7 | **Privacy Lens**, then **Act as Anyone** | The public ledger beside what only the owner's device knows; what a stranger can learn |
+| 7 | **Privacy Lens**, then **Act as Anyone** | The public ledger beside what only the owner's device knows; what a stranger can learn. Both list the grace length, whether a recovery key exists, a recovery in progress, the settings values and "release fee: none" |
+| 8 | With a grace period: **Skip to deadline**, then **+1 day** and **I'm alive** | Nobody can start the switch during grace (`grace period open`), and the late check-in is late but fine. **Skip the grace period** instead to see the switch start |
+| 9 | As Amara, **Settings** → **Change guardians or the attestor**: swap Tomás for Ngozi and save. Then act as guardian **Tomás** | One signed update replaces the guardians. It starts a new voting round, so earlier votes are void. Tomás's own app tells him he is no longer a guardian. Once a countdown has started the settings are locked |
+| 10 | With a recovery key: **Settings** → **Use the key Amara saved** → **Start the recovery**. Then either **Skip the recovery delay** → **Finish the recovery**, or go to **Vault** and check in | "I lost my passkey": a new passkey takes over after a public delay. Or the owner's side: an unmissable warning, one check-in cancels the recovery, and the recovery key is retired for good |
+| 11 | Act as **Ben**, load his letter, then as Amara change the will, then act as Ben again | The vault emits a `will-changed` event; Ben's page says his letter is out of date and what to do |
 
 Shortcuts: **⌘K** (Ctrl+K) opens a command palette to check in, skip time or act as anyone.
 **Reset** starts again.

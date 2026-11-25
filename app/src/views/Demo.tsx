@@ -11,7 +11,7 @@ import { toggleTheme } from '../theme.js';
 import { jumpsFor, type CommandContext, type Tab } from '../demo/commands.js';
 import { calendarFile, downloadCalendar, remindersFor } from '../demo/ics.js';
 import { IS_MAC, Palette, usePaletteShortcut } from './Palette.js';
-import { DAY, demo, GUARDIANS, HEIRS, OWNER_FIRST, useDemo, type Actor, type Snapshot } from '../demo/store.js';
+import { DAY, demo, guardianById, HEIRS, OWNER_FIRST, useDemo, type Actor, type Snapshot } from '../demo/store.js';
 import { nextUp, positionNext, positionStage, sameActor, type NextUp } from '../demo/guide.js';
 import { Wizard } from './Wizard.js';
 import { OwnerView } from './OwnerView.js';
@@ -21,6 +21,7 @@ import { GuardianView } from './GuardianView.js';
 import { LensView } from './LensView.js';
 import { InspectView } from './InspectView.js';
 import { SavingsView } from './SavingsView.js';
+import { SettingsView } from './SettingsView.js';
 
 export type { Tab };
 
@@ -29,7 +30,8 @@ const upper = (t: number) =>
 
 function Nav({ s, tab, setTab }: { s: Snapshot; tab: Tab; setTab: (t: Tab) => void }) {
   const first = s.actor.kind === 'owner' ? 'Vault' : s.actor.kind === 'heir' ? 'Your share' : s.actor.kind === 'guardian' ? 'Guardian' : 'Inspect';
-  const items: [Tab, string][] = [['vault', first], ...(s.actor.kind === 'owner' ? [['will', 'Will'] as [Tab, string]] : []), ['savings', 'Savings'], ['lens', 'Privacy Lens']];
+  const mine: [Tab, string][] = s.actor.kind === 'owner' ? [['will', 'Will'], ['settings', 'Settings']] : [];
+  const items: [Tab, string][] = [['vault', first], ...mine, ['savings', 'Savings'], ['lens', 'Privacy Lens']];
   return (
     <nav className="pillnav" aria-label="Sections">
       {items.map(([id, label]) => (
@@ -43,7 +45,7 @@ function Nav({ s, tab, setTab }: { s: Snapshot; tab: Tab; setTab: (t: Tab) => vo
 
 const actorName = (a: Actor) =>
   a.kind === 'owner' ? OWNER_FIRST : a.kind === 'public' ? 'Anyone'
-    : a.kind === 'heir' ? HEIRS.find((h) => h.id === a.id)!.name : GUARDIANS[a.id].name;
+    : a.kind === 'heir' ? HEIRS.find((h) => h.id === a.id)!.name : guardianById(a.id).name;
 
 /** A label with a pulsing dot when it's this person's turn. */
 const turn = (label: string, next: boolean) => (
@@ -56,10 +58,11 @@ function ActAs({ s, up }: { s: Snapshot; up: NextUp }) {
   const roleNext = (k: Actor['kind']) => up.who.some((w) => w.kind === k);
   const people = role === 'heir'
     ? HEIRS.map((h) => ({ value: h.id as string, label: turn(h.name, isNext({ kind: 'heir', id: h.id })) }))
-    : role === 'guardian' ? GUARDIANS.map((g) => ({ value: String(g.id), label: turn(g.name, isNext({ kind: 'guardian', id: g.id })) })) : [];
+    : role === 'guardian' ? s.guardians.map((g) => ({ value: String(g.id), label: turn(g.name, isNext({ kind: 'guardian', id: g.id })) })) : [];
   const person = s.actor.kind === 'heir' ? s.actor.id : s.actor.kind === 'guardian' ? String(s.actor.id) : '';
   const firstOf = (k: Actor['kind']): Actor => up.who.find((w) => w.kind === k)
-    ?? (k === 'owner' ? { kind: 'owner' } : k === 'heir' ? { kind: 'heir', id: 'ben' } : k === 'guardian' ? { kind: 'guardian', id: 0 } : { kind: 'public' });
+    ?? (k === 'owner' ? { kind: 'owner' } : k === 'heir' ? { kind: 'heir', id: 'ben' }
+      : k === 'guardian' ? { kind: 'guardian', id: (s.guardians.find((g) => g.current) ?? s.guardians[0]).id } : { kind: 'public' });
   return (
     <div className="actas">
       <span className="eyebrow">Act as</span>
@@ -135,6 +138,11 @@ function NextBar({ s, up, openSavings }: { s: Snapshot; up: NextUp; openSavings?
               Release the will <span className="arw" aria-hidden="true">→</span>
             </button>
           )}
+          {up.action === 'finishRecovery' && (
+            <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void demo.finishRecovery(who)}>
+              Finish the recovery
+            </button>
+          )}
           {!up.action && others.map((a) => (
             <button key={actorName(a)} type="button" className="btn btn-secondary btn-sm" onClick={() => demo.setActor(a)}>
               Act as {actorName(a)}
@@ -155,8 +163,8 @@ export function Demo() {
     demo.startClock();
     return () => demo.stopClock();
   }, []);
-  // The Will tab is the owner's alone.
-  useEffect(() => { if (s.actor.kind !== 'owner' && tab === 'will') setTab('vault'); }, [s.actor.kind, tab]);
+  // The Will and Settings tabs are the owner's alone.
+  useEffect(() => { if (s.actor.kind !== 'owner' && (tab === 'will' || tab === 'settings')) setTab('vault'); }, [s.actor.kind, tab]);
 
   // Each screen starts at the top.
   useEffect(() => { window.scrollTo(0, 0); }, [tab, sealed, s.actor.kind]);
@@ -198,6 +206,7 @@ export function Demo() {
           {tab === 'lens' ? <LensView s={s} />
             : tab === 'savings' ? <SavingsView s={s} />
             : tab === 'will' && s.actor.kind === 'owner' ? <WillView s={s} />
+            : tab === 'settings' && s.actor.kind === 'owner' ? <SettingsView s={s} />
             : s.actor.kind === 'owner' ? <OwnerView s={s} openTab={setTab} />
             : s.actor.kind === 'heir' ? <HeirView s={s} id={s.actor.id} openTab={setTab} />
             : s.actor.kind === 'guardian' ? <GuardianView s={s} id={s.actor.id} />

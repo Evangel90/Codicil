@@ -4,9 +4,10 @@
 // Guidance, letters held by heirs, and calendar reminders.
 
 import { beforeEach, describe, expect, it } from 'vitest';
+import { VAULT_EVENTS } from '@codicil/sdk';
 import { CHALLENGE, CLAIM_WINDOW, DAY, defaultSetup, demo } from '../src/demo/store.js';
 import { createDemoPasskey } from '../src/demo/passkey.js';
-import { nextUp, planSummary, presetFor, PRESETS } from '../src/demo/guide.js';
+import { eventSummary, nextUp, planSummary, presetFor, PRESETS } from '../src/demo/guide.js';
 import { calendarFile, remindersFor } from '../src/demo/ics.js';
 import { commands, filterCommands } from '../src/demo/commands.js';
 
@@ -86,6 +87,39 @@ describe('letters held by heirs', () => {
     demo.dismissTx();
     expect(demo.holdLetter('ben')).toBeUndefined();     // the new one can
     await run(demo.claim('ben'));
+  });
+
+  it('hears the vault say "will changed" and tells the heir whose letter is now out of date', async () => {
+    expect(s().willChangedAt).toBeUndefined();
+    expect(s().events).toEqual([]);
+    demo.holdLetter('ben');
+    demo.holdLetter('cleo');
+    expect(nextUp(s()).tone).toBe('calm');
+
+    demo.advance(2 * DAY);
+    await run(demo.updateWill({ ada: 5000n, ben: 3000n, cleo: 2000n, kofiBackup: true }));   // the same shares: every letter is void anyway
+    expect(s().events).toEqual([{ name: VAULT_EVENTS.willChanged, at: s().now }]);           // a name, no content
+    expect(s().willChangedAt).toBe(s().now);
+    expect(s().activity[0].published.join(' ')).toMatch(/"will changed" event with no details/);
+    expect(ben().letter).toMatchObject({ vaultMatches: true, inCurrentWill: false, shareBps: 3000n });
+
+    // The guide points at the heirs who hold a stale letter, until they load the new one.
+    expect(nextUp(s())).toMatchObject({ tone: 'attention', who: [{ kind: 'heir', id: 'ben' }, { kind: 'heir', id: 'cleo' }] });
+    expect(nextUp(s()).text).toMatch(/the letters Ben and Cleo hold are out of date\. Act as Ben/);
+    demo.holdLetter('ben');
+    expect(ben().letter?.inCurrentWill).toBe(true);
+    expect(nextUp(s()).text).toMatch(/the letter Cleo holds is out of date/);
+    demo.setActor({ kind: 'heir', id: 'cleo' });        // once Cleo has seen her page, the guide moves on
+    expect(s().heirs.find((h) => h.profile.id === 'cleo')!.letter?.inCurrentWill).toBe(false);
+    expect(nextUp(s()).tone).toBe('calm');
+    demo.setActor({ kind: 'owner' });
+
+    await run(demo.updateWill({ ada: 5000n, ben: 3500n, cleo: 1500n, kofiBackup: true }));
+    demo.advanceTo(s().deadline);
+    await run(demo.startCountdown('Someone'));
+    demo.advance(CHALLENGE);
+    await run(demo.release('Someone'));
+    expect(eventSummary(s().events)).toBe('will changed × 2, released × 1');
   });
 
   it("knows a letter meant for someone else", () => {

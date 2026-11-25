@@ -143,8 +143,8 @@ for a new letter.
 - **Not per heir.** A notice addressed to particular heirs would say who is in the will. Everyone
   following the vault gets the same event.
 - **What it does not do.** It does not deliver the new letter; the owner still sends that
-  privately. The demo app does not listen for it yet (its in-browser chain labels every event as
-  the release event; that is fixed with live mode).
+  privately. The demo app collects the events each call emits and, on this one, tells an heir who
+  holds a letter that it is out of date and what to do.
 
 ## D15: The grace period delays only the timeout, and never shortens the veto (2026-11-25)
 
@@ -360,7 +360,9 @@ delay, because from then on a lost key cannot be recovered.
    start a recovery, wait for one unanswered delay), where today that thief and the owner can only
    overwrite each other. It would equally let the owner evict the thief. Which of those matters
    more is a product decision, not a detail.
-5. *An alert the owner will see.* The event exists; the app does not yet watch for it, and an owner
-   who is not using the app needs another channel.
+5. *An alert the owner will see.* The demo app shows a warning on the owner's dashboard while a
+   recovery is in progress, with the one action that cancels it. That only helps an owner who opens
+   the app: an owner who is not using it needs another channel (a notification, an email from a
+   watcher), which does not exist yet.
 6. *A hardware-held recovery key* (a signature instead of a secret), if paper secrets prove too
    easy to copy. It would cost one more signature circuit.

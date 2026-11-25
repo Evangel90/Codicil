@@ -60,7 +60,10 @@ export function WillView({ s }: { s: Snapshot }) {
         </div>
       )}
 
-      <PlanSummary setup={s.setup!} now={s.now} title="Your rules, in plain words" />
+      <PlanSummary
+        setup={s.setup!} now={s.now} title="Your rules, in plain words"
+        recoveryKey={s.recovery.state === 'off' ? 'none' : s.recovery.state === 'retired' ? 'retired' : 'ready'}
+      />
 
       <HeirLetters s={s} />
     </div>

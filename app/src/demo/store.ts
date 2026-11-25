@@ -3,9 +3,11 @@
 //
 // The demo world: one owner, a three-heir will with a backup heir and a
 // tranche, three hidden guardians, and a demo clock. The owner configures the
-// shares, the backup, the guardian threshold and the timers in the setup
-// wizard, and every action runs the real vault circuit on the in-browser
-// DemoChain.
+// shares, the backup, the guardian threshold, the timers, an optional grace
+// period and an optional recovery key in the setup wizard, and every action
+// runs the real vault circuit on the in-browser DemoChain. After setup the
+// owner can replace the guardians and name an attestor, and a recovery key can
+// put a new passkey in charge after a public delay.
 //
 // Next to the vault sits one more contract, Harbour Savings: the example
 // escrow from contracts/src/inheritable_escrow.compact, holding tokens for a
@@ -19,34 +21,52 @@ import { randomBytes } from '@noble/hashes/utils.js';
 import { Phase, pureCircuits, type HeirLeaf } from '@codicil/contracts/vault';
 import * as escrowModule from '@codicil/contracts/escrow';
 import {
+  attestationDigest,
   buildGuardianSet,
   buildWill,
   checkHeirLetter,
   checkInDigest,
   claimPackage,
   contractErrorCode,
+  currentSettings,
   decodeHeirLetter,
   encodeHeirLetter,
   explainError,
   guardianLeaf,
+  isCurrentGuardian,
+  lastRecoveryStart,
   letterFingerprint,
   guardianSecrets,
   newGuardianSecret,
   newHeirKey,
+  newP256Key,
+  newRecoverySecret,
   newSalt,
   payoutFor,
+  recoveryCommitment,
+  recoveryConfig,
+  recoveryStatus,
   rpIdHash,
+  settingsDigest,
+  signAttestation,
+  timeoutOpensAt,
+  VAULT_EVENTS,
   VAULT_OPTIONS_OFF,
   vaultId,
   willUpdateDigest,
   withPasskeyApproval,
   type CodicilPrivateState,
+  type GuardianSecrets,
   type GuardianSet,
   type HeirKey,
+  type P256Key,
+  type RecoveryStatus,
+  type VaultEventName,
   type Will,
 } from '@codicil/sdk';
-import { DemoChain } from './chain.js';
-import { approveWithPasskey, type OwnerPasskey } from './passkey.js';
+import { DemoChain, type CallOutcome } from './chain.js';
+import { approveWithPasskey, createDemoPasskey, createDevicePasskey, type OwnerPasskey } from './passkey.js';
+import { decodeRecoveryKey, encodeRecoveryKey } from './recoveryKey.js';
 
 export const DAY = 86_400;
 export const CHECK_IN_EVERY = 30 * DAY;
@@ -75,11 +95,27 @@ export const HEIRS: HeirProfile[] = [
   { id: 'kofi', name: 'Kofi', relation: 'Brother, backup for Ada', leaf: 0, backup: true },
 ];
 
-export const GUARDIANS = [
+export interface GuardianProfile { id: number; name: string; relation: string }
+
+/** The guardians the wizard sets up. */
+export const GUARDIANS: GuardianProfile[] = [
   { id: 0, name: 'Dr. Mensah', relation: 'Family doctor' },
   { id: 1, name: 'Sarah Lin', relation: 'Lawyer' },
   { id: 2, name: 'Tomás', relation: 'Old friend' },
 ];
+
+/** People Amara can ask later, when she changes her guardians. */
+export const MORE_GUARDIANS: GuardianProfile[] = [
+  { id: 3, name: 'Ngozi', relation: 'Sister' },
+  { id: 4, name: 'Mr. Bello', relation: 'Accountant' },
+];
+
+/** Everyone who can be a guardian in the demo; a guardian's id is their index here. */
+export const GUARDIAN_POOL: GuardianProfile[] = [...GUARDIANS, ...MORE_GUARDIANS];
+export const guardianById = (id: number): GuardianProfile => GUARDIAN_POOL[id];
+
+/** The one attestor Amara can name: an office that can start the switch with a signed notice. */
+export const ATTESTOR = { name: 'Lagos Probate Registry', relation: 'Registers deaths and signs a notice' };
 
 // ─── The inheritable position ───────────────────────────────────────────────
 /** Amara's savings in a contract written by someone else, made inheritable. */
@@ -135,16 +171,58 @@ export interface WillDraft {
 export interface VaultSetup extends WillDraft {
   /** Unix seconds when Cleo's share unlocks. */
   cleoUnlock: number;
-  /** Guardian reports needed, of 3. */
+  /** Who the guardians are: ids from GUARDIAN_POOL. The wizard starts with the first three. */
+  guardians: number[];
+  /** Guardian reports needed. */
   threshold: number;
   /** Check-in interval, seconds. */
   every: number;
   /** Challenge window, seconds. */
   window: number;
+  /** Grace period after a missed check-in, seconds; 0 = none. */
+  grace: number;
+  /** Public wait before a recovery takes effect, seconds; 0 = no recovery key. */
+  recoveryDelay: number;
+  /** Whether an attestor can also start the switch. Off at deployment; set later in Settings. */
+  attestor: boolean;
 }
 
 export function defaultSetup(now = Math.floor(Date.now() / 1000)): VaultSetup {
-  return { ada: 5000n, ben: 3000n, cleo: 2000n, kofiBackup: true, cleoUnlock: now + 400 * DAY, threshold: 2, every: CHECK_IN_EVERY, window: CHALLENGE };
+  return {
+    ada: 5000n, ben: 3000n, cleo: 2000n, kofiBackup: true, cleoUnlock: now + 400 * DAY,
+    guardians: GUARDIANS.map((g) => g.id), threshold: 2, every: CHECK_IN_EVERY, window: CHALLENGE,
+    grace: 0, recoveryDelay: 0, attestor: false,
+  };
+}
+
+/**
+ * Grace periods the wizard offers for a check-in interval. The contract caps
+ * grace at the longest check-in period; the app keeps it within one interval.
+ */
+export const graceChoices = (every: number): number[] => [0, DAY, 3 * DAY, 7 * DAY].filter((g) => g <= every);
+
+/**
+ * Recovery delays the wizard offers. The contract needs at least a day; a
+ * delay as long as the check-in interval could never finish before a deadline.
+ */
+export const recoveryDelayChoices = (every: number): number[] => [DAY, 3 * DAY, 7 * DAY].filter((d) => d < every);
+
+/** A setup with its grace period and recovery delay brought back inside what `every` allows. */
+export function fitSetup(p: VaultSetup): VaultSetup {
+  const delays = recoveryDelayChoices(p.every);
+  return {
+    ...p,
+    grace: Math.min(p.grace, p.every),
+    recoveryDelay: p.recoveryDelay === 0 ? 0 : Math.min(p.recoveryDelay, delays[delays.length - 1]),
+  };
+}
+
+/** What the owner changes in one signed settings update. */
+export interface SettingsChange {
+  /** Ids from GUARDIAN_POOL. */
+  guardians: number[];
+  threshold: number;
+  attestor: boolean;
 }
 
 // ─── Activity and transactions ──────────────────────────────────────────────
@@ -188,6 +266,11 @@ const STAGES: Record<TxStageId, TxStage> = {
   record: { id: 'record', label: 'Recorded on the demo chain', detail: 'Only the public result is written. Your secrets never left this device.' },
 };
 
+/** The approval step of a recovery: no signature, a new passkey is made instead. */
+const newPasskeyStage = (kind?: OwnerPasskey['kind']): Pick<TxStage, 'label' | 'detail'> => (kind === 'device'
+  ? { label: 'Creating a passkey on the new device', detail: 'Confirm with Face ID, Touch ID or your device PIN. The lost passkey is not needed.' }
+  : { label: 'Creating a new demo key', detail: 'It stands in for the passkey on your new device. The lost passkey is not needed.' });
+
 // ─── Snapshot for the UI ────────────────────────────────────────────────────
 export interface HeirView {
   profile: HeirProfile;
@@ -201,6 +284,8 @@ export interface HeirView {
   keyEnd: string;
   /** The letter this person holds on their device, as checked there. */
   letter?: HeldLetter;
+  /** This person has opened their page since the will last changed. */
+  sawWillChange: boolean;
 }
 
 export interface HeldLetter {
@@ -213,6 +298,33 @@ export interface HeldLetter {
   role: 'heir' | 'backup' | 'none';
 }
 
+/** A guardian, past or present, as the demo cast knows them. */
+export interface GuardianView extends GuardianProfile {
+  /** Whether the proof on this guardian's device still leads to the guardians root on the chain. */
+  current: boolean;
+}
+
+export interface RecoveryView {
+  /** From the SDK's `recoveryStatus()`: public ledger fields and the clock, nothing else. */
+  state: RecoveryStatus['state'];
+  /** When the proposed keys take over, while a recovery stands; otherwise 0. */
+  readyAt: number;
+  /** The public delay, seconds. */
+  delay: number;
+  /** The latest moment a recovery can start and still finish before the deadline. */
+  lastStart: number;
+  // What the owner's device remembers; none of it is on the chain.
+  startedAt?: number;
+  cancelledAt?: number;
+  completedAt?: number;
+  /** A recovery just ended and the owner has not yet dismissed the note about it. */
+  notice?: 'cancelled' | 'finished';
+  /** A next recovery key is waiting to be saved. */
+  nextKeyToSave: boolean;
+  /** A recovery replaced a passkey, and the demo still holds the old one to try. */
+  formerPasskey: boolean;
+}
+
 export interface Snapshot {
   ready: boolean;
   passkey?: OwnerPasskey;
@@ -223,6 +335,10 @@ export interface Snapshot {
   lastCheckIn: number;
   phase: Phase;
   deadline: number;
+  /** Grace period, seconds; 0 = none. */
+  grace: number;
+  /** When anyone may start the switch by timeout: the deadline plus the grace period. */
+  switchOpensAt: number;
   pendingUntil: number;
   releasedAt: number;
   estate: bigint;
@@ -233,15 +349,33 @@ export interface Snapshot {
   guardianRound: bigint;
   guardianVotes: bigint;
   guardianThreshold: bigint;
+  /** Release fee in basis points; the demo deploys with none. */
+  feeBps: bigint;
   /** Public ledger values, hex. */
   chain: {
     address: string;
     willRoot: string;
     guardianRoot: string;
     ownerPasskeyCommit: string;
+    /** All zeros when no attestor is set. */
+    attestorKeyCommit: string;
+    /** All zeros when the vault has no recovery key. */
+    recoveryKeyCommit: string;
+    /** 0 unless a recovery was started; it stays after a cancellation. */
+    recoveryReadyAt: number;
+    /** The owner action count when the last recovery started. */
+    recoveryNonce: bigint;
+    recoveryPasskeyCommit: string;
     claimNullifiers: string[];
     guardianNullifierCount: number;
   };
+  /** Everyone who is or was a guardian, in the order they joined. */
+  guardians: GuardianView[];
+  recovery: RecoveryView;
+  /** Events the vault has emitted, oldest first. Each is a name with no payload. */
+  events: { name: VaultEventName; at: number }[];
+  /** When the last "will changed" event arrived, if any. */
+  willChangedAt?: number;
   heirs: HeirView[];
   /** The savings contract that pays out when this vault is released. */
   position: PositionView;
@@ -275,13 +409,29 @@ export const fmtDate = (t: number) =>
 export const fmtShort = (t: number) =>
   new Date(t * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 export const days = (seconds: number) => Math.round(seconds / DAY);
+/** "3 days", "1 day", "5 hours" or "a few minutes": a length of time in words. */
+export function span(seconds: number): string {
+  const n = (count: number, unit: string) => `${count} ${unit}${count === 1 ? '' : 's'}`;
+  if (seconds >= DAY) return n(Math.round(seconds / DAY), 'day');
+  if (seconds >= 3600) return n(Math.floor(seconds / 3600), 'hour');
+  return 'a few minutes';
+}
+/** The same, before a noun: "3-day", "1-day", "5-hour". */
+export const spanAdj = (seconds: number): string => (seconds >= 3600 ? span(seconds).replace(/s$/, '').replace(' ', '-') : 'short');
+const ZERO32 = new Uint8Array(32);
+const isZeroBytes = (b: Uint8Array) => b.every((x) => x === 0);
 
 interface Keys {
   ownerSalt: Uint8Array;
   heirKeys: Record<HeirProfile['id'], { key: HeirKey; salt: Uint8Array }>;
+  /** One per person in GUARDIAN_POOL, each made on that person's own device. */
   guardianSecretsList: Uint8Array[];
   /** Made on the beneficiary's device; Amara only ever receives its commitment. */
   beneficiarySecret: Uint8Array;
+  /** Made in the wizard; it goes on paper, and only its commitment goes on-chain. */
+  recoverySecret: Uint8Array;
+  /** The attestor's own signing key; Amara only ever receives its commitment. */
+  attestor: { key: P256Key; salt: Uint8Array };
 }
 
 /** What `run` may change for an action that is not a plain vault call. */
@@ -311,6 +461,24 @@ interface World extends Keys {
   setup: VaultSetup;
   will: Will;
   guardianSet: GuardianSet;
+  /** What each guardian's device holds: their secret and the path the owner last sent them. */
+  guardianHeld: Map<number, GuardianSecrets>;
+  /** Everyone who is or was a guardian, in the order they joined. */
+  guardianCast: number[];
+  /** The recovery key as Amara saved it, on paper. Absent when the vault has none. */
+  savedRecovery?: Uint8Array;
+  /** A recovery started in this demo: the new device's passkey and the next recovery key. */
+  pendingRecovery?: { passkey: OwnerPasskey; salt: Uint8Array; nextSecret: Uint8Array; startedAt: number };
+  /** The passkey a finished recovery replaced. */
+  formerPasskey?: { passkey: OwnerPasskey; salt: Uint8Array };
+  recoveryCancelledAt?: number;
+  recoveryCompletedAt?: number;
+  recoveryNotice?: 'cancelled' | 'finished';
+  /** Events the vault emitted, as an app following the vault would collect them. */
+  events: { name: VaultEventName; at: number }[];
+  willChangedAt?: number;
+  /** Heirs who have opened their page since the will last changed. */
+  sawWillChange: Set<HeirProfile['id']>;
   deployedAt: number;
   lastCheckIn: number;
   /** The savings contract deployed next to the vault. */
@@ -331,6 +499,7 @@ class DemoStore {
   private tx?: Tx;
   private toast?: Toast;
   private lastAction?: () => Promise<boolean>;
+  private guardianChecks?: { root: bigint; current: Map<number, boolean> };
   private clock?: ReturnType<typeof setInterval>;
   private snapshot: Snapshot;
   private listeners = new Set<() => void>();
@@ -358,10 +527,25 @@ class DemoStore {
     this.keys ??= {
       ownerSalt: newSalt(),
       heirKeys: Object.fromEntries(HEIRS.map((h) => [h.id, { key: newHeirKey(), salt: newSalt() }])) as Keys['heirKeys'],
-      guardianSecretsList: GUARDIANS.map(() => newGuardianSecret()),
+      guardianSecretsList: GUARDIAN_POOL.map(() => newGuardianSecret()),
       beneficiarySecret: randomBytes(32),
+      recoverySecret: newRecoverySecret(),
+      attestor: { key: newP256Key(), salt: newSalt() },
     };
     return this.keys;
+  }
+
+  /** The guardian tree for a list of people: each gave the owner only their leaf. */
+  private guardianSetFor(k: Pick<Keys, 'guardianSecretsList'>, ids: readonly number[], threshold: number): GuardianSet {
+    return buildGuardianSet(ids.map((id) => guardianLeaf(k.guardianSecretsList[id])), threshold);
+  }
+
+  /**
+   * The recovery key for the vault being set up, as text to save. It is made
+   * once per session, so the key the wizard shows is the one that is deployed.
+   */
+  draftRecoveryKey(): string {
+    return encodeRecoveryKey(this.ensureKeys().recoverySecret);
   }
 
   /** Last 4 hex digits of an heir's public key, for the setup screens. */
@@ -370,20 +554,24 @@ class DemoStore {
   }
 
   /** What the chain would receive for this setup: real commitments, computed here. */
-  preview(setup: VaultSetup, passkey?: OwnerPasskey): { ownerCommit?: string; willRoot?: string; guardianRoot: string; problem?: string } {
+  preview(setup: VaultSetup, passkey?: OwnerPasskey): {
+    ownerCommit?: string; willRoot?: string; guardianRoot: string; recoveryCommit?: string; problem?: string;
+  } {
     const k = this.ensureKeys();
-    const guardianRoot = fieldHex(buildGuardianSet(k.guardianSecretsList.map(guardianLeaf), setup.threshold).root);
+    const guardianRoot = fieldHex(this.guardianSetFor(k, setup.guardians, setup.threshold).root);
     const ownerCommit = passkey ? hex(pureCircuits.passkeyCommitment(passkey.pk, k.ownerSalt)) : undefined;
+    const recoveryCommit = setup.recoveryDelay > 0 ? hex(recoveryCommitment(k.recoverySecret)) : undefined;
     try {
-      return { ownerCommit, guardianRoot, willRoot: fieldHex(this.draftWill(setup).root) };
+      return { ownerCommit, guardianRoot, recoveryCommit, willRoot: fieldHex(this.draftWill(setup).root) };
     } catch (e) {
-      return { ownerCommit, guardianRoot, problem: e instanceof Error ? e.message : String(e) };
+      return { ownerCommit, guardianRoot, recoveryCommit, problem: e instanceof Error ? e.message : String(e) };
     }
   }
 
-  /** Builds the will for a setup once; the same setup gives the same will (and salts). */
+  /** Builds the will for a setup once; the same shares and dates give the same will (and salts). */
   private draftWill(setup: VaultSetup): Will {
-    const key = JSON.stringify(setup, (_, v) => (typeof v === 'bigint' ? v.toString() : v));
+    const { ada, ben, cleo, kofiBackup, cleoUnlock } = setup;
+    const key = JSON.stringify({ ada, ben, cleo, kofiBackup, cleoUnlock }, (_, v) => (typeof v === 'bigint' ? v.toString() : v));
     if (this.previewed?.key !== key) this.previewed = { key, will: this.willFor(this.ensureKeys(), setup, BigInt(setup.cleoUnlock)) };
     return this.previewed.will;
   }
@@ -392,7 +580,9 @@ class DemoStore {
     const now = Math.floor(Date.now() / 1000);
     const k = this.ensureKeys();
     const will = this.draftWill(setup);
-    const guardianSet = buildGuardianSet(k.guardianSecretsList.map(guardianLeaf), setup.threshold);
+    const guardianSet = this.guardianSetFor(k, setup.guardians, setup.threshold);
+    // A check-in may set the next deadline up to this far ahead (D9).
+    const maxPeriod = BigInt(Math.max(2 * setup.every, 60 * DAY));
 
     const chain = await DemoChain.deploy({
       ownerPasskeyCommit: pureCircuits.passkeyCommitment(passkey.pk, k.ownerSalt),
@@ -400,15 +590,17 @@ class DemoStore {
       passkeyRpIdHash: rpIdHash(globalThis.location?.hostname ?? 'localhost'),
       willRoot: will.root,
       firstDeadline: BigInt(now + setup.every),
-      // A check-in may set the next deadline up to this far ahead (D9).
-      maxPeriod: BigInt(Math.max(2 * setup.every, 60 * DAY)),
+      maxPeriod,
       challengeWindow: BigInt(setup.window),
       claimWindow: BigInt(CLAIM_WINDOW),
       tokenColor: encodeRawTokenType(sampleRawTokenType()),
       guardianRoot: guardianSet.root,
       guardianThreshold: guardianSet.threshold,
       attestorKeyCommit: new Uint8Array(32),
+      // The release fee stays off in the demo; grace and the recovery key are the owner's choice.
       ...VAULT_OPTIONS_OFF,
+      gracePeriod: BigInt(setup.grace),
+      ...(setup.recoveryDelay > 0 ? recoveryConfig(k.recoverySecret, BigInt(setup.recoveryDelay), maxPeriod) : {}),
     }, now);
     // The savings contract is fixed at deployment to this vault and to a
     // commitment to the beneficiary's secret. It holds its own token.
@@ -419,13 +611,29 @@ class DemoStore {
       escrowModule.pureCircuits.beneficiaryCommitment(k.beneficiarySecret),
     );
     this.world = {
-      ...k, chain, passkey, setup, will, guardianSet, deployedAt: now, lastCheckIn: now, claimed: new Map(), votedRound: new Map(), held: new Map(),
+      ...k, chain, passkey, setup: { ...setup, attestor: false }, will, guardianSet, deployedAt: now, lastCheckIn: now,
+      claimed: new Map(), votedRound: new Map(), held: new Map(),
+      // Each guardian's device gets the path to its leaf; nobody else does.
+      guardianHeld: new Map(setup.guardians.map((id) => [id, guardianSecrets(guardianSet, k.guardianSecretsList[id])])),
+      guardianCast: [...setup.guardians],
+      savedRecovery: setup.recoveryDelay > 0 ? k.recoverySecret : undefined,
+      events: [],
+      sawWillChange: new Set(),
       position: { address: position },
     };
     this.activity = [{
       at: now, who: OWNER_NAME, what: 'Vault deployed and will sealed', tone: 'plain',
-      published: ['A commitment to your passkey', 'The heirs root (one 32-byte number)', `The guardians root and "${setup.threshold} of 3"`, 'Your first deadline and the timers'],
-      keptPrivate: ['The passkey itself', 'Names, shares, unlock dates and the backup heir', 'Who the guardians are'],
+      published: [
+        'A commitment to your passkey', 'The heirs root (one 32-byte number)',
+        `The guardians root and "${setup.threshold} must agree"`,
+        setup.grace > 0 ? `Your first deadline and the timers, including the ${span(setup.grace)} of grace` : 'Your first deadline and the timers. Grace period: none',
+        ...(setup.recoveryDelay > 0 ? [`That the vault has a recovery key (a commitment), and its ${spanAdj(setup.recoveryDelay)} delay`] : ['Recovery key: none']),
+        'Release fee: none',
+      ],
+      keptPrivate: [
+        'The passkey itself', 'Names, shares, unlock dates and the backup heir', 'Who the guardians are, and how many',
+        ...(setup.recoveryDelay > 0 ? ['The recovery key itself, which is only on paper'] : []),
+      ],
     }];
     await chain.call('deposit', {}, ESTATE);
     this.log(OWNER_NAME, `Deposit · ${ESTATE.toLocaleString()} ${TOKEN}`, 'public', ['The amount'], []);
@@ -445,6 +653,7 @@ class DemoStore {
     this.tx = undefined;
     this.toast = undefined;
     this.lastAction = undefined;
+    this.guardianChecks = undefined;
     this.actor = { kind: 'owner' };
     this.emit();
   }
@@ -462,6 +671,7 @@ class DemoStore {
 
   setActor(actor: Actor) {
     this.actor = actor;
+    if (actor.kind === 'heir') this.world?.sawWillChange.add(actor.id);
     this.emit();
   }
 
@@ -522,7 +732,7 @@ class DemoStore {
   ): Promise<boolean> {
     if (!this.world || this.tx?.status === 'running') return false;
     this.lastAction = () => this.run(title, stageIds, body, options);
-    const stages = stageIds.map((id) => id === 'approve' && this.world!.passkey.kind === 'demo'
+    const stages = stageIds.map((id) => id === 'approve' && this.world!.passkey.kind === 'demo' && !options.stages?.approve
       ? { ...STAGES.approve, label: 'Signing with the demo key', detail: 'A software key signs in the exact passkey format. With a device passkey this is Face ID or Touch ID.' }
       : { ...STAGES[id], ...options.stages?.[id] });
     const t0 = performance.now();
@@ -562,24 +772,88 @@ class DemoStore {
     return withPasskeyApproval({ passkey: { pk: w.passkey.pk, salt: w.ownerSalt } }, digest, assertion);
   }
 
+  /** Whether a recovery stands right now: the next thing the owner signs cancels it. */
+  private recoveryStands(): boolean {
+    const w = this.world!;
+    const state = recoveryStatus(w.chain.ledger, BigInt(w.chain.now)).state;
+    return state === 'waiting' || state === 'ready';
+  }
+
+  /**
+   * Call after anything the owner signed. If a recovery stood before it, that
+   * recovery is now cancelled and its key retired: the owner nonce moved, which
+   * is all the contract needs (D18). Returns a sentence for the result.
+   */
+  private afterOwnerSigned(stood: boolean): string {
+    if (!stood) return '';
+    const w = this.world!;
+    w.recoveryCancelledAt = w.chain.now;
+    w.recoveryNotice = 'cancelled';
+    w.pendingRecovery = undefined;
+    this.log(OWNER_NAME, 'Recovery cancelled · recovery key retired for good', 'armed', [
+      'Nothing extra: the owner action counter moved, so it no longer matches the one the recovery recorded',
+      'The cancelled proposal and the dead recovery key commitment stay on the ledger',
+    ], ['Your passkey and its signature']);
+    return ' It also cancelled the recovery that was in progress, and the recovery key is now retired for good.';
+  }
+
+  /** Collect the events a call emitted, as an app following the vault would. */
+  private noteEvents(out: CallOutcome) {
+    const w = this.world!;
+    const known = new Set<string>(Object.values(VAULT_EVENTS));
+    for (const e of out.events) {
+      if (!known.has(e.name)) continue;
+      w.events.push({ name: e.name as VaultEventName, at: w.chain.now });
+      // "Look at the ledger now": every letter issued before this is out of date (D14).
+      if (e.name === VAULT_EVENTS.willChanged) {
+        w.willChangedAt = w.chain.now;
+        w.sawWillChange.clear();
+      }
+    }
+  }
+
+  /** Whether the owner is late but still inside the grace period. */
+  private inGrace(): boolean {
+    const w = this.world!;
+    const l = w.chain.ledger;
+    return l.phase === Phase.armed && w.chain.now >= Number(l.deadline) && w.chain.now < Number(timeoutOpensAt(l));
+  }
+
   checkIn() {
     const wasPending = this.world?.chain.ledger.phase === Phase.pending;
-    return this.run(wasPending ? 'Cancelling the switch' : 'Recording your check-in', ['prepare', 'approve', 'circuit', 'proof', 'record'], async (stage) => {
+    const title = wasPending ? 'Cancelling the switch' : this.world && this.recoveryStands() ? 'Checking in, which cancels the recovery' : 'Recording your check-in';
+    return this.run(title, ['prepare', 'approve', 'circuit', 'proof', 'record'], async (stage) => {
       const w = this.world!;
+      const before = w.chain.ledger;
       const next = BigInt(w.chain.now + w.setup.every);
-      const digest = checkInDigest(w.chain.address, next, w.chain.ledger.nonce);
+      const digest = checkInDigest(w.chain.address, next, before.nonce);
       await stage('approve');
       const assertion = await approveWithPasskey(w.passkey, digest);
       await stage('circuit');
-      const pending = w.chain.ledger.phase === Phase.pending;
+      const pending = before.phase === Phase.pending;
+      // Late but fine: after the deadline, before the grace period ends.
+      const lateBy = pending ? -1 : w.chain.now - Number(before.deadline);
+      const stood = this.recoveryStands();
       await w.chain.call('checkInPasskey', this.ownerState(digest, assertion), next);
       w.lastCheckIn = w.chain.now;
-      this.log(OWNER_NAME, pending ? `Switch cancelled · deadline moved to ${fmtShort(Number(next))}` : `Check-in · deadline moved to ${fmtShort(Number(next))}`, 'armed', [
+      const moved = `deadline moved to ${fmtShort(Number(next))}`;
+      this.log(OWNER_NAME, pending ? `Switch cancelled · ${moved}` : lateBy >= 0 ? `Late check-in, inside the grace period · ${moved}` : `Check-in · ${moved}`, 'armed', [
         'The new deadline', 'Check-in counter +1', 'Guardian round +1, so earlier reports no longer count',
+        ...(lateBy >= 0 ? ['That this check-in came after the deadline: block time is public'] : []),
       ], ['Your passkey and its signature', 'Who this vault belongs to']);
-      return pending
-        ? `Switch cancelled. Your next deadline is ${fmtDate(Number(next))}.`
-        : `Check-in recorded. Your next deadline is ${fmtDate(Number(next))}.`;
+      const cancelled = this.afterOwnerSigned(stood);
+      const due = `Your next deadline is ${fmtDate(Number(next))}.`;
+      return (pending ? `Switch cancelled. ${due}`
+        : lateBy >= 0 ? `Check-in recorded, ${span(lateBy)} late. You were inside your grace period, so nothing else happened. ${due}`
+        : `Check-in recorded. ${due}`) + cancelled;
+    }, {
+      explain: (code) => {
+        if (code !== 'switch already expired') return undefined;
+        const w = this.world!;
+        const l = w.chain.ledger;
+        const had = l.gracePeriod > 0n ? ` and your grace period ended on ${fmtDate(Number(timeoutOpensAt(l)))}` : '';
+        return `Your check-in was due on ${fmtDate(Number(l.deadline))}${had}, so a check-in alone no longer works. Start the switch, then check in to cancel it: you get the full ${days(w.setup.window)} days to do that.`;
+      },
     });
   }
 
@@ -639,13 +913,92 @@ class DemoStore {
       await stage('approve');
       const assertion = await approveWithPasskey(w.passkey, digest);
       await stage('circuit');
-      await w.chain.call('updateWillPasskey', this.ownerState(digest, assertion), will.root);
+      const stood = this.recoveryStands();
+      const out = await w.chain.call('updateWillPasskey', this.ownerState(digest, assertion), will.root);
+      this.noteEvents(out);
       w.will = will;
       w.setup = { ...w.setup, ...draft };
       this.log(OWNER_NAME, `Will updated to version ${(w.chain.ledger.willVersion + 1n).toString()}`, 'plain', [
-        'A new heirs root (one 32-byte number)', 'Will version +1',
+        'A new heirs root (one 32-byte number)', 'Will version +1', 'A "will changed" event with no details, so heirs\' apps know their letters are out of date',
       ], ['Who gets what, and what changed', draft.kofiBackup ? 'The backup heir' : 'That the backup heir was removed']);
-      return 'Your new will is sealed. Letters for the old one no longer work.';
+      return 'Your new will is sealed. Letters for the old one no longer work.' + this.afterOwnerSigned(stood);
+    }, {
+      // Inside the grace period the way back is a check-in, not a countdown.
+      explain: (code) => (code === 'switch already expired' && this.inGrace()
+        ? 'Your check-in deadline has passed, so the will is locked. Check in first: you are still inside your grace period. Then change the will.'
+        : undefined),
+    });
+  }
+
+  /**
+   * Replace the guardians, the number that must agree, and the attestor, in
+   * one update signed like a check-in. The owner always signs the complete new
+   * settings; every update starts a new voting round (D17).
+   */
+  updateSettings(change: SettingsChange) {
+    return this.run('Changing who can start the switch', ['prepare', 'approve', 'circuit', 'proof', 'record'], async (stage) => {
+      const w = this.world!;
+      const ids = [...new Set(change.guardians)].sort((a, b) => a - b);
+      if (ids.some((id) => !GUARDIAN_POOL[id])) throw new InputError('one of those people is not in the demo');
+      let set: GuardianSet;
+      try {
+        set = this.guardianSetFor(w, ids, change.threshold);
+      } catch (e) {
+        throw new InputError(e instanceof Error ? e.message : String(e));
+      }
+      const before = w.chain.ledger;
+      const settings = {
+        ...currentSettings(before),
+        guardianRoot: set.root,
+        guardianThreshold: set.threshold,
+        attestorKeyCommit: change.attestor ? pureCircuits.attestorCommitment(w.attestor.key.pk, w.attestor.salt) : ZERO32,
+      };
+      const digest = settingsDigest(w.chain.address, settings, before.nonce);
+      await stage('approve');
+      const assertion = await approveWithPasskey(w.passkey, digest);
+      await stage('circuit');
+      const stood = this.recoveryStands();
+      await w.chain.call('updateSettingsPasskey', this.ownerState(digest, assertion), settings);
+
+      const added = ids.filter((id) => !w.setup.guardians.includes(id));
+      const removed = w.setup.guardians.filter((id) => !ids.includes(id));
+      const attestorChanged = change.attestor !== w.setup.attestor;
+      w.guardianSet = set;
+      w.setup = { ...w.setup, guardians: ids, threshold: change.threshold, attestor: change.attestor };
+      // Every guardian in the new set needs a new path, kept or new: the demo
+      // delivers it. A removed guardian keeps the old one, which no longer works.
+      for (const id of ids) {
+        w.guardianHeld.set(id, guardianSecrets(set, w.guardianSecretsList[id]));
+        if (!w.guardianCast.includes(id)) w.guardianCast.push(id);
+      }
+      const voided = before.guardianVotes;
+      this.log(OWNER_NAME, `Guardians and attestor updated · ${change.threshold} must agree`, 'plain', [
+        'The guardians root, the number that must agree, and the attestor commitment (zeros for none)',
+        'Owner action counter +1', 'Guardian round +1, so earlier votes and attestations no longer count',
+      ], [
+        'Who was added, removed or kept', 'How many guardians there are', 'Who the attestor is', 'Your passkey and its signature',
+      ]);
+      const names = (list: number[]) => list.map((id) => guardianById(id).name).join(' and ');
+      return [
+        `Saved. ${change.threshold} of your ${ids.length} guardian${ids.length === 1 ? '' : 's'} must now agree.`,
+        added.length ? `${names(added)} can vote from now on.` : '',
+        removed.length ? `${names(removed)} can no longer vote.` : '',
+        attestorChanged ? (change.attestor ? `${ATTESTOR.name} can now start the switch with a signed notice.` : `${ATTESTOR.name} can no longer start the switch.`) : '',
+        `A new voting round has started${voided > 0n ? `, so the ${voided === 1n ? 'vote' : `${voided} votes`} cast before no longer count${voided === 1n ? 's' : ''}` : ''}.`,
+      ].filter(Boolean).join(' ') + this.afterOwnerSigned(stood);
+    }, {
+      explain: (code) => {
+        const w = this.world!;
+        if (code === 'settings locked') {
+          return w.chain.ledger.phase === Phase.released
+            ? 'This will has been released, so guardians and the attestor can no longer be changed.'
+            : 'A countdown has started, so guardians and the attestor are locked. Check in to cancel the countdown, then change them.';
+        }
+        if (code === 'switch already expired' && this.inGrace()) {
+          return 'Your check-in deadline has passed, so guardians and the attestor are locked. Check in first: you are still inside your grace period. Then change them.';
+        }
+        return undefined;
+      },
     });
   }
 
@@ -660,19 +1013,57 @@ class DemoStore {
 
   startCountdown(who: string) {
     return this.run('Starting the switch', ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
+      const w = this.world!;
       await stage('circuit');
-      await this.world!.chain.call('triggerTimeout', {});
-      this.log(who, 'Deadline passed · switch started', 'pending', ['Vault state: pending', 'When the challenge window ends'], []);
-      return `The switch has started. The owner has ${days(this.world!.setup.window)} days to cancel.`;
+      const grace = w.chain.ledger.gracePeriod > 0n;
+      await w.chain.call('triggerTimeout', {});
+      const until = Number(w.chain.ledger.pendingUntil);
+      this.log(who, grace ? 'Deadline and grace period passed · switch started' : 'Deadline passed · switch started', 'pending', ['Vault state: pending', 'When the challenge window ends'], []);
+      return `The switch has started. The owner can cancel until ${fmtDate(until)}, ${span(until - w.chain.now)} from now.`;
+    }, {
+      explain: (code) => {
+        if (code !== 'grace period open') return undefined;
+        const l = this.world!.chain.ledger;
+        return `The owner missed the check-in due on ${fmtDate(Number(l.deadline))}, but is inside a ${spanAdj(Number(l.gracePeriod))} grace period and can still check in as usual. The switch can start on ${fmtDate(Number(timeoutOpensAt(l)))} if there is still no check-in.`;
+      },
+    });
+  }
+
+  /**
+   * Anyone holding a notice signed by the attestor can start the switch. In
+   * the demo the registry signs for the current round and the notice is sent
+   * straight away.
+   */
+  attest(who: string) {
+    return this.run(`Sending the notice signed by ${ATTESTOR.name}`, ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
+      const w = this.world!;
+      await stage('circuit');
+      const digest = attestationDigest(w.chain.address, w.chain.ledger.guardianRound);
+      const state: CodicilPrivateState = {
+        attestor: { pk: w.attestor.key.pk, salt: w.attestor.salt, approval: { digest, proof: signAttestation(w.attestor.key.sk, digest) } },
+      };
+      await w.chain.call('triggerAttestation', state, BigInt(w.chain.now));
+      const until = Number(w.chain.ledger.pendingUntil);
+      this.log(who, 'A signed notice from the attestor · switch started', 'pending', ['Vault state: pending', 'When the challenge window ends', 'The time on the notice'], [
+        `That the attestor is ${ATTESTOR.name}`, "The attestor's key and signature",
+      ]);
+      return `The vault accepted the notice, so the switch has started. ${OWNER_FIRST} can cancel until ${fmtDate(until)}.`;
+    }, {
+      explain: (code) => (code === 'unknown attestor'
+        ? `This vault has no attestor, or not this one, so the notice was refused. ${OWNER_FIRST} names an attestor under Settings.`
+        : code === 'not armed' ? 'A countdown has already started or the will was released, so a notice changes nothing now.' : undefined),
     });
   }
 
   guardianReport(id: number) {
-    const g = GUARDIANS[id];
+    const g = guardianById(id);
     return this.run('Casting your vote', ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
       const w = this.world!;
       await stage('circuit');
-      const state: CodicilPrivateState = { guardian: guardianSecrets(w.guardianSet, w.guardianSecretsList[id]) };
+      // The guardian works from what their own device holds: their secret and
+      // the path the owner last sent. After being removed, that path is stale.
+      const held = w.guardianHeld.get(id);
+      const state: CodicilPrivateState = held ? { guardian: held } : {};
       const round = w.chain.ledger.guardianRound;
       await w.chain.call('guardianAttest', state, BigInt(w.chain.now));
       w.votedRound.set(id, round);
@@ -684,15 +1075,142 @@ class DemoStore {
       return started
         ? `Your vote is recorded. Enough guardians agreed, so the switch has started.`
         : `Your vote is recorded: ${l.guardianVotes} of ${l.guardianThreshold} so far. No one can see who voted.`;
+    }, {
+      explain: (code) => (code === 'not a guardian'
+        ? `You are no longer a guardian of this will: ${OWNER_FIRST} changed the guardians. Your vote was not counted and nothing was recorded.`
+        : undefined),
     });
   }
 
   release(who: string) {
     return this.run('Releasing the will', ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
       await stage('circuit');
-      await this.world!.chain.call('finalizeRelease', {});
+      this.noteEvents(await this.world!.chain.call('finalizeRelease', {}));
       this.log(who, 'Challenge window ended · will released', 'released', ['Vault state: released', `Estate snapshot: ${this.world!.chain.ledger.estateSnapshot.toLocaleString()}`, 'A "released" event'], []);
       return 'The will is released. Heirs can now claim their shares.';
+    });
+  }
+
+  // ─── Recovery key ─────────────────────────────────────────────────────────
+  /** The recovery key as Amara saved it, standing in for the paper in her drawer. */
+  savedRecoveryKey(): string | undefined {
+    const secret = this.world?.savedRecovery;
+    return secret && encodeRecoveryKey(secret);
+  }
+
+  /** The key that replaces the used one when the recovery in progress finishes. */
+  nextRecoveryKey(): string | undefined {
+    const next = this.world?.pendingRecovery?.nextSecret;
+    return next && encodeRecoveryKey(next);
+  }
+
+  /**
+   * "I lost my passkey": on a new device, with only the recovery key. Proves
+   * knowledge of the secret inside the circuit and proposes a new passkey and
+   * the next recovery key. Nothing changes hands until the public delay is
+   * over, and anything the current passkey signs before then cancels it (D18).
+   * Without `keyText` the saved key is used, as a demo shortcut.
+   */
+  startRecovery(keyText?: string) {
+    return this.run('Starting a recovery', ['prepare', 'approve', 'circuit', 'proof', 'record'], async (stage) => {
+      const w = this.world!;
+      const secret = decodeRecoveryKey(keyText ?? this.savedRecoveryKey() ?? '');
+      await stage('approve');
+      // The new device makes its own passkey; the lost one is never needed.
+      const passkey = w.passkey.kind === 'device' ? await createDevicePasskey() : createDemoPasskey();
+      const salt = newSalt();
+      const nextSecret = newRecoverySecret();
+      await stage('circuit');
+      const out = await w.chain.call(
+        'startRecovery', { recovery: { secret } },
+        pureCircuits.passkeyCommitment(passkey.pk, salt), ZERO32, recoveryCommitment(nextSecret), BigInt(w.chain.now),
+      );
+      this.noteEvents(out);
+      w.pendingRecovery = { passkey, salt, nextSecret, startedAt: w.chain.now };
+      w.recoveryNotice = undefined;
+      const readyAt = Number(w.chain.ledger.recoveryReadyAt);
+      this.log('Someone with the recovery key', `Recovery started · new keys take over on ${fmtShort(readyAt)}`, 'pending', [
+        'Commitments to the owner keys it would install', 'A commitment to the next recovery key', `When it takes effect: ${fmtShort(readyAt)}`,
+        'A "recovery started" event with no details, so the owner\'s app can raise the alarm',
+      ], ['The recovery key', 'The new passkey', 'Who started it']);
+      return `Recovery started. The new passkey takes over on ${fmtDate(readyAt)}, unless the current passkey signs anything before then. Save your next recovery key now.`;
+    }, {
+      stages: {
+        approve: newPasskeyStage(this.world?.passkey.kind),
+      },
+      explain: (code) => {
+        const w = this.world!;
+        const l = w.chain.ledger;
+        if (code === 'too late to recover') {
+          return `A recovery takes ${span(Number(l.recoveryDelay))}, and your check-in is due on ${fmtDate(Number(l.deadline))}, so it could not finish in time. It had to start by ${fmtDate(Number(lastRecoveryStart(l)))}. Nothing was sent. Without a check-in, the will goes to your heirs as written.`;
+        }
+        if (code === 'not armed') return 'A countdown has started, and a recovery key does nothing during one. Only the current passkey can cancel a countdown. Nothing was sent.';
+        if (code === 'switch already expired') return 'The check-in deadline has passed, and a recovery key only works before it. Nothing was sent.';
+        if (code === 'stale timestamp') return 'A recovery was started a moment ago. Starting again must set a later date: move the clock forward and try again.';
+        if (code === 'unknown recovery key') return isZeroBytes(l.recoveryKeyCommit)
+          ? 'This vault has no recovery key, so nothing can be recovered. Nothing was sent.'
+          : 'That is a valid recovery key, but not the one for this vault. Nothing was sent. Check that you have the right paper.';
+        return undefined;
+      },
+    });
+  }
+
+  /** The owner has read the note about a recovery that was cancelled or finished. */
+  dismissRecoveryNotice() {
+    if (!this.world) return;
+    this.world.recoveryNotice = undefined;
+    this.emit();
+  }
+
+  /** Anyone may complete a recovery once its delay is over; what it installs was fixed at the start. */
+  finishRecovery(who: string) {
+    return this.run('Finishing the recovery', ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
+      const w = this.world!;
+      await stage('circuit');
+      await w.chain.call('finishRecovery', {});
+      const p = w.pendingRecovery;
+      if (p) {
+        w.formerPasskey = { passkey: w.passkey, salt: w.ownerSalt };
+        w.passkey = p.passkey;
+        w.ownerSalt = p.salt;
+        w.savedRecovery = p.nextSecret;
+        w.pendingRecovery = undefined;
+      }
+      w.recoveryCompletedAt = w.chain.now;
+      w.recoveryNotice = 'finished';
+      this.log(who, 'Recovery finished · the new keys now own the vault', 'armed', [
+        'The owner key commitments, replaced by the ones proposed at the start', 'The recovery key commitment, replaced by the next one',
+      ], ['Nothing: finishing takes no private input, so anyone can do it']);
+      return 'The recovery is finished. The new passkey now owns the vault and the old one no longer works. Your check-in deadline did not move.';
+    }, {
+      explain: (code) => {
+        const l = this.world!.chain.ledger;
+        if (code === 'recovery delay open') return `The recovery delay runs until ${fmtDate(Number(l.recoveryReadyAt))}. Until then, anything the current passkey signs cancels it.`;
+        if (code === 'not armed') return 'A recovery cannot finish while a countdown is running. A check-in with the current passkey cancels the countdown, and the recovery with it.';
+        if (code === 'switch already expired') return 'The check-in deadline passed before the recovery was finished, so it can no longer finish.';
+        return undefined;
+      },
+    });
+  }
+
+  /** After a finished recovery: show that the passkey it replaced is refused. */
+  tryFormerPasskey() {
+    return this.run('Checking in with the old passkey', ['prepare', 'approve', 'circuit', 'proof', 'record'], async (stage) => {
+      const w = this.world!;
+      const old = w.formerPasskey;
+      if (!old) throw new InputError('no passkey has been replaced on this vault');
+      const next = BigInt(w.chain.now + w.setup.every);
+      const digest = checkInDigest(w.chain.address, next, w.chain.ledger.nonce);
+      await stage('approve');
+      const assertion = await approveWithPasskey(old.passkey, digest);
+      await stage('circuit');
+      await w.chain.call('checkInPasskey', withPasskeyApproval({ passkey: { pk: old.passkey.pk, salt: old.salt } }, digest, assertion), next);
+      w.lastCheckIn = w.chain.now;
+      return 'The old passkey was accepted.';
+    }, {
+      explain: (code) => (code === 'unknown owner key'
+        ? 'The vault refused the old passkey: after the recovery it is no longer an owner key. Only the new passkey can check in or change the will.'
+        : undefined),
     });
   }
 
@@ -732,7 +1250,7 @@ class DemoStore {
   withdrawPosition(actor: Actor = this.actor, to: string = sampleUserAddress()) {
     const holder = actor.kind === 'heir' && actor.id === POSITION.beneficiary;
     const by = actor.kind === 'owner' ? OWNER_FIRST : actor.kind === 'heir' ? HEIRS.find((h) => h.id === actor.id)!.name
-      : actor.kind === 'guardian' ? GUARDIANS[actor.id].name : 'Someone';
+      : actor.kind === 'guardian' ? guardianById(actor.id).name : 'Someone';
     return this.run(`Withdrawing from ${POSITION.name}`, ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
       const w = this.world!;
       if (!/^[0-9a-f]{64}$/i.test(to)) throw new InputError('that does not look like an address. It should be 64 hexadecimal characters');
@@ -784,6 +1302,17 @@ class DemoStore {
     };
   }
 
+  /**
+   * Each guardian checks their own path against the public guardians root, as
+   * their app would. The answer only changes when the root does, so it is kept.
+   */
+  private stillGuardian(w: World, id: number, root: bigint): boolean {
+    if (this.guardianChecks?.root !== root) this.guardianChecks = { root, current: new Map() };
+    const known = this.guardianChecks.current;
+    if (!known.has(id)) known.set(id, isCurrentGuardian(w.guardianHeld.get(id)!, root));
+    return known.get(id)!;
+  }
+
   private heldLetter(w: World, id: HeirProfile['id']): HeldLetter | undefined {
     const text = w.held.get(id);
     if (!text) return undefined;
@@ -802,9 +1331,14 @@ class DemoStore {
     if (!w) {
       return {
         ready: false, actor: this.actor, now: Math.floor(Date.now() / 1000), deployedAt: 0, lastCheckIn: 0, phase: Phase.armed, deadline: 0,
-        pendingUntil: 0, releasedAt: 0, estate: 0n, estateSnapshot: 0n, estatePaid: 0n, nonce: 0n, willVersion: 0n,
-        guardianRound: 0n, guardianVotes: 0n, guardianThreshold: 0n,
-        chain: { address: '', willRoot: '', guardianRoot: '', ownerPasskeyCommit: '', claimNullifiers: [], guardianNullifierCount: 0 },
+        grace: 0, switchOpensAt: 0, pendingUntil: 0, releasedAt: 0, estate: 0n, estateSnapshot: 0n, estatePaid: 0n, nonce: 0n, willVersion: 0n,
+        guardianRound: 0n, guardianVotes: 0n, guardianThreshold: 0n, feeBps: 0n,
+        chain: {
+          address: '', willRoot: '', guardianRoot: '', ownerPasskeyCommit: '', attestorKeyCommit: '', recoveryKeyCommit: '',
+          recoveryReadyAt: 0, recoveryNonce: 0n, recoveryPasskeyCommit: '', claimNullifiers: [], guardianNullifierCount: 0,
+        },
+        guardians: [], events: [],
+        recovery: { state: 'off', readyAt: 0, delay: 0, lastStart: 0, nextKeyToSave: false, formerPasskey: false },
         heirs: [], leafHashes: [], votedThisRound: [], activity: [], tx: this.tx, toast: this.toast,
         position: { name: POSITION.name, address: '', vault: '', beneficiaryCommit: '', held: 0n, withdrawn: false, beneficiary: POSITION.beneficiary },
       };
@@ -812,6 +1346,7 @@ class DemoStore {
     const l = w.chain.ledger;
     const snapshotBase = l.phase === Phase.released ? l.estateSnapshot : l.estateTotal;
     const leaves: HeirLeaf[] = w.will.leaves;
+    const recovery = recoveryStatus(l, BigInt(w.chain.now));
     return {
       ready: true,
       passkey: w.passkey,
@@ -822,6 +1357,8 @@ class DemoStore {
       lastCheckIn: w.lastCheckIn,
       phase: l.phase,
       deadline: Number(l.deadline),
+      grace: Number(l.gracePeriod),
+      switchOpensAt: Number(timeoutOpensAt(l)),
       pendingUntil: Number(l.pendingUntil),
       releasedAt: Number(l.releasedAt),
       estate: l.estateTotal - l.estatePaid,
@@ -832,14 +1369,35 @@ class DemoStore {
       guardianRound: l.guardianRound,
       guardianVotes: l.guardianVotes,
       guardianThreshold: l.guardianThreshold,
+      feeBps: l.feeBps,
       chain: {
         address: w.chain.address,
         willRoot: fieldHex(l.willRoot),
         guardianRoot: fieldHex(l.guardianRoot),
         ownerPasskeyCommit: hex(l.ownerPasskeyCommit),
+        attestorKeyCommit: hex(l.attestorKeyCommit),
+        recoveryKeyCommit: hex(l.recoveryKeyCommit),
+        recoveryReadyAt: Number(l.recoveryReadyAt),
+        recoveryNonce: l.recoveryNonce,
+        recoveryPasskeyCommit: hex(l.recoveryPasskeyCommit),
         claimNullifiers: [...w.claimed.values()].filter((n) => l.claimNullifiers.member(Uint8Array.from(n.match(/../g)!.map((x) => parseInt(x, 16))))),
         guardianNullifierCount: Number(l.guardianNullifiers.size()),
       },
+      guardians: w.guardianCast.map((id) => ({ ...guardianById(id), current: this.stillGuardian(w, id, l.guardianRoot) })),
+      recovery: {
+        state: recovery.state,
+        readyAt: 'readyAt' in recovery ? Number(recovery.readyAt) : 0,
+        delay: Number(l.recoveryDelay),
+        lastStart: Number(lastRecoveryStart(l)),
+        startedAt: w.pendingRecovery?.startedAt,
+        cancelledAt: w.recoveryCancelledAt,
+        completedAt: w.recoveryCompletedAt,
+        notice: w.recoveryNotice,
+        nextKeyToSave: !!w.pendingRecovery,
+        formerPasskey: !!w.formerPasskey,
+      },
+      events: w.events,
+      willChangedAt: w.willChangedAt,
       heirs: HEIRS.map((profile) => {
         const leaf = leaves[profile.leaf];
         return {
@@ -851,6 +1409,7 @@ class DemoStore {
           named: !profile.backup || leaf.backupKeyCommit.some((b) => b !== 0),
           keyEnd: w.heirKeys[profile.id].key.pk.x.toString(16).slice(-4),
           letter: this.heldLetter(w, profile.id),
+          sawWillChange: w.sawWillChange.has(profile.id),
         };
       }),
       position: this.positionView(w),

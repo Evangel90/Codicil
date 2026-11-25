@@ -6,12 +6,69 @@
 // choices, and the setup presets.
 
 import { Phase } from '@codicil/contracts/vault';
-import { CLAIM_WINDOW, DAY, GUARDIANS, HEIRS, OWNER_FIRST, type Actor, type Snapshot, type VaultSetup } from './store.js';
+import { VAULT_EVENTS } from '@codicil/sdk';
+import {
+  ATTESTOR, CLAIM_WINDOW, DAY, fmtDate, guardianById, HEIRS, OWNER_FIRST, span, spanAdj, type Actor, type RecoveryView, type Snapshot, type VaultSetup,
+} from './store.js';
 
 const d = (seconds: number) => {
   const n = Math.round(seconds / DAY);
   return `${n} day${n === 1 ? '' : 's'}`;
 };
+
+// ─── Where the check-in stands ──────────────────────────────────────────────
+/**
+ * `onTime`: before the deadline. `grace`: the deadline was missed, but a
+ * check-in still works and nobody can start the switch by timeout. `expired`:
+ * anyone can start the switch, and a check-in alone no longer works.
+ */
+export type CheckInState = 'onTime' | 'grace' | 'expired';
+
+export const checkInState = (s: Pick<Snapshot, 'now' | 'deadline' | 'switchOpensAt'>): CheckInState =>
+  s.now < s.deadline ? 'onTime' : s.now < s.switchOpensAt ? 'grace' : 'expired';
+
+/** A recovery that can still take effect: it stands, the vault is armed and the deadline has not passed. */
+export const recoveryLive = (s: Pick<Snapshot, 'phase' | 'now' | 'deadline' | 'recovery'>): boolean =>
+  (s.recovery.state === 'waiting' || s.recovery.state === 'ready') && s.phase === Phase.armed && s.now < s.deadline;
+
+/** Whether the owner can change guardians and the attestor now; the contract locks them otherwise. */
+export const settingsOpen = (s: Pick<Snapshot, 'phase' | 'now' | 'deadline'>): boolean =>
+  s.phase === Phase.armed && s.now < s.deadline;
+
+/** The same, as the end of a sentence. */
+export function recoveryBrief(r: RecoveryView): string {
+  switch (r.state) {
+    case 'off': return 'no recovery key';
+    case 'idle': return 'recovery key ready';
+    case 'waiting': return 'a recovery is in progress';
+    case 'ready': return 'a recovery can be finished now';
+    case 'retired': return 'recovery key retired for good';
+  }
+}
+
+/** The recovery key's status in a few words, for a row on the dashboard. */
+export function recoveryLabel(r: RecoveryView): string {
+  switch (r.state) {
+    case 'off': return 'None';
+    case 'idle': return `Ready · ${spanAdj(r.delay)} delay`;
+    case 'waiting': return `Recovery in progress · until ${fmtDate(r.readyAt)}`;
+    case 'ready': return 'Recovery can be finished now';
+    case 'retired': return 'Retired for good';
+  }
+}
+
+const EVENT_WORDS: Record<string, string> = {
+  [VAULT_EVENTS.willChanged]: 'will changed',
+  [VAULT_EVENTS.recoveryStarted]: 'recovery started',
+  [VAULT_EVENTS.released]: 'released',
+};
+
+/** "will changed × 2, recovery started × 1", in the order each first happened. */
+export function eventSummary(events: Snapshot['events']): string {
+  const counts = new Map<string, number>();
+  for (const e of events) counts.set(e.name, (counts.get(e.name) ?? 0) + 1);
+  return [...counts].map(([name, n]) => `${EVENT_WORDS[name] ?? name} × ${n}`).join(', ');
+}
 
 // ─── Who acts next ──────────────────────────────────────────────────────────
 export interface NextUp {
@@ -20,7 +77,7 @@ export interface NextUp {
   /** People whose turn it is; their "Act as" buttons are highlighted. */
   who: Actor[];
   /** An action anyone may take right now. */
-  action?: 'startSwitch' | 'release';
+  action?: 'startSwitch' | 'release' | 'finishRecovery';
   tone: 'calm' | 'attention' | 'done';
 }
 
@@ -29,12 +86,45 @@ export function nextUp(s: Snapshot): NextUp {
   const votes = Number(s.guardianVotes);
   const owner: Actor = { kind: 'owner' };
   if (s.phase === Phase.armed) {
-    if (s.now >= s.deadline) {
-      return { tone: 'attention', action: 'startSwitch', who: [{ kind: 'public' }, owner], text: `${OWNER_FIRST} missed her check-in. Anyone can now start the switch, or ${OWNER_FIRST} can still check in.` };
+    const due = checkInState(s);
+    if (due === 'grace') {
+      return {
+        tone: 'attention', who: [owner],
+        text: `${OWNER_FIRST} missed her check-in, but her ${spanAdj(s.grace)} grace period runs until ${fmtDate(s.switchOpensAt)}. She can still check in as usual and nobody can start the switch. Skip the grace period to see what happens if she stays silent.`,
+      };
+    }
+    if (due === 'expired') {
+      return {
+        tone: 'attention', action: 'startSwitch', who: [{ kind: 'public' }, owner],
+        text: `${OWNER_FIRST} missed her check-in${s.grace > 0 ? ' and her grace period is over' : ''}. Anyone can now start the switch. ${OWNER_FIRST} then has until ${fmtDate(s.switchOpensAt + s.setup!.window)} to cancel it.`,
+      };
+    }
+    // A recovery outranks everything else while the owner is on time: it is a
+    // change of owner that only she can stop.
+    if (s.recovery.state === 'ready') {
+      return {
+        tone: 'attention', action: 'finishRecovery', who: [{ kind: 'public' }, owner],
+        text: `The recovery delay is over. Anyone can finish the recovery, and the new passkey then owns the vault. A check-in with ${OWNER_FIRST}'s current passkey still cancels it.`,
+      };
+    }
+    if (s.recovery.state === 'waiting') {
+      return {
+        tone: 'attention', who: [owner],
+        text: `A recovery started with ${OWNER_FIRST}'s recovery key. A new passkey takes over on ${fmtDate(s.recovery.readyAt)} unless her current passkey signs anything first. Check in as ${OWNER_FIRST} to cancel it, or skip the recovery delay to let it finish.`,
+      };
     }
     if (votes > 0) {
-      const left = GUARDIANS.filter((g) => !s.votedThisRound.includes(g.id)).map((g): Actor => ({ kind: 'guardian', id: g.id }));
+      const left = s.guardians.filter((g) => g.current && !s.votedThisRound.includes(g.id)).map((g): Actor => ({ kind: 'guardian', id: g.id }));
       return { tone: 'attention', who: [...left, owner], text: `${votes} of ${k} guardians ${votes === 1 ? 'has' : 'have'} voted. Another vote starts the switch; a check-in by ${OWNER_FIRST} resets the count.` };
+    }
+    // The will changed and an heir who has not looked since still holds a letter for the old one.
+    const stale = s.heirs.filter((h) => h.letter && h.letter.vaultMatches && !h.letter.inCurrentWill && !h.sawWillChange);
+    if (stale.length) {
+      const names = stale.map((h) => h.profile.name);
+      return {
+        tone: 'attention', who: stale.map((h): Actor => ({ kind: 'heir', id: h.profile.id })),
+        text: `${OWNER_FIRST} changed her will, so the letter${names.length === 1 ? '' : 's'} ${names.join(' and ')} ${names.length === 1 ? 'holds is' : 'hold are'} out of date. Act as ${names[0]} to see what an heir is told.`,
+      };
     }
     return { tone: 'calm', who: [owner], text: `${OWNER_FIRST} is checking in, so nothing happens. Check in, or skip to the deadline to see what happens if she stops.` };
   }
@@ -104,27 +194,61 @@ export function positionNext(s: Snapshot): NextUp {
 export interface Rule { topic: string; rule: string; meaning: string }
 export interface Warning { topic: string; tone: 'warn' | 'info'; text: string }
 
-export function planSummary(p: VaultSetup, now: number): { rules: Rule[]; warnings: Warning[] } {
-  const n = GUARDIANS.length;
+/**
+ * `recoveryKey` says where the key stands on a live vault; in the wizard it
+ * follows from the setup ('ready' when a delay is chosen, 'none' otherwise).
+ */
+export function planSummary(
+  p: VaultSetup,
+  now: number,
+  live: { recoveryKey?: 'none' | 'ready' | 'retired' } = {},
+): { rules: Rule[]; warnings: Warning[] } {
+  const guardians = p.guardians.map(guardianById);
+  const n = guardians.length;
   const pct = (b: bigint) => Number(b) / 100;
   const total = pct(p.ada + p.ben + p.cleo);
+  const recoveryKey = live.recoveryKey ?? (p.recoveryDelay > 0 ? 'ready' : 'none');
   const rules: Rule[] = [];
   const warnings: Warning[] = [];
 
   rules.push({
     topic: 'Check-ins',
-    rule: `You check in at least every ${d(p.every)}, with one touch of Face ID. Changing the will counts as a check-in.`,
-    meaning: `If ${d(p.every)} pass without one, anyone can start the switch. A missed check-in proves nothing by itself; it only starts a clock you can stop.`,
+    rule: `You check in at least every ${d(p.every)}, with one touch of Face ID. Changing the will does not move your deadline.`,
+    meaning: p.grace > 0
+      ? `If ${d(p.every)} pass without one, your grace period starts. A missed check-in proves nothing by itself; it only starts clocks you can stop.`
+      : `If ${d(p.every)} pass without one, anyone can start the switch. A missed check-in proves nothing by itself; it only starts a clock you can stop.`,
   });
   if (p.every <= 7 * DAY) warnings.push({ topic: 'Check-ins', tone: 'warn', text: `Checking in every ${d(p.every)} is easy to miss on holiday or in hospital. Your challenge window is the safety net.` });
 
+  rules.push(p.grace > 0 ? {
+    topic: 'Grace period',
+    rule: `If you miss a check-in, you have ${d(p.grace)} more to check in as usual.`,
+    meaning: 'Until the grace period ends, nobody can start the switch because of the missed check-in, and your time to cancel is counted from its end. Guardians are not delayed by it. A late check-in is visibly late on the chain, and heirs wait this much longer.',
+  } : {
+    topic: 'Grace period',
+    rule: 'None.',
+    meaning: 'Anyone can start the switch the moment a check-in is missed. Being a day late means cancelling a countdown that everyone can see.',
+  });
+  if (p.grace > 0 && p.grace >= p.every) warnings.push({ topic: 'Grace period', tone: 'info', text: `A grace period as long as the check-in period means you really have ${d(p.every + p.grace)} between check-ins.` });
+
   rules.push({
     topic: 'Guardians',
-    rule: `${GUARDIANS.map((g) => g.name).join(', ')} watch over the will. Any ${p.threshold} of ${n} can start the switch early.`,
+    rule: n === 1
+      ? `${guardians[0].name} watches over the will and can start the switch early.`
+      : `${guardians.map((g) => g.name).join(', ')} watch over the will. Any ${p.threshold} of ${n} can start the switch early.`,
     meaning: 'Guardians can only start the clock. They never see the will, never hold funds, and never learn who the other guardians are.',
   });
-  if (p.threshold === 1) warnings.push({ topic: 'Guardians', tone: 'warn', text: 'A single guardian can start the switch on their own. You would still have the whole challenge window to cancel.' });
-  if (p.threshold === n) warnings.push({ topic: 'Guardians', tone: 'info', text: `All ${n} guardians must agree. If one can't be reached, guardians can't start the switch early; your deadline still works.` });
+  if (p.threshold === 1 && n > 1) warnings.push({ topic: 'Guardians', tone: 'warn', text: 'A single guardian can start the switch on their own. You would still have the whole challenge window to cancel.' });
+  if (n === 1) warnings.push({ topic: 'Guardians', tone: 'warn', text: `${guardians[0].name} is your only guardian and can start the switch alone. You would still have the whole challenge window to cancel.` });
+  if (p.threshold === n && n > 1) warnings.push({ topic: 'Guardians', tone: 'info', text: `All ${n} guardians must agree. If one can't be reached, guardians can't start the switch early; your deadline still works.` });
+
+  if (p.attestor) {
+    rules.push({
+      topic: 'Attestor',
+      rule: `${ATTESTOR.name} can also start the switch, with a signed notice.`,
+      meaning: 'Like the guardians, an attestor can only start the clock. A notice signed before your last check-in or settings change does not work.',
+    });
+  }
 
   rules.push({
     topic: 'Challenge window',
@@ -150,6 +274,27 @@ export function planSummary(p: VaultSetup, now: number): { rules: Rule[]; warnin
   });
   if (!p.kofiBackup) warnings.push({ topic: 'Backup', tone: 'info', text: "Without a backup, Ada's share is lost if her key or letter is lost." });
 
+  if (recoveryKey === 'ready') {
+    rules.push({
+      topic: 'Recovery key',
+      rule: `If you lose your passkey, your recovery key can put a new one in charge after a public wait of ${d(p.recoveryDelay)}.`,
+      meaning: `Anything your current passkey signs in those ${d(p.recoveryDelay)} cancels it and retires the key for good. The key cannot delay or stop a release, and it must be used at least ${d(p.recoveryDelay)} before a deadline.`,
+    });
+    warnings.push({ topic: 'Recovery key', tone: 'info', text: `Anyone who finds your recovery key can take over the vault unless your passkey signs something within ${d(p.recoveryDelay)}. The chain shows that this vault has one.` });
+  } else if (recoveryKey === 'retired') {
+    rules.push({
+      topic: 'Recovery key',
+      rule: 'Retired. A recovery made with it was cancelled.',
+      meaning: 'This vault has no usable recovery key now, and this version cannot set a new one. If you lose your passkey, the will is released at your deadline.',
+    });
+  } else {
+    rules.push({
+      topic: 'Recovery key',
+      rule: 'None.',
+      meaning: 'If you lose your passkey you cannot check in, and the will is released to your heirs at your deadline. A recovery key can only be set when the vault is created.',
+    });
+  }
+
   rules.push({
     topic: 'Privacy',
     rule: 'The chain stores one fingerprint of the will, a fingerprint of the guardians, and the timers.',
@@ -157,8 +302,8 @@ export function planSummary(p: VaultSetup, now: number): { rules: Rule[]; warnin
   });
   rules.push({
     topic: 'Worst case',
-    rule: `Heirs can claim at the earliest ${d(p.every + p.window)} after your last check-in.`,
-    meaning: `Or ${d(p.window)} after ${p.threshold} guardian${p.threshold === 1 ? '' : 's'} vote, if that comes first.`,
+    rule: `Heirs can claim at the earliest ${d(p.every + p.grace + p.window)} after your last check-in.`,
+    meaning: `Or ${d(p.window)} after ${p.threshold} guardian${p.threshold === 1 ? '' : 's'} vote${p.threshold === 1 ? 's' : ''}, if that comes first.`,
   });
   return { rules, warnings };
 }

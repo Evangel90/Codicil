@@ -52,6 +52,7 @@ export const ICONS = {
   down: 'M12 5v14M6 13l6 6 6-6',
   letter: 'M3 6h18v12H3zM3 6l9 7 9-7',
   search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4',
+  shield: 'M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6l7-3z',
 } as const;
 
 export function ThemeToggle() {

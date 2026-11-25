@@ -7,8 +7,10 @@
 import { useState } from 'react';
 import { Phase } from '@codicil/contracts/vault';
 import { Countdown, duration, FACE_ID, HashChip, Icon, ICONS, PHASE } from '../components/ui.js';
-import { days, demo, fmtDate, fmtShort, OWNER_FIRST, TOKEN, type Snapshot } from '../demo/store.js';
+import { days, demo, fmtDate, fmtShort, OWNER_FIRST, span, spanAdj, TOKEN, type Snapshot } from '../demo/store.js';
+import { checkInState, recoveryBrief, recoveryLive } from '../demo/guide.js';
 import { Activity } from './Activity.js';
+import { RecoveryAlert, RecoveryNotice } from './RecoveryAlert.js';
 import { calendarFile, downloadCalendar, remindersFor } from '../demo/ics.js';
 import type { Tab } from './Demo.js';
 
@@ -59,7 +61,13 @@ export function OwnerView({ s, openTab }: { s: Snapshot; openTab: (t: Tab) => vo
   const setup = s.setup!;
   const named = s.heirs.filter((h) => !h.profile.backup);
   const claimed = named.filter((h) => h.claimed).length;
-  const overdue = s.phase === Phase.armed && s.now >= s.deadline;
+  const armed = s.phase === Phase.armed;
+  // On time, late but inside the grace period, or past the point where a check-in alone works.
+  const due = checkInState(s);
+  const overdue = armed && due !== 'onTime';
+  const inGrace = armed && due === 'grace';
+  const expired = armed && due === 'expired';
+  const guardianCount = s.guardians.filter((g) => g.current).length;
 
   const deposit = async () => {
     const n = Number(amount);
@@ -74,16 +82,37 @@ export function OwnerView({ s, openTab }: { s: Snapshot; openTab: (t: Tab) => vo
         <span className="small muted vault-id">Vault <HashChip value={s.chain.address} /></span>
       </div>
 
+      {recoveryLive(s) ? <RecoveryAlert s={s} /> : <RecoveryNotice s={s} />}
+
       <Lifecycle phase={s.phase} />
 
       <div className="split">
         <section className="split-main" aria-labelledby="st-h">
-          {s.phase === Phase.armed && (
+          {armed && !overdue && (
+            <div className="stack-20">
+              <h2 id="st-h" className="sub">Your next check-in is due in</h2>
+              <Countdown seconds={s.deadline - s.now} />
+            </div>
+          )}
+          {inGrace && (
             <div className="stack-20">
               <h2 id="st-h" className="sub">
-                {overdue ? `Your check-in was due on ${fmtDate(s.deadline)}. Check in now, before anyone starts the switch.` : 'Your next check-in is due in'}
+                You missed your check-in on {fmtDate(s.deadline)}. You are late, but inside your {spanAdj(s.grace)} grace
+                period: check in before it ends and nothing else happens. It ends in
               </h2>
-              <Countdown seconds={s.deadline - s.now} />
+              <Countdown seconds={s.switchOpensAt - s.now} />
+            </div>
+          )}
+          {expired && (
+            <div className="stack-18">
+              <h2 id="st-h" className="disp big h-sm">
+                Your check-in was due on {fmtDate(s.deadline)}{s.grace > 0 ? `, and your grace period ended on ${fmtDate(s.switchOpensAt)}` : ''}.
+              </h2>
+              <p className="lede">
+                Anyone can now start the switch, and a check-in alone no longer works. Once the switch has started you
+                can cancel it with one touch until {fmtDate(s.switchOpensAt + setup.window)}. Starting it yourself is the
+                quickest way back.
+              </p>
             </div>
           )}
           {s.phase === Phase.pending && (
@@ -116,28 +145,44 @@ export function OwnerView({ s, openTab }: { s: Snapshot; openTab: (t: Tab) => vo
             </>
           )}
 
-          {s.phase === Phase.armed && (
+          {armed && !inGrace && (
             <ProgressBar
               from={s.lastCheckIn} to={s.deadline} now={s.now} tone={overdue ? 'pending' : 'armed'}
               ticks={[s.deadline - 7 * 86_400, s.deadline - 86_400].filter((t) => t > s.lastCheckIn)}
               labels={[`Last check-in · ${fmtShort(s.lastCheckIn)}`, 'Reminders 7 days and 1 day before', `Deadline · ${fmtShort(s.deadline)}`]}
             />
           )}
+          {inGrace && (
+            <ProgressBar
+              from={s.deadline} to={s.switchOpensAt} now={s.now} tone="pending" ticks={[]}
+              labels={[`Deadline missed · ${fmtShort(s.deadline)}`, `${spanAdj(s.grace)} grace period`, `Switch can start · ${fmtShort(s.switchOpensAt)}`]}
+            />
+          )}
           {s.phase === Phase.pending && (
             <ProgressBar
               from={s.pendingUntil - setup.window} to={s.pendingUntil} now={s.now} tone="pending" ticks={[]}
-              labels={[`Switch started · ${fmtShort(s.pendingUntil - setup.window)}`, `${days(setup.window)}-day challenge window`, `Will opens · ${fmtShort(s.pendingUntil)}`]}
+              labels={[`Window opened · ${fmtShort(s.pendingUntil - setup.window)}`, `${days(setup.window)}-day challenge window`, `Will opens · ${fmtShort(s.pendingUntil)}`]}
             />
           )}
 
-          {s.phase === Phase.armed && (
+          {armed && !expired && (
             <div className="alive-row">
               <button type="button" className="btn btn-primary btn-lg alive btn-xl" disabled={busy} onClick={() => void demo.checkIn()}>
                 <Icon d={FACE_ID} size={20} />I'm alive
               </button>
               <span className="alive-note">
-                One touch with {s.passkey?.kind === 'device' ? 'Face ID' : 'your demo key'}. Your deadline moves to {days(setup.every)} days from now, and nobody can tell it was you.
+                {inGrace
+                  ? `One touch with ${s.passkey?.kind === 'device' ? 'Face ID' : 'your demo key'}. A late check-in works like any other: your deadline moves to ${days(setup.every)} days from now. Because block time is public, it is visibly late.`
+                  : `One touch with ${s.passkey?.kind === 'device' ? 'Face ID' : 'your demo key'}. Your deadline moves to ${days(setup.every)} days from now, and nobody can tell it was you.`}
               </span>
+            </div>
+          )}
+          {expired && (
+            <div className="alive-row">
+              <button type="button" className="btn btn-primary btn-lg" disabled={busy} onClick={() => void demo.startCountdown(OWNER_FIRST)}>
+                Start the switch so I can cancel it
+              </button>
+              <span className="alive-note">Nothing is released by starting it. You then cancel with one touch.</span>
             </div>
           )}
           {s.phase === Phase.armed && !overdue && (
@@ -192,8 +237,15 @@ export function OwnerView({ s, openTab }: { s: Snapshot; openTab: (t: Tab) => vo
             <div><dt>Will</dt><dd>Version {(s.willVersion + 1n).toString()} · sealed</dd></div>
             <div><dt>Heirs</dt><dd className="tone-private">{named.length} · names private</dd></div>
             <div><dt>Guardian votes</dt><dd>{s.guardianVotes.toString()} of {s.guardianThreshold.toString()} · round {(s.guardianRound + 1n).toString()}</dd></div>
-            <div><dt>Rhythm</dt><dd>Every {days(setup.every)} days · {days(setup.window)}-day window</dd></div>
+            <div><dt>Rhythm</dt><dd>Every {days(setup.every)} days · {s.grace > 0 ? `${span(s.grace)} of grace · ` : ''}{days(setup.window)}-day window</dd></div>
           </dl>
+          <button type="button" className="rowlink savings-row" onClick={() => openTab('settings')}>
+            <span className="savings-row-icon" aria-hidden="true"><Icon d={ICONS.shield} size={17} stroke={1.5} /></span>
+            <span className="lens-text">
+              <span>Guardians and recovery key</span>
+              <span>{s.guardianThreshold.toString()} of {guardianCount} guardians must agree · {recoveryBrief(s.recovery)}</span>
+            </span>
+          </button>
           <button type="button" className="rowlink lens-link" onClick={() => openTab('lens')}>
             <span className="lens-icon" aria-hidden="true"><span /><span /></span>
             <span className="lens-text"><span>Open the Privacy Lens</span><span>See exactly what the chain knows</span></span>

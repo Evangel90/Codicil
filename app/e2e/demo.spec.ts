@@ -61,8 +61,10 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
   await expect(page.getByText('1 of 3', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'More votes needed' }).click();
   await next.click();                                   // timers
+  await next.click();                                   // recovery key: none
   await next.click();                                   // review
   await expect(page.getByText('2 of 3 must agree')).toBeVisible();
+  await expect(page.locator('.review')).toContainText('no grace period');
   await next.click();                                   // deploy
   await page.getByRole('button', { name: 'Seal & deploy vault' }).click();
   await page.getByRole('button', { name: /Go to my vault/ }).click({ timeout: 30_000 });
@@ -142,7 +144,7 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
   await expect(palette.getByRole('option')).toHaveCount(1);
   await page.keyboard.press('Enter');
   await expect(palette).toBeHidden();
-  await page.getByRole('button', { name: /Start the switch/ }).click();
+  await page.getByRole('button', { name: 'Start the switch', exact: true }).click();
   await finish(page, /The switch has started/);
   await page.getByRole('button', { name: 'Skip challenge window' }).click();
   await page.getByRole('button', { name: /Release the will/ }).click();
@@ -182,6 +184,10 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
   await expect(page.locator('.inspect-rows')).toContainText('1 one-time stamp');
   await expect(page.locator('.inspect-rows')).toContainText('8,000 demo tokens, paid out');
   await expect(page.locator('.inspect-rows')).not.toContainText(/Ada|Ben|Cleo|Kofi|Mensah|Sarah|Tomás|Amara/);
+  const fact = (label: string) => page.locator('.inspect-rows > div').filter({ has: page.getByText(label, { exact: true }) });
+  await expect(fact('Release fee')).toContainText('None');
+  await expect(fact('Recovery key')).toContainText('None');
+  await expect(fact('Events')).toContainText('will changed × 1, released × 1');
 
   // The privacy lens: one nullifier, and no names on the public side.
   await page.getByRole('button', { name: 'Privacy Lens' }).click();
@@ -192,6 +198,198 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
   await expect(pub.locator('.ledger')).not.toContainText(/Ada|Ben|Cleo|Kofi|Mensah|Sarah|Tomás|Amara/);
   await page.getByRole('button', { name: "Reveal Amara's view" }).first().click();
   await expect(page.locator('.lens-private .ledger')).toContainText('Ben claimed');
+
+  expect(errors).toEqual([]);
+});
+
+/** The wizard, with a passkey from Chrome's virtual authenticator. Ends on the owner's dashboard. */
+async function createVault(page: Page, opts: { grace?: string; recoveryKey?: boolean } = {}) {
+  await addVirtualPasskey(page);
+  await page.goto('/#/demo');
+  await page.getByRole('button', { name: /Register Face ID/ }).click();
+  await expect(page.getByText('Passkey registered on this device.')).toBeVisible();
+  const next = page.getByRole('button', { name: /Continue|Looks right/ });
+  for (let i = 0; i < 4; i++) await next.click();       // heirs, shares, guardians, timers
+  if (opts.grace) {
+    await page.getByRole('group', { name: 'Grace period' }).getByRole('button', { name: opts.grace }).click();
+    await expect(page.locator('.worst')).toContainText('47 days');
+  }
+  await next.click();                                   // recovery key
+  await expect(page.getByRole('heading', { name: 'What if you lose your passkey?' })).toBeVisible();
+  if (opts.recoveryKey) {
+    await page.getByRole('button', { name: 'Create a recovery key' }).click();
+    await expect(page.getByLabel('Your recovery key', { exact: true })).toContainText(/^([0-9a-f]{4}\s*){17}$/);
+    await expect(next).toBeDisabled();                  // not until the key is saved
+    await page.getByRole('button', { name: 'Open the sheet to print or download' }).click();
+    const sheet = page.getByRole('dialog', { name: 'Your recovery key' });
+    await expect(sheet.getByRole('img', { name: /QR code/ })).toBeVisible();
+    await expect(sheet).toContainText('codicil:recovery:v1:');
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await page.getByLabel(/I have saved my recovery key/).check();
+  }
+  await next.click();                                   // review
+  await next.click();                                   // deploy
+  await page.getByRole('button', { name: 'Seal & deploy vault' }).click();
+  await page.getByRole('button', { name: /Go to my vault/ }).click({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Your next check-in is due in' })).toBeVisible();
+}
+
+test('grace period: late but fine, and a recovery the owner cancels', async ({ page }) => {
+  const errors = watchErrors(page);
+  await createVault(page, { grace: '3 days', recoveryKey: true });
+  const nextBar = page.getByRole('status').filter({ hasText: /^Next/ });
+  const nav = page.getByRole('navigation', { name: 'Sections' });
+  const actAs = page.getByRole('group', { name: 'Act as' });
+  const main = page.getByRole('main');
+  const fact = (label: string) => page.locator('.inspect-rows > div').filter({ has: page.getByText(label, { exact: true }) });
+
+  // The deadline passes. Nobody can start the switch: Amara is inside her grace period.
+  await page.getByRole('button', { name: 'Skip to deadline' }).click();
+  await expect(nextBar).toContainText('her 3-day grace period runs until');
+  await expect(page.getByRole('button', { name: 'Start the switch', exact: true })).toHaveCount(0);
+  await expect(main.getByRole('heading', { name: /You missed your check-in on .* You are late, but inside your 3-day grace period/ })).toBeVisible();
+  await actAs.getByRole('button', { name: 'Anyone' }).click();
+  await expect(fact('State')).toContainText('this vault has a grace period');
+  await expect(fact('Grace period')).toContainText('3 days');
+  await actAs.getByRole('button', { name: 'Amara' }).click();
+
+  // A day late, she checks in through the passkey as usual: late but fine.
+  await page.getByRole('button', { name: '+1 day' }).click();
+  await page.getByRole('button', { name: /I'm alive/ }).click();
+  await finish(page, /Check-in recorded, 1 day late\. You were inside your grace period, so nothing else happened\./);
+  await expect(main.getByText(/^Late check-in, inside the grace period/)).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Your next check-in is due in' })).toBeVisible();
+
+  // Silence through the deadline and the whole grace period: now the switch can start.
+  await page.getByRole('button', { name: 'Skip to deadline' }).click();
+  await page.getByRole('button', { name: 'Skip the grace period' }).click();
+  await expect(nextBar).toContainText('her grace period is over');
+  await main.getByRole('button', { name: 'Start the switch so I can cancel it' }).click();
+  await finish(page, /The switch has started\. The owner can cancel until .*, 14 days from now\./);
+  await page.getByRole('button', { name: "I'm here, cancel the switch" }).click();
+  await finish(page, /Switch cancelled/);
+
+  // Someone uses the recovery key. A mistyped key never leaves the device.
+  await nav.getByRole('button', { name: 'Settings' }).click();
+  await expect(main.getByRole('heading', { name: 'Your recovery key is ready.' })).toBeVisible();
+  await main.getByRole('textbox', { name: 'Recovery key' }).fill('not my key');
+  await main.getByRole('button', { name: 'Start the recovery' }).click();
+  await expect(main.getByRole('alert')).toContainText('only the digits 0 to 9 and the letters a to f');
+  await main.getByRole('button', { name: /Use the key Amara saved/ }).click();
+  await main.getByRole('button', { name: 'Start the recovery' }).click();
+  await finish(page, /Recovery started\. The new passkey takes over on/);
+
+  // Amara's dashboard cannot be read without seeing it, and it says what stops it.
+  await nav.getByRole('button', { name: 'Vault' }).click();
+  const alert = main.getByRole('alert');
+  await expect(alert.getByRole('heading')).toContainText('Someone is replacing your passkey');
+  await expect(alert).toContainText('If this was not you, check in now.');
+  await expect(alert).toContainText('retired for good');
+  await expect(nextBar).toContainText("A recovery started with Amara's recovery key");
+  await expect(page.getByRole('button', { name: 'Skip the recovery delay' })).toBeVisible();
+  await actAs.getByRole('button', { name: 'Anyone' }).click();
+  await expect(fact('Recovery key')).toContainText('recovery started, takes effect');
+  await expect(fact('Events')).toContainText('recovery started × 1');
+  await actAs.getByRole('button', { name: 'Amara' }).click();
+
+  // One check-in cancels it, and the key is gone for good.
+  await alert.getByRole('button', { name: /Check in with Face ID and cancel the recovery/ }).click();
+  await finish(page, /It also cancelled the recovery that was in progress, and the recovery key is now retired for good\./);
+  await expect(main.getByRole('alert')).toHaveCount(0);
+  await expect(main.getByRole('heading', { name: 'The recovery was cancelled.' })).toBeVisible();
+  await expect(main.getByText('Recovery cancelled · recovery key retired for good')).toBeVisible();
+  await main.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(main.getByRole('button', { name: /Guardians and recovery key/ })).toContainText('recovery key retired for good');
+  await nav.getByRole('button', { name: 'Settings' }).click();
+  await expect(main.getByRole('heading', { name: 'Your recovery key is retired for good.' })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Start the recovery' })).toHaveCount(0);
+
+  // What the chain shows of all this: lengths, dates and counters; no secret, no names.
+  await nav.getByRole('button', { name: 'Privacy Lens' }).click();
+  const ledger = page.locator('.lens-public .ledger');
+  const row = (key: string) => ledger.locator('.lens-row').filter({ has: page.getByText(key, { exact: true }) });
+  await expect(row('gracePeriod')).toContainText('259200');
+  await expect(row('feeBps')).toContainText('0 · no release fee');
+  await expect(row('recoveryReadyAt · recoveryNonce')).toContainText('cancelled');
+  await expect(row('events')).toContainText('recovery started × 1');
+  await expect(ledger).not.toContainText(/Ada|Ben|Cleo|Kofi|Mensah|Sarah|Tomás|Ngozi|Bello|Amara|Lagos/);
+  await actAs.getByRole('button', { name: 'Anyone' }).click();
+  await nav.getByRole('button', { name: 'Inspect' }).click();
+  await expect(fact('Recovery key')).toContainText('a recovery was cancelled, key retired');
+
+  expect(errors).toEqual([]);
+});
+
+test('new guardians, and a lost passkey recovered with the saved key', async ({ page }) => {
+  const errors = watchErrors(page);
+  await createVault(page, { recoveryKey: true });
+  const nextBar = page.getByRole('status').filter({ hasText: /^Next/ });
+  const nav = page.getByRole('navigation', { name: 'Sections' });
+  const actAs = page.getByRole('group', { name: 'Act as' });
+  const main = page.getByRole('main');
+
+  // One guardian has voted when Amara replaces Tomás with Ngozi.
+  await actAs.getByRole('button', { name: 'Guardian' }).click();
+  await page.getByRole('button', { name: 'I confirm the owner has died' }).click();
+  await page.getByLabel(/reliable knowledge/).check();
+  await page.getByRole('button', { name: 'Cast my vote' }).click();
+  await finish(page, /1 of 2 so far/);
+  await actAs.getByRole('button', { name: 'Amara' }).click();
+  await main.getByRole('button', { name: /Guardians and recovery key/ }).click();
+  await expect(main.getByRole('heading', { name: 'Guardians and recovery' })).toBeVisible();
+  await main.getByRole('button', { name: 'Change guardians or the attestor' }).click();
+  const save = main.getByRole('button', { name: /Save and start a new round/ });
+  await expect(save).toBeDisabled();                    // nothing changed yet
+  await main.getByLabel(/^Tomás/).uncheck();
+  await main.getByLabel(/^Ngozi/).check();
+  await expect(main.locator('.settings-effect')).toContainText('Adds Ngozi.');
+  await expect(main.locator('.settings-effect')).toContainText('Removes Tomás.');
+  await expect(main.locator('.settings-effect')).toContainText('The vote already cast this round will no longer count');
+  await save.click();
+  await finish(page, /Ngozi can vote from now on\. Tomás can no longer vote\. A new voting round has started, so the vote cast before no longer counts\./);
+  await expect(main.locator('.people-read')).toContainText('Removed, can no longer vote');
+  await expect(main.getByText('Round 2 · 0 votes so far')).toBeVisible();
+
+  // Tomás is told by his own app; Ngozi can vote with the proof she was sent.
+  await actAs.getByRole('button', { name: 'Guardian' }).click();
+  const which = page.getByRole('group', { name: 'Which guardian' });
+  await which.getByRole('button', { name: 'Tomás' }).click();
+  await expect(main.getByRole('heading', { name: 'You are no longer a guardian of this will.' })).toBeVisible();
+  await main.getByRole('button', { name: 'Try to vote anyway' }).click();
+  await finish(page, /You are no longer a guardian of this will/);
+  await which.getByRole('button', { name: 'Ngozi' }).click();
+  await page.getByRole('button', { name: 'I confirm the owner has died' }).click();
+  await page.getByLabel(/reliable knowledge/).check();
+  await page.getByRole('button', { name: 'Cast my vote' }).click();
+  await finish(page, /1 of 2 so far/);
+  await actAs.getByRole('button', { name: 'Amara' }).click();
+  await page.getByRole('button', { name: /I'm alive/ }).click();
+  await finish(page, /Check-in recorded/);
+
+  // Amara loses her phone. With the saved key, a new passkey is proposed.
+  await nav.getByRole('button', { name: 'Settings' }).click();
+  await main.getByRole('button', { name: /Use the key Amara saved/ }).click();
+  await main.getByRole('button', { name: 'Start the recovery' }).click();
+  await finish(page, /Recovery started/);
+  await main.getByRole('button', { name: 'Open my next recovery key' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Your next recovery key' });
+  await expect(sheet).toContainText('replaces the one you used to start it');
+  await sheet.getByRole('button', { name: 'Close' }).click();
+
+  // The public delay runs out, and anyone finishes it.
+  await page.getByRole('button', { name: 'Skip the recovery delay' }).click();
+  await expect(nextBar).toContainText('The recovery delay is over.');
+  await nextBar.getByRole('button', { name: 'Finish the recovery' }).click();
+  await finish(page, /The recovery is finished\. The new passkey now owns the vault and the old one no longer works\./);
+  await expect(main.getByRole('heading', { name: 'The recovery is finished.' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Your recovery key is ready.' })).toBeVisible();
+
+  // The old passkey is refused by the vault; the new one checks in.
+  await main.getByRole('button', { name: 'Try a check-in with the old passkey' }).click();
+  await finish(page, /The vault refused the old passkey/);
+  await nav.getByRole('button', { name: 'Vault' }).click();
+  await page.getByRole('button', { name: /I'm alive/ }).click();
+  await finish(page, /Check-in recorded/);
 
   expect(errors).toEqual([]);
 });

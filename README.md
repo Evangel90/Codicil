@@ -16,7 +16,7 @@ owner has had a chance to veto.
 
 > **Status (Wave 3, in progress):** the vault contract, SDK and web app are built and tested. That
 > covers passkey and wallet check-ins, multi-heir wills with tranches and backup heirs, hidden k-of-n
-> guardians, the attestation trigger and the cross-contract hook: 344 tests, every contract call
+> guardians, the attestation trigger and the cross-contract hook: 373 tests, every contract call
 > checked against its ZK circuit, plus browser tests that check in with Chrome's real WebAuthn. The
 > Preprod deployment is next. See [What changed this Wave](#what-changed-this-wave).
 > Demo video and deck: *coming*.
@@ -46,8 +46,10 @@ the site they were made on, and the vault was compiled for it). The demo runs th
 contract in your browser** on a simulated chain with a clock you can fast-forward. Only proof
 generation and network fees are skipped.
 
-1. **Create a vault** in the seven-step wizard: register Face ID / Touch ID (or a demo key), set the
+1. **Create a vault** in the eight-step wizard: register Face ID / Touch ID (or a demo key), set the
    shares, the guardian threshold and the timers (or start from a Careful / Balanced / Quick preset).
+   Two choices are optional and off by default: a **grace period** (step 5) and a **recovery key**
+   (step 6), which is shown once to print or download.
    The review step reads the will back in plain words and flags risky choices. The side panel shows the real heirs root and
    commitments that would go on-chain, recomputed as you edit.
 2. **I'm alive**: your passkey signs the check-in, and the circuit verifies the signature, the
@@ -55,7 +57,9 @@ generation and network fees are skipped.
    The **Next** line under the demo bar always says whose turn it is, and their button pulses.
 3. **Act as** a guardian (Dr. Mensah, then Sarah Lin) and vote: two of three start a 14-day
    challenge window. Switch back to Amara and cancel it.
-4. **Skip to deadline**, start the switch, skip the challenge window, **release**.
+4. **Skip to deadline**, start the switch, skip the challenge window, **release**. With a grace
+   period, the deadline is followed by **Skip the grace period**: until then nobody can start the
+   switch, and a check-in is late but fine.
 5. Optional: on the **Will** tab, change the will and re-seal it with Face ID, then open an **heir
    letter** (what you would print or send each heir; it is reissued whenever the will changes).
 6. Act as heir **Ben**: load his letter (paste it, scan its QR code, or use the demo shortcut). His
@@ -66,7 +70,13 @@ generation and network fees are skipped.
    holds tokens for Ben and calls the vault before it pays. Before the release it refuses with its
    own error, `vault not released`; after, the same button pays. The screen shows the one line of
    Compact that makes any contract inheritable.
-8. Open the **Privacy Lens** at any point: the real public ledger beside what only the owner's
+8. On the owner's **Settings** tab: add, remove or replace **guardians**, change how many must
+   agree, or name an attestor, all in one update signed like a check-in. It starts a new voting
+   round and is locked once a countdown has started. With a recovery key, play **"I lost my
+   passkey"**: start a recovery with the saved key, then either skip the delay and finish it (the new
+   passkey works, the old one is refused) or check in as Amara, which cancels it and retires the key
+   for good. While a recovery is in progress her dashboard shows a warning that cannot be missed.
+9. Open the **Privacy Lens** at any point: the real public ledger beside what only the owner's
    device knows. Or **Act as Anyone** for the public inspector: what a stranger can learn from the
    vault address alone.
 9. The owner can download check-in reminders as a calendar file, made on the device, so no server
@@ -199,8 +209,8 @@ this call can be generated", not just "the JavaScript ran".
 | [`webauthn-real.test.ts`](contracts/test/webauthn-real.test.ts) | Real Touch ID assertions verified by the vault's own WebAuthn module |
 | [`errors.test.ts`](contracts/test/errors.test.ts) | Every contract error has a friendly UI message and is documented |
 | [`sdk/test`](sdk/test) | Passkey/wallet format conversion, will builder, witnesses, heir letter encoding and checking against the will root |
-| [`app/test`](app/test/demo.test.ts) | The whole demo story through the app's own store: wizard setup and preview, check-ins, veto, guardian rounds, release, claims, tranche, backup, retries; who acts next, the plain-words summary and its warnings, presets, letters held by heirs (stale after a will change), calendar reminders, the command palette; the savings contract that calls the vault (refused before the release, paid after) |
-| [`app/e2e`](app/e2e/demo.spec.ts) | In Chrome: the setup wizard with a passkey (virtual authenticator), check-in through the real WebAuthn API, a refused and then a successful cross-contract withdrawal, will change and letter, guardian votes, release, loading and checking a letter, the command palette, claim, public inspector, privacy lens. `npm run e2e` |
+| [`app/test`](app/test/demo.test.ts) | The whole demo story through the app's own store: wizard setup and preview, check-ins, veto, guardian rounds, release, claims, tranche, backup, retries; who acts next, the plain-words summary and its warnings, presets, letters held by heirs (stale after a will change, announced by the will-changed event), calendar reminders, the command palette; the savings contract that calls the vault (refused before the release, paid after); the grace period (late but fine, the switch held back, the full window kept); changing guardians and the attestor (new round, locked during a countdown); the recovery key (its text form, recover with a new passkey, cancelled and retired by any owner signature) |
+| [`app/e2e`](app/e2e/demo.spec.ts) | In Chrome: the setup wizard with a passkey (virtual authenticator), check-in through the real WebAuthn API, a refused and then a successful cross-contract withdrawal, will change and letter, guardian votes, release, loading and checking a letter, the command palette, claim, public inspector, privacy lens; a late check-in inside the grace period; a recovery the owner cancels; replacing a guardian; a lost passkey recovered with the saved key. `npm run e2e` |
 
 The property tests already found one design flaw, now fixed ([D9](docs/DECISIONS.md)). How to run each
 level, and the bugs the tests caught: [docs/TESTING.md](docs/TESTING.md).
@@ -241,10 +251,12 @@ Milestones and status: [docs/ROADMAP.md](docs/ROADMAP.md). Customers, go-to-mark
 - Web app with a demo that runs the real contract in the browser: Face ID check-ins, changing the
   will, printable heir letters with QR codes that heirs check on their own device, a who-acts-next
   guide, plain-words summary with warnings, presets, a public inspector, calendar reminders, a ⌘K command palette, guardian reports, veto, release, claims, a second
-  contract that pays out through the cross-contract hook, and a privacy
+  contract that pays out through the cross-contract hook, an optional grace period, changing
+  guardians and the attestor after setup, an optional recovery key with a warning the owner cannot
+  miss, a notice to heirs when the will changes, and a privacy
   lens, in the Obsidian design, with a landing page whose 3D point field changes shape as you scroll. Dark and light themes,
   works on phones.
-- 344 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
+- 373 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
   CI on every push.
 - Docs: architecture, privacy (every field and transaction), a threat model mapping each threat to
   the test that covers it, testing, roadmap, business and a judges' quickstart. Details: [docs/WAVES.md](docs/WAVES.md).

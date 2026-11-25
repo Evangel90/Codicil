@@ -111,6 +111,7 @@ export function LetterBox({ s, me }: { s: Snapshot; me: HeirView }) {
         <span className="small muted">
           It says which share is yours and proves it is in the will. Load it here to check it; it is read on this device
           only. {s.phase === Phase.armed ? 'You can check it now, years before it is needed.' : ''}
+          {s.willChangedAt ? ` ${OWNER_FIRST} changed the will on ${fmtDate(s.willChangedAt)}, so only a letter made since then will work.` : ''}
         </span>
       </div>
       <label className="field-label">

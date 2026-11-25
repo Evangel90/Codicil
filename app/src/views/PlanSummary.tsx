@@ -7,8 +7,12 @@
 import { planSummary } from '../demo/guide.js';
 import type { VaultSetup } from '../demo/store.js';
 
-export function PlanSummary({ setup, now, title = 'In plain words' }: { setup: VaultSetup; now: number; title?: string }) {
-  const { rules, warnings } = planSummary(setup, now);
+export function PlanSummary({ setup, now, title = 'In plain words', recoveryKey }: {
+  setup: VaultSetup; now: number; title?: string;
+  /** Where the recovery key stands on a live vault; in the wizard it follows from the setup. */
+  recoveryKey?: 'none' | 'ready' | 'retired';
+}) {
+  const { rules, warnings } = planSummary(setup, now, { recoveryKey });
   return (
     <section className="summary stack-16" aria-labelledby="sum-h">
       <h2 id="sum-h" className="disp h-sec">{title}</h2>

@@ -6,9 +6,10 @@
 
 import { useState } from 'react';
 import { Icon, ICONS, short } from '../components/ui.js';
-import { days, demo, fmtShort, GUARDIANS, HEIRS, OWNER_FIRST, TOKEN, type Snapshot } from '../demo/store.js';
+import { ATTESTOR, days, demo, fmtShort, HEIRS, OWNER_FIRST, span, TOKEN, type Snapshot } from '../demo/store.js';
+import { eventSummary } from '../demo/guide.js';
 
-type PubId = 'owner' | 'root' | 'deadline' | 'window' | 'counter' | 'guard' | 'nulls' | 'bal' | 'pos';
+type PubId = 'owner' | 'root' | 'deadline' | 'grace' | 'window' | 'counter' | 'guard' | 'attest' | 'rec' | 'recp' | 'fee' | 'events' | 'nulls' | 'bal' | 'pos';
 type Active = { side: 'pub' | 'priv'; id: string } | undefined;
 
 const NOTES: Record<string, [string, string]> = {
@@ -19,8 +20,14 @@ const NOTES: Record<string, [string, string]> = {
   bak: ['The backup heir is part of a leaf', 'After the claim window, the backup can prove they back up that leaf and take only that unclaimed share.'],
   deadline: ['Deadlines are public, by design', 'The contract must enforce time, so the deadline is visible. It shows that someone checks in, never who.'],
   window: ['The challenge window is public', 'Everyone can verify the owner had time to cancel before release.'],
+  grace: ['The grace period is public', 'The contract enforces it, so everyone can see how much slack the owner chose. A check-in made during it is visibly late, because block time is public.'],
   counter: ['A counter, not a diary', 'The chain counts owner actions so old signatures can’t be replayed. It doesn’t store where you checked in from.'],
-  guard: ['Guardians → a root and a count', 'Guardian identities are leaves in their own tree. Votes are counted with nullifiers, so “1 of 2” is public but who voted never is.'],
+  guard: ['Guardians → a root and a count', 'Guardian identities are leaves in their own tree. Votes are counted with nullifiers, so “1 of 2” is public but who voted never is. When the owner changes the guardians the root changes, which shows that they changed and nothing about who.'],
+  attest: ['The attestor → a commitment', 'The chain holds a sealed fingerprint of the attestor’s key, or zeros when there is none. It shows whether an attestor is set, never who it is.'],
+  rec: ['The recovery key → a commitment and a delay', 'Everyone can see that this vault has a recovery key and how long a recovery must wait. That tells a thief it is worth looking for. The secret itself exists only on paper.'],
+  recp: ['A recovery is public on purpose', 'When someone uses the recovery key, the date the new keys take over goes on the ledger, with sealed commitments to those keys. The owner can only cancel what the owner can see. After a cancellation the fields stay, so anyone can tell that a recovery was tried and stopped.'],
+  fee: ['No release fee', 'A vault can be deployed with a fee of up to 10% of the estate, paid to a public address at release. This one has none: nothing is taken, and no operator address links it to other vaults.'],
+  events: ['Events: a name, nothing else', 'The vault emits “will changed”, “recovery started” and “released”. Each tells apps to read the ledger again. None carries any content, and none is addressed to anyone.'],
   nulls: ['Nullifiers: one-time stamps', 'Each claim leaves a random-looking stamp so it can’t be repeated. The stamps can’t be linked to heirs.'],
   bal: ['The total is public, the split is not', 'Anyone can see what the vault holds. Only you know how it divides.'],
   pos: ['A second contract, the same privacy', 'The savings contract stores the vault it asks, the amount and a commitment to its beneficiary. It asks the vault one question, released or not, and never learns who is in the will.'],
@@ -44,14 +51,24 @@ export function LensView({ s }: { s: Snapshot }) {
   const cleo = s.heirs.find((h) => h.profile.id === 'cleo')!;
   const claimedNames = s.heirs.filter((h) => h.claimed && (!h.profile.backup || !s.heirs.some((x) => !x.profile.backup && x.profile.leaf === h.profile.leaf && x.claimed)));
   const owner = s.actor.kind === 'owner';
+  const r = s.recovery;
+  const attestor = s.setup!.attestor;
+  const stands = r.state === 'waiting' || r.state === 'ready';
+  const zero = '0x0000…0000';
 
   const pub: [PubId, string, string, string][] = [
     ['owner', 'ownerPasskeyCommit', short(s.chain.ownerPasskeyCommit), `commitment ending ${s.chain.ownerPasskeyCommit.slice(-4)}`],
     ['root', 'willRoot', short(s.chain.willRoot), `hash ending ${s.chain.willRoot.slice(-4)}`],
     ['deadline', 'deadline', String(s.deadline), 'unix timestamp'],
+    ['grace', 'gracePeriod', s.grace > 0 ? String(s.grace) : '0 · none', 'seconds'],
     ['window', 'challengeWindow', String(s.setup!.window), 'seconds'],
     ['counter', 'nonce', s.nonce.toString(), 'count'],
     ['guard', 'guardianRoot · k · votes · round', `${short(s.chain.guardianRoot)} · ${s.guardianThreshold} · ${s.guardianVotes} · ${s.guardianRound + 1n}`, 'root, threshold, votes, round'],
+    ['attest', 'attestorKeyCommit', attestor ? short(s.chain.attestorKeyCommit) : `${zero} · none`, attestor ? `commitment ending ${s.chain.attestorKeyCommit.slice(-4)}` : 'no attestor'],
+    ['rec', 'recoveryKeyCommit · recoveryDelay', r.state === 'off' ? `${zero} · none` : `${short(s.chain.recoveryKeyCommit)} · ${r.delay}`, r.state === 'off' ? 'no recovery key' : 'commitment and delay in seconds'],
+    ['recp', 'recoveryReadyAt · recoveryNonce', s.chain.recoveryReadyAt === 0 ? '0 · no recovery started' : `${s.chain.recoveryReadyAt} · ${s.chain.recoveryNonce}${r.state === 'retired' ? ' · cancelled' : ''}`, 'when proposed keys take over, and the owner action count when it started'],
+    ['fee', 'feeBps', s.feeBps > 0n ? s.feeBps.toString() : '0 · no release fee', 'basis points'],
+    ['events', 'events', s.events.length ? eventSummary(s.events) : 'none yet', 'names of events emitted so far'],
     ['nulls', 'claimNullifiers', s.chain.claimNullifiers.length ? `${s.chain.claimNullifiers.length} spent · ${s.chain.claimNullifiers.map((n) => `0x${n.slice(0, 4)}…`).join(' ')}` : '{ } · 0 spent', 'set of stamps'],
     ['bal', 'estate', `${s.estate.toLocaleString()} ${TOKEN}`, 'balance'],
     ['pos', `escrow ${short(s.position.address)}`, `${s.position.held.toLocaleString()} · ${short(s.position.beneficiaryCommit)} · ${s.position.withdrawn ? 'withdrawn' : 'not withdrawn'}`, 'linked contract: amount held, beneficiary commitment, withdrawn or not'],
@@ -63,9 +80,15 @@ export function LensView({ s }: { s: Snapshot }) {
     ['cleo', 'root', 'Heir', `Cleo · ${pct('cleo')} · from ${fmtShort(cleo.unlockAt)}`],
     ['bak', 'root', 'Backup heir', kofi.named ? 'Kofi, for Ada’s share' : 'None'],
     ['due', 'deadline', 'Next check-in due', fmtShort(s.deadline)],
+    ['late', 'grace', 'If a check-in is late', s.grace > 0 ? `${span(s.grace)} of grace` : 'No grace period'],
     ['win', 'window', 'Time to cancel', `${days(s.setup!.window)} days`],
-    ['hist', 'counter', 'Owner actions', `${s.nonce} · check-ins and will changes`],
-    ['g', 'guard', 'Guardians', GUARDIANS.map((g) => g.name).join(' · ')],
+    ['hist', 'counter', 'Owner actions', `${s.nonce} · check-ins, will changes and settings changes`],
+    ['g', 'guard', 'Guardians', s.guardians.filter((g) => g.current).map((g) => g.name).join(' · ')],
+    ['att', 'attest', 'Attestor', attestor ? ATTESTOR.name : 'None'],
+    ['rk', 'rec', 'Recovery key', r.state === 'off' ? 'None' : r.state === 'retired' ? 'Retired after a cancelled recovery' : `On paper, with ${OWNER_FIRST}`],
+    ['rp', 'recp', 'Recovery in progress', stands ? 'A new passkey, made on another device' : r.state === 'retired' ? `Cancelled by ${OWNER_FIRST}’s passkey` : 'None'],
+    ['nofee', 'fee', 'Release fee', s.feeBps > 0n ? `${Number(s.feeBps) / 100}% of the estate` : 'None'],
+    ['evs', 'events', 'What the events were about', s.events.length ? 'Known only to the people involved' : 'Nothing has happened yet'],
     ['cl', 'nulls', 'Claims', claimedNames.length ? `${claimedNames.map((h) => h.profile.name).join(', ')} claimed` : 'No one has claimed'],
     ['split', 'bal', 'How it splits', `Ada ${amt('ada')} · Ben ${amt('ben')} · Cleo ${amt('cleo')}`],
     ['sav', 'pos', s.position.name, `${HEIRS.find((h) => h.id === s.position.beneficiary)!.name} is the beneficiary${s.position.withdrawn ? ' · paid out' : ''}`],

@@ -1,25 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Codicil Authors
 //
-// Create a vault in seven steps. The side panel shows, as you go, what stays
+// Create a vault in eight steps. The side panel shows, as you go, what stays
 // on this device and the real values that would go on-chain.
 
 import { useEffect, useMemo, useState } from 'react';
 import { HashChip, Icon, ICONS, FACE_ID, Logo, Segmented } from '../components/ui.js';
-import { DAY, days, defaultSetup, demo, fmtShort, GUARDIANS, HEIRS, OWNER_NAME, type Snapshot, type VaultSetup } from '../demo/store.js';
+import {
+  DAY, days, defaultSetup, demo, fitSetup, fmtShort, graceChoices, GUARDIANS, HEIRS, OWNER_NAME, recoveryDelayChoices, span,
+  type Snapshot, type VaultSetup,
+} from '../demo/store.js';
 import { PRESETS, presetFor } from '../demo/guide.js';
+import { recoveryKeyGroups } from '../demo/recoveryKey.js';
 import { PlanSummary } from './PlanSummary.js';
+import { RecoveryKeySheet } from './RecoveryKeySheet.js';
 import { createDemoPasskey, createDevicePasskey, passkeySupport, type OwnerPasskey, type PasskeySupport } from '../demo/passkey.js';
 
-const LABELS = ['Passkey', 'Heirs', 'Shares & dates', 'Guardians', 'Timers', 'Review', 'Deploy'];
+const LABELS = ['Passkey', 'Heirs', 'Shares & dates', 'Guardians', 'Timers', 'Recovery key', 'Review', 'Deploy'];
+const RECOVERY = 5;
+const REVIEW = 6;
+const DEPLOY = 7;
 const COPY: [string, string, string][] = [
   ['Step 1 · Sign-in', 'Protect your vault with your face or fingerprint.', 'No passwords, no seed phrase. Your passkey is the only thing that can check in or change the will.'],
   ['Step 2 · Heirs', 'Who should inherit?', 'Nicknames stay on this device. Each heir made a key on their own phone and sent you only its public half.'],
   ['Step 3 · Shares', 'How much, and from when?', 'Shares can add up to less than 100%. Anything not allocated stays in the vault.'],
   ['Step 4 · Guardians (optional)', 'Who can confirm, early, that you’ve died?', 'Guardians are people you trust, such as family or a lawyer. They can start the switch before your deadline. You can still cancel.'],
-  ['Step 5 · Timers', 'How long before the switch starts?', 'Choose a rhythm you’ll actually keep. You can change it any time.'],
-  ['Step 6 · Review', 'Read it once more.', 'Everything below stays on your device except where marked as on-chain.'],
-  ['Step 7 · Deploy', 'Seal the will.', 'One confirmation creates your vault and seals the will.'],
+  ['Step 5 · Timers', 'How long before the switch starts?', 'Choose a rhythm you’ll actually keep. These are fixed once the vault is created.'],
+  ['Step 6 · Recovery key (optional)', 'What if you lose your passkey?', 'Without your passkey you cannot check in, so the will would be released while you are alive. A recovery key is a way back in. It also adds a risk, so read this step before you choose.'],
+  ['Step 7 · Review', 'Read it once more.', 'Everything below stays on your device except where marked as on-chain.'],
+  ['Step 8 · Deploy', 'Seal the will.', 'One confirmation creates your vault and seals the will.'],
 ];
 
 const toDate = (t: number) => new Date(t * 1000).toISOString().slice(0, 10);
@@ -33,13 +42,20 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
   const [setup, setSetup] = useState<VaultSetup>(() => defaultSetup());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  // The owner confirms the recovery key is saved before going on; it is not shown again.
+  const [keySaved, setKeySaved] = useState(false);
+  const [sheet, setSheet] = useState(false);
   useEffect(() => { void passkeySupport().then(setSupport); }, []);
 
   const preview = useMemo(() => demo.preview(setup, passkey), [setup, passkey]);
   const total = pct(setup.ada + setup.ben + setup.cleo);
   const over = total > 100;
-  const patch = (p: Partial<VaultSetup>) => setSetup((x) => ({ ...x, ...p }));
+  // A shorter check-in period can make the chosen grace period or recovery delay too long; bring them back in range.
+  const patch = (p: Partial<VaultSetup>) => setSetup((x) => fitSetup({ ...x, ...p }));
   const deployed = s.ready;
+  const wantsKey = setup.recoveryDelay > 0;
+  const recoveryKey = useMemo(() => (wantsKey ? demo.draftRecoveryKey() : ''), [wantsKey]);
+  const delays = recoveryDelayChoices(setup.every);
 
   const register = async (kind: 'device' | 'demo') => {
     setBusy(true);
@@ -68,13 +84,13 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
     }
   };
 
-  const blocked = (step === 0 && !passkey) || (step === 2 && (over || !!preview.problem));
+  const blocked = (step === 0 && !passkey) || (step === 2 && (over || !!preview.problem)) || (step === RECOVERY && wantsKey && !keySaved);
   const [eyebrow, title, lede] = COPY[step];
   const keyEnd = (id: string) => demo.heirKeyEnd(id as never);
 
   return (
     <div className="wizard wrap">
-      <div className="wiz-progress" aria-hidden="true"><span style={{ width: `${((step + 1) / 7) * 100}%` }} /></div>
+      <div className="wiz-progress" aria-hidden="true"><span style={{ width: `${((step + 1) / LABELS.length) * 100}%` }} /></div>
       <div className="wiz-grid">
         <nav className="wiz-steps" aria-label="Steps">
           <ol>
@@ -253,11 +269,93 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
                   onChange={(v) => patch({ window: v })}
                 />
               </fieldset>
-              <div className="worst">In the worst case, heirs can claim <strong>{days(setup.every + setup.window)} days</strong> after your last check-in.</div>
+              <fieldset>
+                <legend>Grace period: extra time to check in after you miss a deadline</legend>
+                <Segmented<number>
+                  label="Grace period"
+                  value={setup.grace}
+                  options={graceChoices(setup.every).map((g) => ({ value: g, label: g === 0 ? 'None' : span(g) }))}
+                  onChange={(v) => patch({ grace: v })}
+                />
+                <span className="small muted">
+                  {setup.grace > 0
+                    ? `If you are up to ${span(setup.grace)} late, your check-in still works as usual and nobody can start the switch over it. Your time to cancel is counted from the end of the grace period, so it is never shortened. Heirs wait ${span(setup.grace)} longer, and a late check-in is visibly late on the chain.`
+                    : 'With no grace period, anyone can start the switch the moment you miss a check-in. If you are a day late, you cancel a countdown that everyone can see.'}
+                </span>
+              </fieldset>
+              <div className="worst">In the worst case, heirs can claim <strong>{days(setup.every + setup.grace + setup.window)} days</strong> after your last check-in.</div>
             </div>
           )}
 
-          {step === 5 && (
+          {step === RECOVERY && (
+            <div className="card wiz-card">
+              <fieldset>
+                <legend>Do you want a recovery key?</legend>
+                <Segmented<string>
+                  label="Recovery key"
+                  value={wantsKey ? 'yes' : 'no'}
+                  options={[{ value: 'no', label: 'No recovery key' }, { value: 'yes', label: 'Create a recovery key' }]}
+                  onChange={(v) => { setKeySaved(false); patch({ recoveryDelay: v === 'yes' ? (delays.includes(3 * DAY) ? 3 * DAY : delays[0]) : 0 }); }}
+                />
+                {!wantsKey && (
+                  <span className="small muted">
+                    Without one, a lost passkey cannot be replaced. You could no longer check in or change the will, and the
+                    will would be released to your heirs at your deadline. You cannot add a recovery key later.
+                  </span>
+                )}
+              </fieldset>
+
+              {wantsKey && (
+                <>
+                  <fieldset>
+                    <legend>How long must a recovery wait before it takes effect?</legend>
+                    <Segmented<number>
+                      label="Recovery delay"
+                      value={setup.recoveryDelay}
+                      options={delays.map((d) => ({ value: d, label: span(d) }))}
+                      onChange={(v) => patch({ recoveryDelay: v })}
+                    />
+                    <span className="small muted">
+                      The delay is your protection: during it, anything your passkey signs cancels the recovery. Choose one
+                      long enough that you would notice, and short enough to fit before a deadline. It is always shorter
+                      than your check-in period of {days(setup.every)} days.
+                    </span>
+                  </fieldset>
+
+                  <div className="rk-box fade-in">
+                    <div className="stack-6">
+                      <h2 className="rk-title">Your recovery key</h2>
+                      <span className="small muted">Made on this device just now. Only a fingerprint of it goes on-chain. Save it before you continue: it is not shown again.</span>
+                    </div>
+                    <p className="mono rk-groups" aria-label="Your recovery key">
+                      {recoveryKeyGroups(recoveryKey).map((g, i) => <span key={i}>{g}</span>)}
+                    </p>
+                    <div className="btn-row">
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setSheet(true)}>Open the sheet to print or download</button>
+                    </div>
+                    <label className="check">
+                      <input type="checkbox" checked={keySaved} onChange={(e) => setKeySaved(e.target.checked)} />
+                      I have saved my recovery key somewhere away from this device.
+                    </label>
+                  </div>
+
+                  <div className="stack-8">
+                    <h2 className="rk-title">What to know before you rely on it</h2>
+                    <ul className="plain-list">
+                      <li>Anyone who finds the key can start a recovery. If your passkey signs nothing for {span(setup.recoveryDelay)}, they become the owner. That includes after your death, if a deadline is further away than the delay.</li>
+                      <li>It must be used at least {span(setup.recoveryDelay)} before a check-in deadline. If you discover the loss later than that, it cannot help and the will is released.</li>
+                      <li>It works once. If a recovery is cancelled, the key is retired for good, and this version of Codicil cannot give the vault a new one.</li>
+                      <li>It cannot delay, stop or cancel a release. Only a check-in does that.</li>
+                      <li>Everyone can see that this vault has a recovery key, and can see a recovery start.</li>
+                    </ul>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          {sheet && <RecoveryKeySheet keyText={recoveryKey} delay={setup.recoveryDelay} onClose={() => setSheet(false)} />}
+
+          {step === REVIEW && (
             <div className="card review">
               {([
                 ['Sign-in', passkey?.kind === 'device' ? 'Passkey on this device' : 'Demo key in this tab', 0],
@@ -265,7 +363,8 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
                 ['Unlock dates', `Ada: on release · Ben: on release · Cleo: ${fmtShort(setup.cleoUnlock)}`, 2],
                 ['Backup heir', setup.kofiBackup ? 'Kofi, for Ada’s share' : 'None', 2],
                 ['Guardians', `${setup.threshold} of ${GUARDIANS.length} must agree`, 3],
-                ['Timers', `Check in every ${days(setup.every)} days · ${days(setup.window)}-day challenge window`, 4],
+                ['Timers', `Check in every ${days(setup.every)} days · ${setup.grace > 0 ? `${span(setup.grace)} of grace` : 'no grace period'} · ${days(setup.window)}-day challenge window`, 4],
+                ['Recovery key', wantsKey ? `Saved by you · takes effect after ${span(setup.recoveryDelay)}` : 'None', RECOVERY],
               ] as const).map(([k, v, go]) => (
                 <div key={k} className="review-row">
                   <span className="eyebrow">{k}</span>
@@ -276,9 +375,9 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
             </div>
           )}
 
-          {step === 5 && <PlanSummary setup={setup} now={Math.floor(Date.now() / 1000)} />}
+          {step === REVIEW && <PlanSummary setup={setup} now={Math.floor(Date.now() / 1000)} />}
 
-          {step === 6 && (
+          {step === DEPLOY && (
             <div className="card deploy">
               {!deployed ? (
                 <>
@@ -310,9 +409,9 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
           {!deployed && (
             <div className="wiz-nav">
               <button type="button" className="btn btn-ghost" disabled={step === 0 || busy} onClick={() => setStep(step - 1)}>← Back</button>
-              {step < 6 && (
+              {step < DEPLOY && (
                 <button type="button" className="btn btn-primary" disabled={blocked} onClick={() => setStep(step + 1)}>
-                  {step === 5 ? 'Looks right, deploy' : 'Continue'} <span className="arw" aria-hidden="true">→</span>
+                  {step === REVIEW ? 'Looks right, deploy' : 'Continue'} <span className="arw" aria-hidden="true">→</span>
                 </button>
               )}
             </div>
@@ -329,6 +428,7 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
               <div><dt>Ben</dt><dd>{pct(setup.ben)}% · key …{keyEnd('ben')}</dd></div>
               <div><dt>Cleo</dt><dd>{pct(setup.cleo)}% · {fmtShort(setup.cleoUnlock)}</dd></div>
               <div><dt>Guardian identities</dt><dd>{GUARDIANS.length} people</dd></div>
+              <div><dt>Recovery key</dt><dd>{wantsKey ? 'On paper, with you' : 'None'}</dd></div>
             </dl>
           </div>
           <div className="side-cross mono"><Icon d={ICONS.down} size={14} stroke={2} />zero-knowledge: only fingerprints cross</div>
@@ -341,6 +441,10 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
               <div><dt>Threshold</dt><dd className="mono">k = {setup.threshold}</dd></div>
               <div><dt>Check-in every</dt><dd className="mono">{setup.every.toLocaleString('en-GB')} s</dd></div>
               <div><dt>Challenge window</dt><dd className="mono">{setup.window.toLocaleString('en-GB')} s</dd></div>
+              <div><dt>Grace period</dt><dd className="mono">{setup.grace > 0 ? `${setup.grace.toLocaleString('en-GB')} s` : 'none'}</dd></div>
+              <div><dt>Recovery key</dt><dd className="mono">{preview.recoveryCommit ? `commit 0x${preview.recoveryCommit.slice(0, 4)}…${preview.recoveryCommit.slice(-4)}` : 'none'}</dd></div>
+              {wantsKey && <div><dt>Recovery delay</dt><dd className="mono">{setup.recoveryDelay.toLocaleString('en-GB')} s</dd></div>}
+              <div><dt>Release fee</dt><dd className="mono">none</dd></div>
             </dl>
             <p className="small muted">
               The heirs root changes as you edit. It is a fingerprint of the whole will, computed by the real circuit, so it

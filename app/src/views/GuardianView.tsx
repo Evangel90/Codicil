@@ -7,7 +7,8 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Phase } from '@codicil/contracts/vault';
 import { Icon, ICONS } from '../components/ui.js';
-import { days, demo, fmtDate, fmtShort, GUARDIANS, OWNER_FIRST, type Snapshot } from '../demo/store.js';
+import { days, demo, fmtDate, fmtShort, guardianById, OWNER_FIRST, spanAdj, type Snapshot } from '../demo/store.js';
+import { checkInState } from '../demo/guide.js';
 
 function Confirm({ onClose, onVote }: { onClose: () => void; onVote: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -42,14 +43,40 @@ function Confirm({ onClose, onVote }: { onClose: () => void; onVote: () => void 
 
 export function GuardianView({ s, id }: { s: Snapshot; id: number }) {
   const [confirming, setConfirming] = useState(false);
-  const me = GUARDIANS[id];
+  const me = guardianById(id);
   const k = Number(s.guardianThreshold);
-  const n = GUARDIANS.length;
+  // A guardian's own app knows only itself. The demo shows the size of the set so the count can be followed.
+  const n = s.guardians.filter((g) => g.current).length;
+  // Checked on this device: does my path still lead to the guardians root on the chain?
+  const current = s.guardians.find((g) => g.id === id)?.current ?? false;
+  const due = checkInState(s);
   const votes = Number(s.guardianVotes);
   const voted = s.votedThisRound.includes(id);
   const busy = s.tx?.status === 'running';
   const win = days(s.setup!.window);
   const started = s.phase !== Phase.armed;
+
+  if (!current) {
+    return (
+      <div className="guardian narrow stack-32">
+        <div className="stack-18">
+          <h1 className="disp h-sm">You are no longer a guardian of this will.</h1>
+          <p className="lede">
+            {me.name}, {OWNER_FIRST} has changed the guardians. The proof of membership on this device no longer matches the
+            guardians fingerprint on the chain, so a vote from here would be refused. The chain does not say who was
+            removed or why; your app worked it out by checking its own proof.
+          </p>
+          <p className="lede">There is nothing you need to do. If you think this is a mistake, ask {OWNER_FIRST}: a new proof from her makes you a guardian again.</p>
+        </div>
+        <div className="btn-row">
+          <button type="button" className="btn btn-secondary" disabled={busy || s.phase !== Phase.armed} onClick={() => void demo.guardianReport(id)}>
+            Try to vote anyway
+          </button>
+          <span className="small muted">The vault will refuse it and record nothing.</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="guardian split">
@@ -72,7 +99,7 @@ export function GuardianView({ s, id }: { s: Snapshot; id: number }) {
           </ol>
           <details className="disclose">
             <summary>What does “round {(s.guardianRound + 1n).toString()}” mean?</summary>
-            <p>Each time the owner checks in, the vote count resets and a new round starts. Old votes can't be reused, so a single mistaken vote can't pile up over time.</p>
+            <p>Each time the owner checks in or changes the guardians, the vote count resets and a new round starts. Old votes can't be reused, so a single mistaken vote can't pile up over time.</p>
           </details>
         </section>
 
@@ -107,7 +134,7 @@ export function GuardianView({ s, id }: { s: Snapshot; id: number }) {
           <div className="row-between"><span className="eyebrow">Round {(s.guardianRound + 1n).toString()}</span><span className="eyebrow">{k} needed</span></div>
           <div className="mono votes-big">{Math.min(votes, n)} <span className="muted">of {n}</span></div>
           <div className="vote-dots" aria-hidden="true">
-            {GUARDIANS.map((g, i) => <span key={g.id} className={i < votes ? 'on' : ''} />)}
+            {Array.from({ length: n }, (_, i) => <span key={i} className={i < votes ? 'on' : ''} />)}
           </div>
           <span>{votes >= k ? 'Threshold reached. The challenge window is open.' : `${k - votes} more vote${k - votes === 1 ? '' : 's'} would start the switch.`}</span>
           <span className="small muted">The chain stores only this number. Who voted is never recorded.</span>
@@ -119,7 +146,9 @@ export function GuardianView({ s, id }: { s: Snapshot; id: number }) {
             {s.phase === Phase.armed ? 'Armed' : s.phase === Phase.pending ? 'Pending' : 'Released'}
           </span>
           <span className="small muted">
-            {s.phase === Phase.armed ? `Owner's deadline: ${fmtShort(s.deadline)}. They are still checking in.`
+            {s.phase === Phase.armed ? (due === 'onTime' ? `Owner's deadline: ${fmtShort(s.deadline)}. They are still checking in.`
+              : due === 'grace' ? `The owner missed the check-in due ${fmtShort(s.deadline)} and is inside a ${spanAdj(s.grace)} grace period, until ${fmtShort(s.switchOpensAt)}. Your vote is not delayed by it.`
+              : `The owner missed the check-in due ${fmtShort(s.deadline)}. Anyone can start the switch now.`)
               : s.phase === Phase.pending ? `The owner can still cancel until ${fmtShort(s.pendingUntil)}.`
               : `Released on ${fmtShort(s.releasedAt)}.`}
           </span>

@@ -1,6 +1,6 @@
 # Testing
 
-344 unit and simulator tests plus 2 browser end-to-end tests, all run by CI on every push
+373 unit and simulator tests plus 4 browser end-to-end tests, all run by CI on every push
 ([workflow](../.github/workflows/ci.yml)). This page explains what each level proves, how to run
 it, and the bugs the tests caught.
 
@@ -17,9 +17,9 @@ npm run e2e          # builds the app and runs Playwright in Chrome
 |---|---|---|---|
 | Contract simulator + ZK constraint checks | `npm test -w @codicil/contracts` | 186 | ~6 s |
 | SDK | `npm test -w @codicil/sdk` | 34 | ~1 s |
-| App logic (the demo store and helpers) | `npm test -w @codicil/app` | 37 | ~4 s |
+| App logic (the demo store and helpers) | `npm test -w @codicil/app` | 66 | ~6 s |
 | Network script, offline parts | `npm test -w @codicil/preprod` | 87 (one more when the proving keys are present) | ~3 s |
-| Browser end-to-end | `npm run e2e` | 2 | ~30 s |
+| Browser end-to-end | `npm run e2e` | 4 | ~75 s |
 | Full compile with proving keys | `npm run compile:full` | 16 circuits | several minutes |
 
 Property tests run 12 cases per property by default. Run more with `FC_RUNS=500 npm test -w @codicil/contracts`.
@@ -69,7 +69,23 @@ letter, older will, another vault, which key opens it).
   backup claim, retries after a failure, address validation.
 - [`guide.test.ts`](../app/test/guide.test.ts): who acts next at every stage, the plain-words
   summary and its warnings, presets, letters held by heirs (a letter goes stale when the will
-  changes and then cannot claim), calendar reminders (which never mention heirs), the ⌘K palette.
+  changes and then cannot claim; the app hears the `will-changed` event and points at the heirs
+  whose letters are out of date), calendar reminders (which never mention heirs), the ⌘K palette.
+- [`grace.test.ts`](../app/test/grace.test.ts): the grace period as the app shows it. The lengths
+  the wizard offers, the plain-words rule and the worst case; after a missed deadline nobody can
+  start the switch (`grace period open`, with the date it can start), the guide and palette say so
+  and offer "Skip the grace period"; a late check-in is late but fine; the will and settings stay
+  locked from the deadline; after grace the owner still gets the whole challenge window; guardians
+  are not delayed.
+- [`settings.test.ts`](../app/test/settings.test.ts): changing guardians and the attestor. A
+  replaced guardian cannot vote and the new one can, every update starts a new round and voids
+  votes, impossible choices are refused before signing, `settings locked` during a countdown and
+  after release, nothing published says who, and a named attestor's signed notice starts the switch.
+- [`recovery.test.ts`](../app/test/recovery.test.ts): the recovery key. Its text form (round trip,
+  typing mistakes caught on the device), the deployed commitment equals the key the wizard showed,
+  the lost-passkey path (start, `recovery delay open`, finish; the new passkey checks in, the old
+  one is refused, the next key replaces the used one), `too late to recover`, and the owner's side:
+  a check-in, will change or settings change cancels a recovery and retires the key for good.
 - [`savings.test.ts`](../app/test/savings.test.ts): the escrow next to the vault, with the real
   cross-contract call. Refused with `vault not released` while armed or pending, refused for anyone
   without the beneficiary secret, paid after the release with both circuits in the transaction's
@@ -95,6 +111,18 @@ because the vault is armed → change the will → open a letter → guardian vo
 and veto → the ⌘K palette → timeout and release → Ben loads and checks his letter (a bad letter is
 rejected first) → claim → the same withdrawal, now paid through the cross-contract call → public
 inspector (no names on the page) → Privacy Lens.
+
+Two more stories cover what an owner chooses in the wizard and changes later. **Grace and a
+cancelled recovery:** a vault with a 3-day grace period and a recovery key (shown once, on a sheet
+with a QR code) → the deadline passes and nobody can start the switch → a check-in one day late,
+through the passkey, is late but fine → after the grace period the switch starts and is cancelled →
+a recovery starts with the saved key (a mistyped key never leaves the device) → the owner's
+dashboard shows the warning → one check-in cancels it and retires the key → the inspector and
+Privacy Lens show the grace length, "no release fee" and the cancelled recovery, with no names.
+**New guardians and a lost passkey:** one guardian has voted when the owner replaces another → the
+vote is void, the removed guardian is refused, the new one votes → a recovery with the saved key
+creates a second passkey in the virtual authenticator → the delay is skipped and anyone finishes it
+→ the old passkey is refused and the new one checks in.
 
 Run against your local Chrome with `PW_CHANNEL=chrome npm run e2e`. On failure CI uploads Playwright
 traces.

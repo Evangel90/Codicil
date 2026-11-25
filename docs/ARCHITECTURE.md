@@ -254,8 +254,9 @@ The app is React + Vite with hand-written CSS tokens (the "Obsidian" design: dar
 works on phones).
 
 - **Landing page** (`#/`): a scrolling page over a WebGL point field that changes shape with each section.
-- **Demo** (`#/demo`): a seven-step setup wizard, then the vault from four points of view: the
+- **Demo** (`#/demo`): an eight-step setup wizard, then the vault from four points of view: the
   owner (Amara), an heir (Ada, Ben, Cleo, Kofi), a guardian, and "Anyone" (the public inspector).
+  The owner has three more tabs: Will, Settings (guardians, attestor and the recovery key) and Savings.
 
 ### What the demo runs
 
@@ -272,12 +273,22 @@ state. The runtime's cross-contract path uses Node's `Buffer` for hex, so
 [`buffer-shim.ts`](../app/src/demo/buffer-shim.ts) supplies those two conversions in the browser.
 
 [`app/src/demo/store.ts`](../app/src/demo/store.ts) holds the world (chain, keys, will, letters held
-by heirs) and exposes it to React through `useSyncExternalStore`. Every action goes through a
+by heirs, the proof each guardian holds, the saved recovery key) and exposes it to React through
+`useSyncExternalStore`. Every action goes through a
 transaction sheet with the real stages (prepare, approve, run the circuit, proof, record), so a
 failure shows where it happened and in plain words.
 
+The store deploys with the release fee off and the owner's choice of grace period and recovery key
+(`VAULT_OPTIONS_OFF`, `recoveryConfig`). What the screens show about them comes from the SDK and the
+ledger, not from the store's memory: `timeoutOpensAt` for when the switch can start,
+`recoveryStatus` for the recovery key, `isCurrentGuardian` for each guardian's own proof, and the
+events each call emitted (`vaultEventName`), which is how an heir's page learns that a will changed.
+A settings update is signed like a check-in (`settingsDigest`); a recovery makes a new passkey, as a
+new device would, and installs it only when `finishRecovery` succeeds.
+
 Pure helpers keep the views simple and testable:
-[`guide.ts`](../app/src/demo/guide.ts) (who acts next, what to try on the savings screen, the will in plain words, presets),
+[`guide.ts`](../app/src/demo/guide.ts) (who acts next, on time / in grace / expired, what to try on the savings screen, the will in plain words, presets),
+[`recoveryKey.ts`](../app/src/demo/recoveryKey.ts) (the recovery key as text with a check for typing mistakes),
 [`commands.ts`](../app/src/demo/commands.ts) (the ⌘K palette),
 [`ics.ts`](../app/src/demo/ics.ts) (calendar reminders made on the device).
 
