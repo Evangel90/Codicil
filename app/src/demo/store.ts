@@ -28,6 +28,7 @@ import {
   newSalt,
   payoutFor,
   rpIdHash,
+  VAULT_OPTIONS_OFF,
   vaultId,
   willUpdateDigest,
   withPasskeyApproval,
@@ -333,6 +334,7 @@ class DemoStore {
       guardianRoot: guardianSet.root,
       guardianThreshold: guardianSet.threshold,
       attestorKeyCommit: new Uint8Array(32),
+      ...VAULT_OPTIONS_OFF,
     }, now);
     this.world = {
       ...k, chain, passkey, setup, will, guardianSet, deployedAt: now, lastCheckIn: now, claimed: new Map(), votedRound: new Map(), held: new Map(),

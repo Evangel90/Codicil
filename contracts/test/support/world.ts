@@ -30,6 +30,7 @@ import {
   newSalt,
   rpIdHash,
   softwareSigners,
+  VAULT_OPTIONS_OFF,
   willUpdateDigest,
   withPasskeyApproval,
   withWalletApproval,
@@ -147,6 +148,7 @@ export async function deployVault(opts: DeployOptions = {}): Promise<World> {
     guardianRoot: guardianSet.root,
     guardianThreshold: guardianSet.threshold,
     attestorKeyCommit: pure.attestorCommitment(attestor.key.pk, attestor.salt),
+    ...VAULT_OPTIONS_OFF,
     ...opts.config,
   };
   // Tests run "lax" witnesses by default so they can hand the circuit
