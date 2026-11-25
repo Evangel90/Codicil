@@ -20,6 +20,7 @@ or death-registry service), **any third party** (every trigger is permissionless
 | Threat | Mitigation | Evidence |
 |---|---|---|
 | **Fake death claim** by a guardian, an heir or a stranger | Every trigger (timeout, k guardians, attestation) only starts a **challenge window**. One check-in by the owner cancels it. | `auth.test.ts` "vetoes a trigger"; `properties.test.ts` "the owner can always veto" (any window length, D9) |
+| A **slightly late check-in** puts the vault into a public countdown and alarms the heirs | Optional grace period: until `deadline + gracePeriod` the owner checks in normally and no timeout can start. The challenge window is counted from the end of the grace period, so grace never shortens the veto (D15) | `lifecycle.test.ts` "grace period"; `properties.test.ts` "during the grace period" |
 | Guardians **colluding** (fewer than k) | k-of-n threshold; one vote per guardian per round | `guardians.test.ts` "k−1 votes do nothing", "already voted" |
 | Guardians **colluding** (k or more) | Still only starts the challenge window; the owner vetoes. Owners should pick k so a quorum is hard to buy. | `guardians.test.ts` "owner veto" |
 | Votes **accumulating slowly** over months | Any check-in voids all votes so far (D13) | `guardians.test.ts` "any check-in voids votes" |
@@ -51,6 +52,8 @@ or death-registry service), **any third party** (every trigger is permissionless
   should claim to a fresh address (D4, D8).
 - **Front-running a claim.** The payout goes to the address chosen *inside* the proof, so a copied
   transaction pays the same heir. A front-runner gains nothing.
+- **A grace period delays the heirs too.** It adds to the time between the owner's last check-in and
+  release by timeout. It does not delay guardians or the attestor. It is capped at `maxPeriod`.
 - **Block time.** All time checks use Midnight block time, which can drift slightly from wall-clock time.
   Windows are days long, except for the 15-minute freshness window on triggers.
 - **Attestor trust.** An attestor's signature still only starts the challenge window. A compromised

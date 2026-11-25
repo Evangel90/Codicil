@@ -145,3 +145,35 @@ for a new letter.
 - **What it does not do.** It does not deliver the new letter; the owner still sends that
   privately. The demo app does not listen for it yet (its in-browser chain labels every event as
   the release event; that is fixed with live mode).
+
+## D15: The grace period delays only the timeout, and never shortens the veto (2026-11-25)
+
+`gracePeriod` (seconds, set at deployment, 0 = none) sits between a missed deadline and the moment
+anyone can start the countdown by timeout. The reason is practical: without it, an owner who is one
+day late has to let the vault go into a public countdown and then cancel it, which alarms heirs and
+tells every observer that the owner slipped.
+
+- **The owner can check in during the grace period.** `checkIn` is allowed while armed until
+  `deadline + gracePeriod` (before: until `deadline`). After that the old rule applies: start the
+  countdown, then veto.
+- **`triggerTimeout` is refused until `deadline + gracePeriod`** with its own message
+  (`grace period open`), so apps can tell "on time" from "late but in grace".
+- **The challenge window starts at the end of the grace period**, not at the deadline. Otherwise a
+  grace period as long as the challenge window would leave no time to veto. The owner's total
+  allowance after a missed deadline is `gracePeriod + challengeWindow`, whenever the trigger arrives.
+- **Guardians and the attestor are not delayed.** They assert that the owner has died; the grace
+  period is about a late check-in. Both still only start a challenge window.
+- **The will stays locked from the deadline itself.** A late owner checks in first, then changes the
+  will. This keeps "nothing but a check-in happens after the deadline" true.
+- **Capped at `maxPeriod`** (`grace period too long`). A grace period longer than the check-in
+  period would make the deadline meaningless, and the cap catches unit mistakes (milliseconds for
+  seconds) before they lock the timers.
+- **Zero is the old behaviour.** `deadline + 0` is the deadline in every check; the existing tests
+  run with grace off and are unchanged.
+- **Cost.** No new circuits. The check-in circuits gain one ledger read and one addition, 28 rows.
+  The wallet check-in has 57 rows to spare ([VALIDATION.md](VALIDATION.md), "Circuit headroom"),
+  so it stays in its size class with 29 left. Without the read-once change recorded there it
+  would not fit, and its prover key would double.
+
+**Trade-off:** grace also delays the heirs by the same amount, and a check-in made during grace is
+visibly late on-chain, because block time is public.

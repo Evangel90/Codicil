@@ -5,7 +5,8 @@
 //   - total paid never exceeds the snapshot;
 //   - each share is paid at most once, and exactly floor(snapshot × bps / 10000);
 //   - nothing can be claimed before release;
-//   - the owner can always veto during the challenge window.
+//   - the owner can always veto during the challenge window, with any grace period;
+//   - during the grace period the owner can always check in and no timeout can start.
 // Every call is also checked against the compiled ZK circuit.
 
 import { describe, expect, it } from 'vitest';
@@ -96,14 +97,40 @@ describe('properties of random wills', () => {
         fc.double({ min: 0, max: 1, maxExcluded: true, noNaN: true }),
         fc.integer({ min: 1, max: MAX_PERIOD }),
         fc.constantFrom<Via>('passkey', 'wallet'),
-        async (challenge, fraction, extension, via) => {
-          const w = await deployVault({ config: { challengeWindow: BigInt(challenge) } });
-          await w.sim.call('triggerTimeout', { time: FIRST_DEADLINE, as: nobody });
-          const t = FIRST_DEADLINE + Math.floor(fraction * challenge);
+        // Any grace period, including none and ones longer than the challenge window.
+        fc.oneof(fc.constant(0), fc.integer({ min: 1, max: MAX_PERIOD })),
+        async (challenge, fraction, extension, via, grace) => {
+          const w = await deployVault({ config: { challengeWindow: BigInt(challenge), gracePeriod: BigInt(grace) } });
+          const opens = FIRST_DEADLINE + grace;
+          if (grace > 0) {
+            await expect(w.sim.call('triggerTimeout', { time: opens - 1, as: nobody })).rejects.toThrow('grace period open');
+          }
+          await w.sim.call('triggerTimeout', { time: opens, as: nobody });
+          const t = opens + Math.floor(fraction * challenge);
           await checkIn(w, via, t + extension, t);
           expect(L(w.sim).phase).toBe(Phase.armed);
-          await expect(w.sim.call('finalizeRelease', { time: FIRST_DEADLINE + challenge, as: nobody }))
+          await expect(w.sim.call('finalizeRelease', { time: opens + challenge, as: nobody }))
             .rejects.toThrow('not pending');
+        },
+      ),
+      { numRuns: RUNS },
+    );
+  });
+
+  it('during the grace period the owner can always check in and nobody can time the vault out', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.integer({ min: 1, max: MAX_PERIOD }),
+        fc.double({ min: 0, max: 1, maxExcluded: true, noNaN: true }),
+        fc.integer({ min: 1, max: MAX_PERIOD }),
+        fc.constantFrom<Via>('passkey', 'wallet'),
+        async (grace, fraction, extension, via) => {
+          const w = await deployVault({ config: { gracePeriod: BigInt(grace) } });
+          const t = FIRST_DEADLINE + Math.floor(fraction * grace);
+          await expect(w.sim.call('triggerTimeout', { time: t, as: nobody })).rejects.toThrow('grace period open');
+          await checkIn(w, via, t + extension, t);
+          expect(L(w.sim).phase).toBe(Phase.armed);
+          expect(L(w.sim).deadline).toBe(BigInt(t + extension));
         },
       ),
       { numRuns: RUNS },

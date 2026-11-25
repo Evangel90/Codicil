@@ -16,7 +16,7 @@ owner has had a chance to veto.
 
 > **Status (Wave 3, in progress):** the vault contract, SDK and web app are built and tested. That
 > covers passkey and wallet check-ins, multi-heir wills with tranches and backup heirs, hidden k-of-n
-> guardians, the attestation trigger and the cross-contract hook: 157 tests, every contract call
+> guardians, the attestation trigger and the cross-contract hook: 169 tests, every contract call
 > checked against its ZK circuit, plus browser tests that check in with Chrome's real WebAuthn. The
 > Preprod deployment is next. See [What changed this Wave](#what-changed-this-wave).
 > Demo video and deck: *coming*.
@@ -110,7 +110,8 @@ flowchart LR
   and path.
 - **Check-in** signs `aliveDigest(vault, nextDeadline, nonce)`. The circuit checks the signature
   against the committed key without revealing it. Replays fail because the nonce moves.
-- **Release**: the countdown starts after a missed deadline (anyone can trigger it), when k of n
+- **Release**: the countdown starts after a missed deadline plus an optional grace period (anyone
+  can trigger it), when k of n
   hidden guardians vote, or with an attestation from a trusted signer. In every case the owner can
   veto during the challenge window, and any check-in voids earlier votes and attestations. After
   the window the estate is snapshotted.
@@ -230,7 +231,7 @@ Milestones and status: [docs/ROADMAP.md](docs/ROADMAP.md). Customers, go-to-mark
   guide, plain-words summary with warnings, presets, a public inspector, calendar reminders, a ⌘K command palette, guardian reports, veto, release, claims and a privacy
   lens, in the Obsidian design, with a landing page whose 3D point field changes shape as you scroll. Dark and light themes,
   works on phones.
-- 157 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
+- 169 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
   CI on every push.
 - Docs: architecture, privacy (every field and transaction), a threat model mapping each threat to
   the test that covers it, testing, roadmap, business and a judges' quickstart. Details: [docs/WAVES.md](docs/WAVES.md).

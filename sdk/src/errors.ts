@@ -17,6 +17,7 @@ export const CONTRACT_ERRORS = {
   // Vault creation
   'vault needs an owner key': { audience: 'owner', message: 'Add a passkey or a wallet before creating the vault.' },
   'invalid vault settings': { audience: 'owner', message: 'The check-in period and challenge window must both be longer than zero.' },
+  'grace period too long': { audience: 'owner', message: 'The grace period cannot be longer than the longest check-in period.' },
   // Owner: check-in and will updates
   'vault already released': { audience: 'owner', message: 'This vault has already been released to the heirs. It can no longer be changed.' },
   'switch already expired': { audience: 'owner', message: 'Your check-in deadline has passed. Start the challenge window, then check in to cancel it.' },
@@ -38,6 +39,7 @@ export const CONTRACT_ERRORS = {
   'vault closed': { audience: 'anyone', message: 'This vault no longer accepts deposits.' },
   'not armed': { audience: 'anyone', message: 'The countdown has already started or the vault was released.' },
   'owner is still alive': { audience: 'anyone', message: 'The owner checked in on time. Nothing to do yet.' },
+  'grace period open': { audience: 'anyone', message: 'The owner missed the deadline but is still within the grace period. The countdown can start when it ends.' },
   'not pending': { audience: 'anyone', message: 'The vault is not waiting for release.' },
   'challenge window open': { audience: 'anyone', message: 'The owner can still cancel. Release becomes possible when the challenge window ends.' },
   // Heirs

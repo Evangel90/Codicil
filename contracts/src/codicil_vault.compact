@@ -17,6 +17,8 @@
 // Lifecycle:
 //   ARMED --timeout | k-of-n guardians | signed attestation--> PENDING --challenge window--> RELEASED
 //     ^----------------- owner check-in during the challenge window (veto) --'
+//
+// "timeout" means the deadline plus an optional grace period has passed.
 
 pragma language_version >= 0.28.0;
 
@@ -49,6 +51,7 @@ export struct VaultConfig {
   maxPeriod: Uint<64>;            // longest allowed check-in extension
   challengeWindow: Uint<64>;      // time the owner has to veto a trigger
   claimWindow: Uint<64>;          // after release, before backups may claim
+  gracePeriod: Uint<64>;          // after a missed deadline, before the countdown may start; 0 = none
   tokenColor: Bytes<32>;          // unshielded token held by the vault
   guardianRoot: Field;            // Merkle root of guardianLeaf(secret) values
   guardianThreshold: Uint<8>;     // votes needed to start the countdown; 0 = no guardians
@@ -67,6 +70,7 @@ export ledger deadline: Uint<64>;
 export ledger maxPeriod: Uint<64>;
 export ledger challengeWindow: Uint<64>;
 export ledger claimWindow: Uint<64>;
+export ledger gracePeriod: Uint<64>;
 export ledger pendingUntil: Uint<64>;
 export ledger releasedAt: Uint<64>;
 export ledger tokenColor: Bytes<32>;
@@ -105,6 +109,8 @@ constructor(config: VaultConfig) {
   assert(c.ownerPasskeyCommit != default<Bytes<32>> || c.ownerEdCommit != default<Bytes<32>>,
          "vault needs an owner key");
   assert(c.maxPeriod > 0 && c.challengeWindow > 0, "invalid vault settings");
+  // Grace is for a late check-in, not a second check-in period (D15).
+  assert(c.gracePeriod <= c.maxPeriod, "grace period too long");
   ownerPasskeyCommit = c.ownerPasskeyCommit;
   ownerEdCommit = c.ownerEdCommit;
   passkeyRpIdHash = c.passkeyRpIdHash;
@@ -113,6 +119,7 @@ constructor(config: VaultConfig) {
   maxPeriod = c.maxPeriod;
   challengeWindow = c.challengeWindow;
   claimWindow = c.claimWindow;
+  gracePeriod = c.gracePeriod;
   tokenColor = c.tokenColor;
   guardianRoot = c.guardianRoot;
   guardianThreshold = c.guardianThreshold;
@@ -210,10 +217,17 @@ circuit approvedByWallet(digest: Bytes<32>): [] {
 }
 
 // ─── Check-in (proof of life) ───────────────────────────────────────────────
+// The moment the timeout opens: the deadline plus the grace period. Until
+// then the owner can still check in normally and nobody can start the
+// countdown by timeout. With no grace period it is the deadline itself.
+circuit graceEnd(): Uint<64> {
+  return (deadline + gracePeriod) as Uint<64>;
+}
+
 circuit checkInPreconditions(p: Phase, next: Uint<64>): [] {
   assert(p != Phase.released, "vault already released");
   if (p == Phase.armed) {
-    assert(blockTimeLt(deadline), "switch already expired");
+    assert(blockTimeLt(graceEnd()), "switch already expired");
   }
   assert(blockTimeLt(next), "deadline must be in the future");
   // next <= now + maxPeriod, measured from now rather than from the old
@@ -303,11 +317,15 @@ circuit freshTimestamp(asOf: Uint<64>): [] {
   assert(blockTimeLt((asOf + 900) as Uint<64>), "stale timestamp");
 }
 
-// Anyone may start the countdown once the owner has missed their deadline.
+// Anyone may start the countdown once the owner has missed their deadline and
+// the grace period, if any, is over. The challenge window is measured from the
+// end of the grace period, so a long grace never shortens the time to veto.
 export circuit triggerTimeout(): [] {
   assert(phase == Phase.armed, "not armed");
   assert(blockTimeGte(deadline), "owner is still alive");
-  startChallenge(deadline);
+  const opens = graceEnd();
+  assert(blockTimeGte(opens), "grace period open");
+  startChallenge(opens);
 }
 
 // A hidden guardian votes that the owner has died. When `guardianThreshold`

@@ -25,6 +25,14 @@ export function willUpdateDigest(address: string, newRoot: bigint, nonce: bigint
   return pureCircuits.willUpdateDigest(vaultId(address), newRoot, nonce);
 }
 
+/**
+ * When anyone may start the countdown by timeout: the deadline plus the grace
+ * period (unix seconds). Until then the owner can still check in normally.
+ */
+export function timeoutOpensAt(ledger: { deadline: bigint; gracePeriod: bigint }): bigint {
+  return ledger.deadline + ledger.gracePeriod;
+}
+
 /** Private state with a passkey approval attached. */
 export function withPasskeyApproval(
   s: CodicilPrivateState,

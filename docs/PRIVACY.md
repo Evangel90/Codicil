@@ -33,7 +33,7 @@ leaks we have not removed yet. To see it live, open the **Privacy Lens** or **Ac
 | `willRoot` | Merkle root of salted heir entries | Nothing about the will. It changes when the will changes |
 | `willVersion` | Counter | How many times the will was changed |
 | `nonce` | Counter of owner actions | How many check-ins and will changes so far |
-| `deadline`, `maxPeriod`, `challengeWindow`, `claimWindow` | Timers | The owner's check-in rhythm. The contract must enforce time, so time is public |
+| `deadline`, `maxPeriod`, `challengeWindow`, `claimWindow`, `gracePeriod` | Timers | The owner's check-in rhythm and how much slack they chose. The contract must enforce time, so time is public |
 | `phase`, `pendingUntil`, `releasedAt` | State machine | Whether the switch has started or the will was released |
 | `guardianRoot`, `guardianThreshold` | Merkle root, k | k, but not n and not who |
 | `guardianRound`, `guardianVotes`, `guardianNullifiers` | Vote bookkeeping | A vote count. Nullifiers differ per guardian, per round and per vault, so votes cannot be linked |
@@ -53,6 +53,7 @@ transcript bytes for the secret values.
 | `updateWillPasskey` / `updateWillEd25519` | The new will root; a `codicil:will-changed:v1` event with no payload | Heirs, shares, dates, the old will, what changed | `auth.test.ts` "emits a notice" |
 | `deposit` | Amount; the depositing address (unshielded input) | — | `lifecycle.test.ts` |
 | `triggerTimeout`, `finalizeRelease` | That the switch started / the will was released | — | `lifecycle.test.ts` |
+| A check-in during the grace period | The same as any check-in. Because block time is public, everyone can see that it came after the deadline | — | `lifecycle.test.ts` "grace period" |
 | `guardianAttest` | A nullifier and the vote time | Which guardian, how many guardians exist | `guardians.test.ts` "unlinkable nullifier" |
 | `triggerAttestation` | The attestation time | The attestor's key | `guardians.test.ts` |
 | `claim` / `claimAsBackup` | Nullifier, amount, unlock date, recipient address; whether it was a backup claim | Which entry, the heir's key or its commitment, the Merkle path | `claims.test.ts` "publishes a nullifier, not which leaf or heir" |

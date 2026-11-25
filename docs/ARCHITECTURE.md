@@ -53,7 +53,7 @@ stateDiagram-v2
     Armed --> Armed: checkInPasskey / checkInEd25519
     Armed --> Armed: updateWillPasskey / updateWillEd25519
     Armed --> Armed: deposit, guardianAttest (below threshold)
-    Armed --> Pending: triggerTimeout (deadline passed)
+    Armed --> Pending: triggerTimeout (deadline + grace period passed)
     Armed --> Pending: guardianAttest (k-th vote)
     Armed --> Pending: triggerAttestation (attestor signature)
     Pending --> Armed: check-in (owner veto)
@@ -70,7 +70,7 @@ All of it is public. The design goal is that nothing here identifies a person
 |---|---|
 | Owner | `ownerPasskeyCommit`, `ownerEdCommit` (salted commitments; zero = that key type disabled), `passkeyRpIdHash` (the website), `nonce` (owner actions so far) |
 | Will | `willRoot` (Merkle root of the heir entries), `willVersion` |
-| Timers | `phase`, `deadline`, `maxPeriod`, `challengeWindow`, `claimWindow`, `pendingUntil`, `releasedAt` |
+| Timers | `phase`, `deadline`, `maxPeriod`, `challengeWindow`, `claimWindow`, `gracePeriod` (0 = none), `pendingUntil`, `releasedAt` |
 | Estate | `tokenColor`, `estateTotal`, `estateSnapshot` (frozen at release), `estatePaid` (capped at the snapshot) |
 | Claims | `claimNullifiers` (one per claimed will entry) |
 | Guardians | `guardianRoot`, `guardianThreshold` (k), `guardianRound`, `guardianVotes`, `guardianNullifiers` |
@@ -80,11 +80,11 @@ All of it is public. The design goal is that nothing here identifies a person
 
 | Circuit | Who calls it | Authorisation | Effect |
 |---|---|---|---|
-| `checkInPasskey(next)` | Owner | WebAuthn assertion over `aliveDigest(vault, next, nonce)`, from the committed passkey, on the committed website, with Face ID / Touch ID | Moves the deadline (at most `maxPeriod` from now), bumps the nonce, voids guardian votes; vetoes a pending switch |
+| `checkInPasskey(next)` | Owner | WebAuthn assertion over `aliveDigest(vault, next, nonce)`, from the committed passkey, on the committed website, with Face ID / Touch ID | Moves the deadline (at most `maxPeriod` from now), bumps the nonce, voids guardian votes; vetoes a pending switch. Allowed until the deadline plus the grace period, and during any challenge window |
 | `checkInEd25519(next)` | Owner | CIP-30 signature over the same digest from the committed wallet key | Same |
 | `updateWillPasskey(root)` / `updateWillEd25519(root)` | Owner | Signature over `willUpdateDigest(vault, root, nonce)` | Replaces the will root; only while armed and before the deadline. Emits `codicil:will-changed:v1` |
 | `deposit(amount)` | Anyone | None | Receives unshielded tokens while armed |
-| `triggerTimeout()` | Anyone | Deadline has passed | Starts the challenge window |
+| `triggerTimeout()` | Anyone | The deadline and the grace period have passed | Starts the challenge window, counted from the end of the grace period |
 | `guardianAttest(asOf)` | A guardian | Merkle membership in `guardianRoot`, one nullifier per guardian per round | Counts a vote; the k-th vote starts the challenge window |
 | `triggerAttestation(asOf)` | Anyone holding an attestation | P-256 signature from the committed attestor over `attestationDigest(vault, round)` | Starts the challenge window |
 | `finalizeRelease()` | Anyone | Challenge window over | Releases; snapshots the estate; emits `codicil:released:v1` |
@@ -95,6 +95,14 @@ All of it is public. The design goal is that nothing here identifies a person
 The 10 exported pure circuits (`passkeyCommitment`, `edKeyCommitment`, `heirLeafHash`, `aliveDigest`,
 `willUpdateDigest`, `claimNullifier`, `guardianLeaf`, `guardianNullifier`, `attestorCommitment`,
 `attestationDigest`) are called by the SDK, so TypeScript never re-implements a hash.
+
+### Grace period
+
+`gracePeriod` is optional ([D15](DECISIONS.md)). When it is set, an owner who misses the deadline can
+still check in normally until `deadline + gracePeriod`, and `triggerTimeout` is refused until then, so
+a check-in that is a day late does not put the vault into a public countdown. Guardians and the
+attestor are not delayed. The will stays locked from the deadline itself. With `gracePeriod = 0` the
+vault behaves as it did before the option existed.
 
 ### Signing first, proving second
 

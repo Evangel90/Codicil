@@ -35,8 +35,10 @@ import {
   signAttestation,
   signLikePasskey,
   signLikeWallet,
+  timeoutOpensAt,
   toWebAuthnAssertion,
   VAULT_EVENTS,
+  VAULT_OPTIONS_OFF,
   vaultEventName,
   verifyCip30Signature,
   verifyWebAuthnAssertion,
@@ -263,5 +265,13 @@ describe('vault events', () => {
     withPayload.set(utf8ToBytes(VAULT_EVENTS.willChanged));
     withPayload[40] = 7;
     expect(vaultEventName({ data: { content: { value: [withPayload] } } })).toBe(VAULT_EVENTS.willChanged);
+  });
+});
+
+describe('optional vault settings', () => {
+  it('the grace period is off by default, and the timeout opens at the deadline plus the grace period', () => {
+    expect(VAULT_OPTIONS_OFF.gracePeriod).toBe(0n);
+    expect(timeoutOpensAt({ deadline: 100n, ...VAULT_OPTIONS_OFF })).toBe(100n);
+    expect(timeoutOpensAt({ deadline: 100n, gracePeriod: 30n })).toBe(130n);
   });
 });

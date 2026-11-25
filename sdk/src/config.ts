@@ -39,4 +39,7 @@ export function rpIdHash(rpId: string = DEFAULT_RP_ID): Uint8Array {
  * and override only what the vault uses; a vault deployed with these values
  * behaves exactly as if the feature did not exist.
  */
-export const VAULT_OPTIONS_OFF = {} as const satisfies Partial<VaultConfig>;
+export const VAULT_OPTIONS_OFF = {
+  /** No grace period: the countdown can start at the deadline itself. */
+  gracePeriod: 0n,
+} as const satisfies Partial<VaultConfig>;
