@@ -40,6 +40,7 @@ flowchart TB
 | [`contracts/test/`](../contracts/test) | Simulator tests; every successful call is also checked against the ZK circuit |
 | [`sdk/src/`](../sdk/src) | Keys, commitments, will builder, witnesses, signing, letters, error catalogue |
 | [`app/src/`](../app/src) | Web app: landing page, setup wizard, owner / heir / guardian / public views, Privacy Lens |
+| [`preprod/`](../preprod) | Gate V14: the vault end to end on a real network with Midnight.js and the wallet SDK ([PREPROD.md](PREPROD.md)) |
 | [`codicil-spike/`](../codicil-spike) | Phase 0 validation spike, kept as a record ([VALIDATION.md](VALIDATION.md)) |
 | [`tools/webauthn-capture/`](../tools/webauthn-capture) | Page that captured the real passkey and wallet signatures used as test fixtures |
 
@@ -211,4 +212,5 @@ Pure helpers keep the views simple and testable:
 
 Going live replaces the in-memory chain with Midnight.js providers (wallet, proof server, indexer)
 and keeps the SDK, witnesses and views. That step is gate V14 ([VALIDATION.md](VALIDATION.md)) and
-is next on the [roadmap](ROADMAP.md).
+is next on the [roadmap](ROADMAP.md). The provider wiring already exists for a command-line run
+([`preprod/src/providers.ts`](../preprod/src/providers.ts), [PREPROD.md](PREPROD.md)).

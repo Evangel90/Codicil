@@ -1,6 +1,6 @@
 # Testing
 
-154 unit and simulator tests plus 2 browser end-to-end tests, all run by CI on every push
+241 unit and simulator tests plus 2 browser end-to-end tests, all run by CI on every push
 ([workflow](../.github/workflows/ci.yml)). This page explains what each level proves, how to run
 it, and the bugs the tests caught.
 
@@ -9,7 +9,7 @@ it, and the bugs the tests caught.
 ```bash
 npm ci
 npm run compile      # Compact → JS + ZK circuits (--skip-zk: no proving keys, seconds)
-npm test             # contracts, SDK and app: about 10 seconds
+npm test             # contracts, SDK, app and the network script's offline tests: about 15 seconds
 npm run e2e          # builds the app and runs Playwright in Chrome
 ```
 
@@ -18,6 +18,7 @@ npm run e2e          # builds the app and runs Playwright in Chrome
 | Contract simulator + ZK constraint checks | `npm test -w @codicil/contracts` | 104 | ~6 s |
 | SDK | `npm test -w @codicil/sdk` | 28 | ~1 s |
 | App logic (the demo store and helpers) | `npm test -w @codicil/app` | 22 | ~3 s |
+| Network script, offline parts | `npm test -w @codicil/preprod` | 87 (one more when the proving keys are present) | ~3 s |
 | Browser end-to-end | `npm run e2e` | 2 | ~30 s |
 | Full compile with proving keys | `npm run compile:full` | 12 circuits | several minutes |
 
@@ -66,7 +67,16 @@ letter, older will, another vault, which key opens it).
   summary and its warnings, presets, letters held by heirs (a letter goes stale when the will
   changes and then cannot claim), calendar reminders (which never mention heirs), the ⌘K palette.
 
-## 4. Browser end-to-end
+## 4. Network script tests
+
+[`preprod/test/`](../preprod/test) covers the parts of the Preprod script ([PREPROD.md](PREPROD.md))
+that need no network: environment and endpoint selection, secret redaction, timer selection, the
+resumable state file, the results table, the preflight (with a fake `fetch`), and
+[`dryrun.test.ts`](../preprod/test/dryrun.test.ts), which builds every transaction of the real run
+through Midnight.js, including the cross-contract withdrawal. Nothing in these tests opens a
+connection. The run itself is opt-in: `npm run preprod:check`, `preprod:dust` and `preprod:run`.
+
+## 5. Browser end-to-end
 
 [`app/e2e/demo.spec.ts`](../app/e2e/demo.spec.ts) runs in Chrome with a **CDP virtual authenticator**,
 so the passkey goes through the browser's real WebAuthn API and is verified by the circuit. The story:

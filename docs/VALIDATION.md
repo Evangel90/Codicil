@@ -25,7 +25,7 @@ simulator tests in `test/`.
 | V11 | Shielded payout | **PASS** (simulator): recipient hidden; amount still derivable (D8) | 2026-11-23 |
 | V12 | Cross-contract call | **PASS** (simulator): escrow → vault hook, 2 proofs per tx; Preprod PENDING | 2026-11-23 |
 | V13 | Events visible | **PASS** (simulator); indexer PENDING (V14) | 2026-11-23 |
-| V14 | End-to-end on Preprod | PENDING | |
+| V14 | End-to-end on Preprod | PENDING: script ready ([PREPROD.md](PREPROD.md)), not yet run on a network | |
 | V15 | Curve25519 Montgomery ⇄ Edwards | **PASS** | 2026-11-23 |
 
 ---
@@ -253,6 +253,45 @@ is ready to report upstream.
 - `finalizeRelease` emits `Misc { name: "codicil:released:v1", … }`. The test finds exactly one
   event and the name bytes in its payload.
 - **Still to do:** read the event from the indexer on Preprod (V14).
+
+## V14: End-to-end on Preprod (prepared, not run)
+
+- **Status:** PENDING. No transaction has been submitted to any network. The run needs Docker (for
+  the proof server), a Blockfrost token for Preprod and one faucet request; the runbook is
+  [PREPROD.md](PREPROD.md) and the script is [`preprod/`](../preprod).
+- **Versions** (compatibility matrix on docs.midnight.network, read 2026-11-25): Preprod and
+  Preview run ledger 9 with node 2.1.101 and indexer 4.4.101. The matching client set is Compact
+  0.36.1, compact-runtime 0.21.0, Midnight.js 5.0.1, Wallet SDK 2.0.1 and proof server 9.0.2. The
+  repo's pins match.
+
+What was done on 2026-11-25, without a proof server, a token or funds:
+
+- **Full compile.** `npm run compile:full` for the vault took 2 min 46 s. Circuit sizes read from
+  the binary ZKIR: `checkInPasskey` k = 18, `checkInEd25519` k = 17, `claim` k = 16,
+  `withdrawToBeneficiary` k = 13, the rest k ≤ 8.
+- **Every transaction of the run built offline through Midnight.js 5.0.1**
+  (`npm run preprod:dryrun -- --escrow`): deploy (29.8 KB, 12 verifier keys), deposit, both
+  check-ins, `triggerTimeout`, `finalizeRelease` (one `codicil:released:v1` event), `claim` (a
+  6 tNIGHT output to the wallet), and the escrow's cross-contract withdrawal (two calls in one
+  transaction, the vault's first). This is also a unit test, with stand-in keys in CI.
+- **Proofs made in-process** (`--prove`, the zkir-v3 WebAssembly prover, no Docker):
+  `checkInEd25519` 223 s, `claim` 95 s, the cross-contract withdrawal 19 s, the small circuits
+  under 1 s each. `checkInPasskey` aborts: k = 18 needs more than WebAssembly's 4 GiB. These times
+  are single-threaded WebAssembly and say nothing about the proof server.
+- **These proofs were not verified.** The ledger library's `wellFormed` check accepted them, but it
+  also accepted the same transactions with single bits flipped inside the proof (34 of 40 flips,
+  with `verifyContractProofs` on or off), so in this build it is not a proof check. Only a node
+  verifies.
+- **Live, read-only, on Preview:** the indexer and node answered (block 270,382, 20 s old, protocol
+  version 2001100; node `Midnight Preview` 2.1.101). A fresh wallet synced in 6 min 40 s and
+  restarted from saved state in seconds. It holds nothing.
+- **Preprod endpoints:** Blockfrost's indexer and node answered a made-up token with HTTP 403
+  `Invalid project token.`, as the docs describe. Nothing else on Preprod has been exercised.
+
+Still unknown until the real run: proving time and memory on the proof server (the docs measure a
+k = 18 proof at 17 s and 5 GiB on an Apple M4), fees, whether the wallet balances and signs these
+transactions as built, the first wallet sync on Preprod (the docs report about three and a half
+hours), and what the indexer returns for the release event.
 
 ## V15: Curve25519 conversion
 
