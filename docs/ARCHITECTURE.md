@@ -258,7 +258,7 @@ The app is React + Vite with hand-written CSS tokens (the "Obsidian" design: dar
 works on phones).
 
 - **Landing page** (`#/`): a scrolling page over a WebGL point field that changes shape with each section.
-- **Demo** (`#/demo`): an eight-step setup wizard, then the vault from four points of view: the
+- **Demo** (`#/demo`): a nine-step setup wizard, then the vault from four points of view: the
   owner (Amara), an heir (Ada, Ben, Cleo, Kofi), a guardian, and "Anyone" (the public inspector).
   The owner has three more tabs: Will, Settings (guardians, attestor and the recovery key) and Savings.
 - **Live mode** (`#/app`): a real vault on a Midnight test network, through the person's own Lace

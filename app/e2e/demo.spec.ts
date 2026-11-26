@@ -62,6 +62,8 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
   await page.getByRole('button', { name: 'More votes needed' }).click();
   await next.click();                                   // timers
   await next.click();                                   // recovery key: none
+  await next.click();                                   // sealed message: none
+  await expect(page.getByRole('heading', { name: 'Is there something to say, or to hand over?' })).toBeVisible();
   await next.click();                                   // review
   await expect(page.getByText('2 of 3 must agree')).toBeVisible();
   await expect(page.locator('.review')).toContainText('no grace period');
@@ -203,7 +205,7 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
 });
 
 /** The wizard, with a passkey from Chrome's virtual authenticator. Ends on the owner's dashboard. */
-async function createVault(page: Page, opts: { grace?: string; recoveryKey?: boolean } = {}) {
+async function createVault(page: Page, opts: { grace?: string; recoveryKey?: boolean; message?: string } = {}) {
   await addVirtualPasskey(page);
   await page.goto('/#/demo');
   await page.getByRole('button', { name: /Register Face ID/ }).click();
@@ -227,9 +229,16 @@ async function createVault(page: Page, opts: { grace?: string; recoveryKey?: boo
     await sheet.getByRole('button', { name: 'Close' }).click();
     await page.getByLabel(/I have saved my recovery key/).check();
   }
+  await next.click();                                   // sealed message
+  if (opts.message) {
+    await page.getByLabel('Who is it for?').selectOption({ label: 'Ben, son' });
+    await page.getByLabel('Your message for Ben').fill(opts.message);
+  }
   await next.click();                                   // review
+  if (opts.message) await expect(page.locator('.review')).toContainText(`For Ben, ${opts.message.length} characters. Kept off the chain.`);
   await next.click();                                   // deploy
   await page.getByRole('button', { name: 'Seal & deploy vault' }).click();
+  if (opts.message) await expect(page.getByRole('main')).toContainText('Your message for Ben is sealed too.', { timeout: 30_000 });
   await page.getByRole('button', { name: /Go to my vault/ }).click({ timeout: 30_000 });
   await expect(page.getByRole('heading', { name: 'Your next check-in is due in' })).toBeVisible();
 }
@@ -390,6 +399,33 @@ test('new guardians, and a lost passkey recovered with the saved key', async ({ 
   await nav.getByRole('button', { name: 'Vault' }).click();
   await page.getByRole('button', { name: /I'm alive/ }).click();
   await finish(page, /Check-in recorded/);
+
+  expect(errors).toEqual([]);
+});
+
+test('a message written while creating the vault is sealed with it', async ({ page }) => {
+  const errors = watchErrors(page);
+  const TEXT = 'Ben, the contracts are in the folder. Check them against the bank letters before you run anything.';
+  await createVault(page, { message: TEXT });
+  const nav = page.getByRole('navigation', { name: 'Sections' });
+  const main = page.getByRole('main');
+
+  // It is already sealed for Ben, with a piece of its key for each guardian, and nothing on the chain.
+  await nav.getByRole('button', { name: 'Messages' }).click();
+  const row = main.getByRole('listitem').filter({ hasText: 'Ben' }).first();
+  await expect(row).toContainText(`${TEXT.length} characters · Shut until your vault releases`);
+  await expect(row).toContainText('Any 2 of them open it, together with Ben.');
+  await expect(main.getByRole('button', { name: 'Write to Ada' })).toBeVisible();
+  await nav.getByRole('button', { name: 'Privacy Lens' }).click();
+  await expect(page.locator('.lens-public')).toContainText('nothing · no field');
+  await expect(page.locator('.lens-private .ledger')).toContainText('1, for Ben');
+
+  // Ben holds sealed text he cannot open yet.
+  await page.getByRole('group', { name: 'Act as' }).getByRole('button', { name: 'Heir' }).click();
+  await page.getByRole('group', { name: 'Which heir' }).getByRole('button', { name: 'Ben' }).click();
+  await nav.getByRole('button', { name: 'Messages' }).click();
+  await expect(main.getByRole('heading', { name: 'Amara left you a sealed message.' })).toBeVisible();
+  await expect(main).not.toContainText('bank letters');
 
   expect(errors).toEqual([]);
 });

@@ -15,7 +15,7 @@ import {
   demo, fmtDate, guardianById, HEIRS, MESSAGE_MAX, OWNER_FIRST, type HeirProfile, type MessageView, type Snapshot,
 } from '../demo/store.js';
 
-const EXAMPLES: { label: string; text: (to: string) => string }[] = [
+export const MESSAGE_EXAMPLES: { label: string; text: (to: string) => string }[] = [
   {
     label: 'A letter',
     text: (to) => `${to}, if you are reading this, I have been gone a while.\n\nThe papers for the house are with Sarah Lin. Do not sell the workshop in a hurry: wait a year, then decide. Look after each other.\n\nI am proud of you.\n${OWNER_FIRST}`,
@@ -118,10 +118,10 @@ function Editor({ to, start, onDone }: { to: HeirProfile; start: string; onDone:
       <div className="msg-under">
         <span className="small muted">
           Or start from an example:{' '}
-          {EXAMPLES.map((x, i) => (
+          {MESSAGE_EXAMPLES.map((x, i) => (
             <span key={x.label}>
               <button type="button" className="linkish" onClick={() => { setText(x.text(to.name)); setProblem(undefined); }}>{x.label.toLowerCase()}</button>
-              {i < EXAMPLES.length - 1 && ', '}
+              {i < MESSAGE_EXAMPLES.length - 1 && ', '}
             </span>
           ))}
         </span>

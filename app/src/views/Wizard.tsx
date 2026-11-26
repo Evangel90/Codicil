@@ -1,25 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Codicil Authors
 //
-// Create a vault in eight steps. The side panel shows, as you go, what stays
-// on this device and the real values that would go on-chain.
+// Create a vault in nine steps: a will, and a sealed message if the owner has
+// one. The side panel shows, as you go, what stays on this device and the real
+// values that would go on-chain.
 
 import { useEffect, useMemo, useState } from 'react';
 import { HashChip, Icon, ICONS, FACE_ID, Logo, Segmented } from '../components/ui.js';
 import {
-  DAY, days, defaultSetup, demo, fitSetup, fmtShort, graceChoices, GUARDIANS, HEIRS, OWNER_NAME, recoveryDelayChoices, span,
-  type Snapshot, type VaultSetup,
+  DAY, days, defaultSetup, demo, fitSetup, fmtShort, graceChoices, GUARDIANS, HEIRS, MESSAGE_MAX, OWNER_NAME, recoveryDelayChoices, span,
+  type HeirProfile, type Snapshot, type VaultSetup,
 } from '../demo/store.js';
 import { PRESETS, presetFor } from '../demo/guide.js';
 import { recoveryKeyGroups } from '../demo/recoveryKey.js';
+import { MESSAGE_EXAMPLES } from './MessagesView.js';
 import { PlanSummary } from './PlanSummary.js';
 import { RecoveryKeySheet } from './RecoveryKeySheet.js';
 import { createDemoPasskey, createDevicePasskey, passkeySupport, type OwnerPasskey, type PasskeySupport } from '../demo/passkey.js';
 
-const LABELS = ['Passkey', 'Heirs', 'Shares & dates', 'Guardians', 'Timers', 'Recovery key', 'Review', 'Deploy'];
+const LABELS = ['Passkey', 'Heirs', 'Shares & dates', 'Guardians', 'Timers', 'Recovery key', 'Sealed message', 'Review', 'Deploy'];
 const RECOVERY = 5;
-const REVIEW = 6;
-const DEPLOY = 7;
+const MESSAGE = 6;
+const REVIEW = 7;
+const DEPLOY = 8;
 const COPY: [string, string, string][] = [
   ['Step 1 · Sign-in', 'Protect your vault with your face or fingerprint.', 'No passwords, no seed phrase. Your passkey is the only thing that can check in or change the will.'],
   ['Step 2 · Heirs', 'Who should inherit?', 'Nicknames stay on this device. Each heir made a key on their own phone and sent you only its public half.'],
@@ -27,8 +30,9 @@ const COPY: [string, string, string][] = [
   ['Step 4 · Guardians (optional)', 'Who can confirm, early, that you’ve died?', 'Guardians are people you trust, such as family or a lawyer. They can start the switch before your deadline. You can still cancel.'],
   ['Step 5 · Timers', 'How long before the switch starts?', 'Choose a rhythm you’ll actually keep. These are fixed once the vault is created.'],
   ['Step 6 · Recovery key (optional)', 'What if you lose your passkey?', 'Without your passkey you cannot check in, so the will would be released while you are alive. A recovery key is a way back in. It also adds a risk, so read this step before you choose.'],
-  ['Step 7 · Review', 'Read it once more.', 'Everything below stays on your device except where marked as on-chain.'],
-  ['Step 8 · Deploy', 'Seal the will.', 'One confirmation creates your vault and seals the will.'],
+  ['Step 7 · Sealed message (optional)', 'Is there something to say, or to hand over?', 'A will passes on money. A sealed message passes on words: a letter, the recovery phrase of a wallet outside this vault, or documents that must come out if you cannot publish them yourself. Leave it empty to skip; you can write one later.'],
+  ['Step 8 · Review', 'Read it once more.', 'Everything below stays on your device except where marked as on-chain.'],
+  ['Step 9 · Deploy', 'Seal the will.', 'One confirmation creates your vault and seals the will.'],
 ];
 
 const toDate = (t: number) => new Date(t * 1000).toISOString().slice(0, 10);
@@ -45,6 +49,9 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
   // The owner confirms the recovery key is saved before going on; it is not shown again.
   const [keySaved, setKeySaved] = useState(false);
   const [sheet, setSheet] = useState(false);
+  // A message written here is sealed on this device right after the vault exists.
+  const [noteTo, setNoteTo] = useState<HeirProfile['id']>('ada');
+  const [note, setNote] = useState('');
   useEffect(() => { void passkeySupport().then(setSupport); }, []);
 
   const preview = useMemo(() => demo.preview(setup, passkey), [setup, passkey]);
@@ -56,6 +63,11 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
   const wantsKey = setup.recoveryDelay > 0;
   const recoveryKey = useMemo(() => (wantsKey ? demo.draftRecoveryKey() : ''), [wantsKey]);
   const delays = recoveryDelayChoices(setup.every);
+  const noteFor = HEIRS.find((h) => h.id === noteTo)!;
+  const noteLength = note.trim().length;
+  const noteOver = noteLength > MESSAGE_MAX;
+  const holders = setup.guardians.length;
+  const noteLine = noteLength > 0 ? `For ${noteFor.name}, ${noteLength.toLocaleString()} character${noteLength === 1 ? '' : 's'}` : 'None';
 
   const register = async (kind: 'device' | 'demo') => {
     setBusy(true);
@@ -77,6 +89,10 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
     setError(undefined);
     try {
       await demo.setUp(passkey, setup);
+      if (noteLength > 0) {
+        const wrong = await demo.sealMessage(noteTo, note);
+        if (wrong) setError(`Your vault is created, but the message was not sealed. ${wrong} You can seal it under Messages.`);
+      }
     } catch (e) {
       setError(`The vault could not be deployed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -84,8 +100,11 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
     }
   };
 
-  const blocked = (step === 0 && !passkey) || (step === 2 && (over || !!preview.problem)) || (step === RECOVERY && wantsKey && !keySaved);
-  const [eyebrow, title, lede] = COPY[step];
+  const blocked = (step === 0 && !passkey) || (step === 2 && (over || !!preview.problem)) || (step === RECOVERY && wantsKey && !keySaved) || (step === MESSAGE && noteOver);
+  const [eyebrow, title, plainLede] = COPY[step];
+  const lede = step === DEPLOY && noteLength > 0
+    ? `One confirmation creates your vault and seals the will. Your message for ${noteFor.name} is sealed on this device at the same moment, and never goes to the chain.`
+    : plainLede;
   const keyEnd = (id: string) => demo.heirKeyEnd(id as never);
 
   return (
@@ -355,6 +374,50 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
           )}
           {sheet && <RecoveryKeySheet keyText={recoveryKey} delay={setup.recoveryDelay} onClose={() => setSheet(false)} />}
 
+          {step === MESSAGE && (
+            <div className="card wiz-card">
+              <label className="field-label">
+                Who is it for?
+                <select className="field" value={noteTo} onChange={(e) => setNoteTo(e.target.value as HeirProfile['id'])}>
+                  {HEIRS.map((h) => <option key={h.id} value={h.id}>{h.name}, {h.relation[0].toLowerCase() + h.relation.slice(1)}</option>)}
+                </select>
+              </label>
+              <div className="stack-12">
+                <label className="field-label">
+                  Your message for {noteFor.name}
+                  <textarea
+                    className="field msg-text" value={note} rows={8} aria-invalid={noteOver || undefined}
+                    placeholder={`Write to ${noteFor.name}. Only ${noteFor.name} will ever read this.`}
+                    onChange={(e) => setNote(e.target.value)}
+                  />
+                </label>
+                <div className="msg-under">
+                  <span className="small muted">
+                    Or start from an example:{' '}
+                    {MESSAGE_EXAMPLES.map((x, i) => (
+                      <span key={x.label}>
+                        <button type="button" className="linkish" onClick={() => setNote(x.text(noteFor.name))}>{x.label.toLowerCase()}</button>
+                        {i < MESSAGE_EXAMPLES.length - 1 && ', '}
+                      </span>
+                    ))}
+                  </span>
+                  <span className={`small mono ${noteOver ? 'msg-over' : 'muted'}`}>{noteLength.toLocaleString()} / {MESSAGE_MAX.toLocaleString()}</span>
+                </div>
+                {noteOver && <p className="err-inline" role="alert">That is too long. The demo seals up to {MESSAGE_MAX.toLocaleString()} characters.</p>}
+              </div>
+              <div className="stack-8">
+                <h2 className="rk-title">How it stays shut</h2>
+                <ul className="plain-list">
+                  <li>It is locked on this device when you create the vault. Nothing about it goes on the chain, not even that it exists.</li>
+                  <li>{noteFor.name} keeps the locked text and half of the key. {holders === 1
+                    ? 'Your guardian keeps the other half'
+                    : `Your ${holders} guardians each keep a piece of the other half`} and {holders === 1 ? 'hands' : 'hand'} it over only after the vault releases{holders === 1 ? '' : `; ${setup.threshold} of them ${setup.threshold === 1 ? 'is' : 'are'} needed`}.</li>
+                  <li>It rests on that promise. {setup.threshold === 1 ? 'One guardian' : `Any ${setup.threshold} guardians`} and {noteFor.name}, acting together, could open it early, so choose guardians you trust with it.</li>
+                </ul>
+              </div>
+            </div>
+          )}
+
           {step === REVIEW && (
             <div className="card review">
               {([
@@ -365,6 +428,7 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
                 ['Guardians', `${setup.threshold} of ${GUARDIANS.length} must agree`, 3],
                 ['Timers', `Check in every ${days(setup.every)} days · ${setup.grace > 0 ? `${span(setup.grace)} of grace` : 'no grace period'} · ${days(setup.window)}-day challenge window`, 4],
                 ['Recovery key', wantsKey ? `Saved by you · takes effect after ${span(setup.recoveryDelay)}` : 'None', RECOVERY],
+                ['Sealed message', noteLength > 0 ? `${noteLine}. Kept off the chain.` : 'None', MESSAGE],
               ] as const).map(([k, v, go]) => (
                 <div key={k} className="review-row">
                   <span className="eyebrow">{k}</span>
@@ -398,6 +462,12 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
                   <span className="seal-press" aria-hidden="true"><Logo size={56} /></span>
                   <h2 className="disp">Your will is <em>sealed.</em></h2>
                   <p className="muted">Vault deployed. Your first check-in is due on {fmtShort(s.deadline)}.</p>
+                  {s.messages.length > 0 && (
+                    <p className="muted">
+                      Your message for {noteFor.name} is sealed too. It opens only after the vault releases, and only for {noteFor.name}.
+                    </p>
+                  )}
+                  {error && <p className="err-inline" role="alert">{error}</p>}
                   <button type="button" className="btn btn-primary" onClick={onDone} autoFocus>
                     Go to my vault <span className="arw" aria-hidden="true">→</span>
                   </button>
@@ -429,6 +499,7 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
               <div><dt>Cleo</dt><dd>{pct(setup.cleo)}% · {fmtShort(setup.cleoUnlock)}</dd></div>
               <div><dt>Guardian identities</dt><dd>{GUARDIANS.length} people</dd></div>
               <div><dt>Recovery key</dt><dd>{wantsKey ? 'On paper, with you' : 'None'}</dd></div>
+              <div><dt>Sealed message</dt><dd>{noteLine}</dd></div>
             </dl>
           </div>
           <div className="side-cross mono"><Icon d={ICONS.down} size={14} stroke={2} />zero-knowledge: only fingerprints cross</div>
@@ -445,6 +516,7 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
               <div><dt>Recovery key</dt><dd className="mono">{preview.recoveryCommit ? `commit 0x${preview.recoveryCommit.slice(0, 4)}…${preview.recoveryCommit.slice(-4)}` : 'none'}</dd></div>
               {wantsKey && <div><dt>Recovery delay</dt><dd className="mono">{setup.recoveryDelay.toLocaleString('en-GB')} s</dd></div>}
               <div><dt>Release fee</dt><dd className="mono">none</dd></div>
+              <div><dt>Sealed message</dt><dd className="mono">nothing</dd></div>
             </dl>
             <p className="small muted">
               The heirs root changes as you edit. It is a fingerprint of the whole will, computed by the real circuit, so it

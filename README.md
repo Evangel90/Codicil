@@ -53,10 +53,10 @@ the site they were made on, and the vault was compiled for it). The demo runs th
 contract in your browser** on a simulated chain with a clock you can fast-forward. Only proof
 generation and network fees are skipped.
 
-1. **Create a vault** in the eight-step wizard: register Face ID / Touch ID (or a demo key), set the
+1. **Create a vault** in the nine-step wizard: register Face ID / Touch ID (or a demo key), set the
    shares, the guardian threshold and the timers (or start from a Careful / Balanced / Quick preset).
-   Two choices are optional and off by default: a **grace period** (step 5) and a **recovery key**
-   (step 6), which is shown once to print or download.
+   Three choices are optional and off by default: a **grace period** (step 5), a **recovery key**
+   (step 6), which is shown once to print or download, and a **sealed message** for one person (step 7).
    The review step reads the will back in plain words and flags risky choices. The side panel shows the real heirs root and
    commitments that would go on-chain, recomputed as you edit.
 2. **I'm alive**: your passkey signs the check-in, and the circuit verifies the signature, the
