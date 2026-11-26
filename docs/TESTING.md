@@ -160,6 +160,8 @@ sealing, and what is saved across a reload; the backup file downloads. A wallet 
 sent to the faucet for its network. These tests use no network, so they stop where the app first
 needs one. With `E2E_LIVE_PREVIEW=1` the owner test goes one step further: it builds the staged
 deployment in the browser and offers it to the wallet, which declines.
+The two owner tests build a real deployment, which needs the circuits' keys from
+`npm run compile:full`. CI compiles without them, so those two are skipped there and run locally.
 
 [`app/e2e/live-network.spec.ts`](../app/e2e/live-network.spec.ts) is opt-in
 (`E2E_LIVE_NETWORK=preview`). It clicks through live mode in headless Chromium **on the real

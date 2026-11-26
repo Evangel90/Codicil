@@ -11,8 +11,18 @@
 // That part runs on a real network in `npm run live:e2e`, and with the Lace
 // extension by hand (docs/JUDGES_QUICKSTART.md).
 
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { bech32m } from '@scure/base';
 import { expect, test, type Page } from '@playwright/test';
+
+/**
+ * Creating a vault needs the circuits' real keys, which only the full compile
+ * makes (`npm run compile:full`, 2.7 GB). CI compiles with --skip-zk, so the
+ * owner tests are skipped there, as the app itself would refuse: its button
+ * stays off and it says the keys are missing.
+ */
+const HAVE_KEYS = existsSync(fileURLToPath(new URL('../../contracts/managed/codicil_vault/keys/deposit.prover', import.meta.url)));
 
 /**
  * Set to use the real Preview indexer, which takes the owner test one step
@@ -111,6 +121,7 @@ test.describe('live mode, before a wallet is connected', () => {
 
 for (const network of (REAL_PREVIEW ? ['preview'] : ['preview', 'preprod']) as ('preview' | 'preprod')[]) {
   test(`an owner on ${network}: from the wizard to the first approval, and back after a reload`, async ({ page }) => {
+    test.skip(!HAVE_KEYS, 'needs the proving keys: run `npm run compile:full`');
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
     const Network = network === 'preview' ? 'Preview' : 'Preprod';
