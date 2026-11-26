@@ -241,6 +241,9 @@ export function syncLine(state: FacadeState): string {
   ].join(', ');
 }
 
+/** The wallet's state right now. */
+export const currentState = (session: WalletSession): Promise<FacadeState> => Rx.firstValueFrom(session.facade.state());
+
 export const isSynced = (s: FacadeState): boolean => s.isSynced && s.protocol._tag === 'Settled';
 
 export class SyncTimeoutError extends Error {
@@ -402,12 +405,21 @@ export interface TxTimings {
   submittedAt?: number;
 }
 
+/** Balancing and submitting, on serialized transactions. */
+export interface WalletTransactions {
+  /** Pay the fee for a proven transaction, balance it and sign it. */
+  balance(tx: Uint8Array, ttl?: Date): Promise<Uint8Array>;
+  /** Send a finished transaction; resolves to its id. */
+  submit(tx: Uint8Array): Promise<string>;
+}
+
 /**
- * The two providers Midnight.js needs from a wallet. Transactions cross as
- * bytes: `adoptTransaction` reads them with the wallet SDK's own ledger copy,
- * at the protocol version the wallet is acting at.
+ * What the wallet does to a transaction, as bytes in and bytes out:
+ * `adoptTransaction` reads them with the wallet SDK's own ledger copy, at the
+ * protocol version the wallet is acting at. The Midnight.js adapter below and
+ * the web app's headless wallet (app/scripts/headless-wallet.ts) both use it.
  */
-export function midnightWalletProviders(session: WalletSession, timings: TxTimings, log: Log = () => {}): { walletProvider: WalletProvider; midnightProvider: MidnightProvider } {
+export function walletTransactions(session: WalletSession, timings: TxTimings, log: Log = () => {}): WalletTransactions {
   const { facade, identity } = session;
   const dust = (speck: bigint) => `${(Number(speck) / 1e15).toFixed(3)} DUST`;
   const dustNow = async () => {
@@ -420,10 +432,9 @@ export function midnightWalletProviders(session: WalletSession, timings: TxTimin
     }
     return false;
   };
-  const walletProvider = createLedger9WalletProvider({
-    async balanceTx(tx, ttl) {
+  return {
+    async balance(bytes, ttl) {
       const started = Date.now();
-      const bytes = tx.serialize();
       // Fees are paid in DUST, which a wallet generates over time and cannot
       // buy. A transaction that costs more than the wallet holds is not a
       // failure, only early: say what it needs and wait for it. A deployment
@@ -456,44 +467,53 @@ export function midnightWalletProviders(session: WalletSession, timings: TxTimin
         }
       }
     },
-    getCoinPublicKey: () => identity.coinPublicKey,
-    getEncryptionPublicKey: () => identity.encryptionPublicKey,
-  });
-  const midnightProvider = createLedger9MidnightProvider(async (tx) => {
-    // How much of a block this transaction takes. The node refuses one that is
-    // too big ("would exhaust the block limits"), and the size that matters is
-    // the bytes of state it writes, not the bytes of the transaction.
-    try {
-      const params = LedgerParameters.initialParameters();
-      const cost = Transaction.deserialize('signature', 'proof', 'binding', tx.serialize()).cost(params);
-      timings.bytesWritten = Number(cost.bytesWritten);
-      log(`  writes ${cost.bytesWritten} bytes of state (a block allows ${/block_limits[\s\S]*?bytes_written:\s*(\d+)/.exec(params.toString())?.[1] ?? '50000'}), ${tx.serialize().length} bytes on the wire`);
-    } catch { /* a diagnostic only */ }
-    try {
-      const id = await facade.submitTransaction(facade.adoptTransaction(tx.serialize(), 'Finalized'));
-      timings.submittedAt = Date.now();
-      return id;
-    } catch (e) {
-      // Midnight.js replaces a submission failure with a generic message. The
-      // node's own reason (which rule the transaction broke) is what a person
-      // needs, and it holds no key material, so show the whole chain here.
-      for (let x: unknown = e, depth = 0; x && depth < 6; x = (x as { cause?: unknown }).cause, depth++) {
-        const err = x as { name?: string; message?: string; _tag?: string };
-        let extra = '';
-        try {
-          // Leave out the transaction bytes; keep every message and code.
-          extra = JSON.stringify(x, (k, v) => (
-            k === 'txData' || v instanceof Uint8Array ? undefined
-              : typeof v === 'bigint' ? v.toString()
-              : v instanceof Error ? { ...v, name: v.name, message: v.message, cause: (v as { cause?: unknown }).cause }
-              : v))?.slice(0, 3000) ?? '';
-        } catch { /* not serializable */ }
-        log(`  submit failed [${depth}] ${err._tag ?? err.name ?? typeof x}: ${err.message ?? String(x)} ${extra}`);
+    async submit(serialized) {
+      // How much of a block this transaction takes. The node refuses one that is
+      // too big ("would exhaust the block limits"), and the size that matters is
+      // the bytes of state it writes, not the bytes of the transaction.
+      try {
+        const params = LedgerParameters.initialParameters();
+        const cost = Transaction.deserialize('signature', 'proof', 'binding', serialized).cost(params);
+        timings.bytesWritten = Number(cost.bytesWritten);
+        log(`  writes ${cost.bytesWritten} bytes of state (a block allows ${/block_limits[\s\S]*?bytes_written:\s*(\d+)/.exec(params.toString())?.[1] ?? '50000'}), ${serialized.length} bytes on the wire`);
+      } catch { /* a diagnostic only */ }
+      try {
+        const id = await facade.submitTransaction(facade.adoptTransaction(serialized, 'Finalized'));
+        timings.submittedAt = Date.now();
+        return id;
+      } catch (e) {
+        // Midnight.js replaces a submission failure with a generic message. The
+        // node's own reason (which rule the transaction broke) is what a person
+        // needs, and it holds no key material, so show the whole chain here.
+        for (let x: unknown = e, depth = 0; x && depth < 6; x = (x as { cause?: unknown }).cause, depth++) {
+          const err = x as { name?: string; message?: string; _tag?: string };
+          let extra = '';
+          try {
+            // Leave out the transaction bytes; keep every message and code.
+            extra = JSON.stringify(x, (k, v) => (
+              k === 'txData' || v instanceof Uint8Array ? undefined
+                : typeof v === 'bigint' ? v.toString()
+                : v instanceof Error ? { ...v, name: v.name, message: v.message, cause: (v as { cause?: unknown }).cause }
+                : v))?.slice(0, 3000) ?? '';
+          } catch { /* not serializable */ }
+          log(`  submit failed [${depth}] ${err._tag ?? err.name ?? typeof x}: ${err.message ?? String(x)} ${extra}`);
+        }
+        log(`  transaction size ${serialized.length} bytes`);
+        throw e;
       }
-      log(`  transaction size ${tx.serialize().length} bytes`);
-      throw e;
-    }
+    },
+  };
+}
+
+/** The two providers Midnight.js needs from a wallet. */
+export function midnightWalletProviders(session: WalletSession, timings: TxTimings, log: Log = () => {}): { walletProvider: WalletProvider; midnightProvider: MidnightProvider } {
+  const txs = walletTransactions(session, timings, log);
+  const walletProvider = createLedger9WalletProvider({
+    balanceTx: (tx, ttl) => txs.balance(tx.serialize(), ttl),
+    getCoinPublicKey: () => session.identity.coinPublicKey,
+    getEncryptionPublicKey: () => session.identity.encryptionPublicKey,
   });
+  const midnightProvider = createLedger9MidnightProvider((tx) => txs.submit(tx.serialize()));
   return { walletProvider, midnightProvider };
 }
 

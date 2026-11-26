@@ -16,11 +16,16 @@ owner has had a chance to veto.
 
 > **Status (Wave 3, in progress):** the vault contract, SDK and web app are built and tested. That
 > covers passkey and wallet check-ins, multi-heir wills with tranches and backup heirs, hidden k-of-n
-> guardians, the attestation trigger and the cross-contract hook: 374 tests, every contract call
+> guardians, the attestation trigger and the cross-contract hook: 419 tests, every contract call
 > checked against its ZK circuit, plus browser tests that check in with Chrome's real WebAuthn. On
 > 26 November 2026 the vault ran end to end on **Preprod**: deploy, both kinds of check-in, release,
 > a claim and the cross-contract withdrawal ([results](preprod/results/v14-preprod.md), vault
-> `4f3b21e1c811…`). See [What changed this Wave](#what-changed-this-wave).
+> `4f3b21e1c811…`). The web app now has a **live mode** (`#/app`) in which a person creates and uses
+> their own vault on Preview or Preprod through the Lace wallet
+> ([how to try it](#try-it-on-a-test-network)); its store and chain code ran that whole story on
+> Preview with a wallet built from a seed. It has not yet been run with the Lace extension itself,
+> and a check-in from a browser is not yet proven on a network.
+> See [What changed this Wave](#what-changed-this-wave).
 > Demo video and deck: *coming*.
 
 ## Judge quickstart
@@ -87,6 +92,61 @@ generation and network fees are skipped.
 
 `npm run compile:full` also generates the proving keys (several minutes; sizes in
 [docs/VALIDATION.md](docs/VALIDATION.md)).
+
+### Try it on a test network
+
+Live mode is the same vault on a real network, used through your own wallet:
+**http://localhost:5173/#/app**. There is no cast and no clock to move: the heirs and guardians are
+the ones you type in, time is real, and every transaction is proven on your machine and paid for by
+your wallet. It works on Midnight **Preview** or **Preprod**, whichever your wallet is on. Preview is
+the quicker one to start on: a new wallet syncs there in minutes.
+
+What you need:
+
+| Thing | Why |
+|---|---|
+| Chrome with the [Lace wallet](https://www.lace.io/), set to Midnight Preview or Preprod | It pays the fees and signs. The app reads the network and its service addresses from the wallet |
+| tNIGHT from a faucet ([Preview](https://faucet.preview.midnight.network/), [Preprod](https://midnight-tmnight-preprod.nethermind.dev/)), with "Generate tDUST" turned on in Lace | Fees are paid in DUST, which tNIGHT generates over time. Creating a vault takes about 30 DUST (about 12 minutes of generation from 5,000 tNIGHT); any other action takes under 1 |
+| A proof server on your machine, in Docker with at least 8 GB of memory | Proofs are made locally, so secrets never leave your computer |
+| The proving keys: `npm run compile:full` (about 4 minutes, 2.7 GB) | The app serves them to itself; a check-in's key is 448 MB and is downloaded once, then kept by the browser |
+
+```bash
+npm run compile && npm run compile:full   # in this order; `npm run compile` alone deletes the keys
+docker run -d --name proof-server -p 127.0.0.1:6300:6300 midnightntwrk/proof-server:9.0.2
+npm run dev                               # then open http://localhost:5173/#/app
+```
+
+1. **Connect Lace.** The bar under the header names the network and shows your tNIGHT and DUST.
+2. **Create a vault**: your name, a passkey, your heirs and their shares, guardians if you want
+   them, and the timers. To see the whole life of a vault in one sitting, choose **Trying it out, in
+   minutes** on the timers step.
+3. **Seal the will.** Lace asks you to approve **eight transactions** over about three minutes: the
+   vault is too large for one block, so it is created with the rules it needs first and the rest are
+   added one at a time ([D19](docs/DECISIONS.md)). If you close the tab part-way, the page continues
+   from where it stopped.
+4. **Save a backup file** (the Backup button). Everything private is kept only in your browser.
+5. **Add tNIGHT** to the vault, and check in with **I'm alive**.
+6. Under **Invitations to send**, copy an heir's link. Open it in another browser profile that has
+   Lace (the same wallet will do for a test). That browser now knows only what the invitation holds.
+7. Let the check-in deadline pass. In the heir's browser: **Start the switch**, wait out the
+   challenge window, **Release the will**, then **Claim** to that wallet.
+
+**What has and has not been run** ([docs/VALIDATION.md](docs/VALIDATION.md#live-mode-on-a-network-2026-11-26)):
+
+- `npm run live:e2e` drove the app's own live store and live chain through this whole story on
+  **Preview**: 14 transactions, with a wallet built from a seed in place of Lace
+  ([results](preprod/results/live-app-preview.md)).
+- In a real browser on Preview, with a stand-in for the extension answered by that same wallet, the
+  screens created a vault (eight transactions) and made a deposit. The first check-in then crashed
+  the tab: Midnight.js's proof client holds the 448 MB proving key in memory several times over.
+  The app now has its own proof client that never holds it, tested offline byte for byte. **It has
+  not yet made a proof on a network**, so a check-in from a browser is unproven.
+- The live code has **not been run on Preprod** (the contract itself has, from the script), and
+  **not with the Lace extension**, which our tooling cannot click; that path is written from the
+  DApp connector's published types.
+
+Passkeys work at `http://localhost:5173` only, so live mode is a localhost experience for now.
+Limits: [docs/ROADMAP.md](docs/ROADMAP.md#live-mode-what-it-does-not-do-yet).
 
 ## How it works
 
@@ -240,8 +300,10 @@ Design decisions: [docs/DECISIONS.md](docs/DECISIONS.md). Error catalogue: [docs
 
 ## Roadmap
 
-1. Live mode in the app: the same flow as the Preprod run, with Lace and a real passkey.
-   Then giving up the contract's maintenance key after deployment ([D19](docs/DECISIONS.md)).
+1. Live mode in the app is built, and its code has run end to end on Preview with a wallet from a
+   seed ([how to try it](#try-it-on-a-test-network)). Next: a check-in from a browser and a run on
+   Preprod, a first run with the Lace extension itself, will and guardian changes in live mode, and giving up the contract's maintenance key
+   after deployment ([D19](docs/DECISIONS.md)).
 2. In the app: writing a will from scratch, and heirs creating their own keys on their own devices.
 3. A recovery that can outlast a deadline, and owner-signed rotation of a single lost key
    ([D18](docs/DECISIONS.md)).
@@ -266,7 +328,12 @@ Milestones and status: [docs/ROADMAP.md](docs/ROADMAP.md). Customers, go-to-mark
   miss, a notice to heirs when the will changes, and a privacy
   lens, in the Obsidian design, with a landing page whose 3D point field changes shape as you scroll. Dark and light themes,
   works on phones.
-- 374 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
+- Live mode (`#/app`): the same vault on Midnight Preview or Preprod through the Lace wallet, with
+  the owner's own heirs and guardians, real time, a deployment in eight resumable transactions,
+  invitations that let an heir claim and a guardian vote from their own browser, passphrase-locked
+  backups, and a plain message for everything that can go wrong. Its store and chain code ran end
+  to end on Preview with a wallet from a seed (`npm run live:e2e`).
+- 419 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
   CI on every push.
 - Docs: architecture, privacy (every field and transaction), a threat model mapping each threat to
   the test that covers it, testing, roadmap, business and a judges' quickstart. Details: [docs/WAVES.md](docs/WAVES.md).

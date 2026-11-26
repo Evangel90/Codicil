@@ -178,8 +178,19 @@ const clock = (s: number) => {
   return `${String(m).padStart(2, '0')}:${(s - m * 60).toFixed(1).padStart(4, '0')}`;
 };
 
+/**
+ * What the progress sheet draws. The demo's transactions and the live app's
+ * have this shape in common; the live app adds what to do when one fails.
+ */
+export interface SheetTx extends Omit<Tx, 'stages'> {
+  stages: { id: string; label: string; detail: string; skipped?: boolean; tag?: string }[];
+  problem?: { title: string; command?: string; link?: { label: string; href: string }; retry: boolean };
+}
+
 /** Glass progress sheet for every action: stages, timings, and the outcome. */
-export function TxSheet({ tx }: { tx?: Tx }) {
+export function TxSheet({ tx, onDismiss = () => demo.dismissTx(), onRetry = () => void demo.retry() }: {
+  tx?: SheetTx; onDismiss?: () => void; onRetry?: () => void;
+}) {
   const [, tick] = useState(0);
   useEffect(() => {
     if (tx?.status !== 'running') return;
@@ -188,15 +199,15 @@ export function TxSheet({ tx }: { tx?: Tx }) {
   }, [tx?.status]);
   useEffect(() => {
     if (!tx || tx.status === 'running') return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') demo.dismissTx(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onDismiss(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [tx]);
+  }, [tx, onDismiss]);
   if (!tx) return null;
   const elapsed = ((tx.endedAt ?? performance.now()) - tx.startedAt) / 1000;
   const failed = tx.status === 'error';
   return (
-    <div className="scrim" onClick={(e) => { if (e.target === e.currentTarget) demo.dismissTx(); }}>
+    <div className="scrim" onClick={(e) => { if (e.target === e.currentTarget) onDismiss(); }}>
       <div className="sheet glass" role="dialog" aria-modal="true" aria-labelledby="tx-title">
         <div className="sheet-head">
           <h2 id="tx-title">{tx.title}</h2>
@@ -230,19 +241,22 @@ export function TxSheet({ tx }: { tx?: Tx }) {
           <div className="sheet-result" role="status">
             <Icon d={ICONS.check} size={18} stroke={2} />
             <p>{tx.message}</p>
-            <button type="button" className="btn btn-primary btn-sm" onClick={() => demo.dismissTx()} autoFocus>Close</button>
+            <button type="button" className="btn btn-primary btn-sm" onClick={onDismiss} autoFocus>Close</button>
           </div>
         )}
         {failed && (
           <div className="err-row" role="status">
             <span className="mono err-tag">ERROR</span>
             <div className="err-body">
+              {tx.problem && <strong>{tx.problem.title}</strong>}
               <span>{tx.message}</span>
+              {tx.problem?.command && <code className="mono err-code">{tx.problem.command}</code>}
+              {tx.problem?.link && <a className="linkish" href={tx.problem.link.href} target="_blank" rel="noreferrer">{tx.problem.link.label}</a>}
               {tx.code && <span className="mono err-code">{tx.code}</span>}
             </div>
             <div className="err-actions">
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => void demo.retry()}>Try again</button>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => demo.dismissTx()} autoFocus>Close</button>
+              {tx.problem?.retry !== false && <button type="button" className="btn btn-secondary btn-sm" onClick={onRetry}>Try again</button>}
+              <button type="button" className="btn btn-ghost btn-sm" onClick={onDismiss} autoFocus>Close</button>
             </div>
           </div>
         )}
@@ -252,18 +266,19 @@ export function TxSheet({ tx }: { tx?: Tx }) {
 }
 
 /** Glass pill toast; auto-dismisses after 7 seconds. */
-export function Toast({ toast }: { toast?: ToastT }) {
+export function Toast({ toast, onDismiss = () => demo.dismissToast() }: { toast?: Pick<ToastT, 'id' | 'title'>; onDismiss?: () => void }) {
   useEffect(() => {
     if (!toast) return;
-    const id = setTimeout(() => demo.dismissToast(), 7000);
+    const id = setTimeout(onDismiss, 7000);
     return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toast]);
   if (!toast) return null;
   return (
     <div className="toast glass" role="status" key={toast.id}>
       <span className="toast-icon"><Icon d={ICONS.check} size={16} stroke={2} /></span>
       <span className="toast-text">{toast.title}</span>
-      <button type="button" className="icon-btn icon-btn-sm" aria-label="Dismiss" onClick={() => demo.dismissToast()}>
+      <button type="button" className="icon-btn icon-btn-sm" aria-label="Dismiss" onClick={onDismiss}>
         <Icon d={ICONS.close} size={14} stroke={1.8} />
       </button>
     </div>

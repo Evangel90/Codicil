@@ -22,7 +22,7 @@ import {
 } from '@midnight-ntwrk/compact-runtime';
 import { unshieldedToken } from '@midnight-ntwrk/midnight-js-protocol/v9';
 import { deployContract, findDeployedContract, getUnshieldedBalances } from '@midnight-ntwrk/midnight-js/contracts';
-import { deployInStages, insertVerifierKeys } from './staged-deploy.js';
+import { deployInStages, insertVerifierKeys, VAULT_DEFER_ORDER } from './staged-deploy.js';
 import type { PublicDataProvider } from '@midnight-ntwrk/midnight-js/types';
 import * as Rx from 'rxjs';
 import { ledger as vaultLedger, Phase, pureCircuits as vaultPure, type Ledger as VaultLedger, type VaultConfig } from '@codicil/contracts/vault';
@@ -201,15 +201,7 @@ interface TxPublic {
   fees: { paidFees: string; estimatedFees: string };
 }
 
-/**
- * If the vault's deployment is too big for one block, the verifier keys of
- * these circuits are left out of it and inserted afterwards, in this order:
- * the ones a first check-in, release and claim do not need come first.
- */
-export const VAULT_DEFER_ORDER = [
-  'updateSettingsEd25519', 'updateSettingsPasskey', 'startRecovery', 'finishRecovery',
-  'updateWillEd25519', 'updateWillPasskey', 'triggerAttestation', 'guardianAttest', 'claimAsBackup',
-] as const;
+export { VAULT_DEFER_ORDER };
 
 type StepOutcome =
   | { kind: 'tx'; tx: TxPublic; circuits?: string[]; notes?: string[] }

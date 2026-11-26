@@ -211,7 +211,7 @@ function storyTime(anchors: HTMLElement[]): number {
 // how it is built. The technical account lives in the docs the footer links to.
 
 /** Where "Create your vault" goes. */
-const APP = '#/demo';
+const APP = '#/app';
 const DEMO = '#/demo';
 
 /** What people do today, and how each goes wrong. */

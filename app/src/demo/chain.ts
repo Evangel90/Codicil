@@ -31,6 +31,7 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import * as vaultModule from '@codicil/contracts/vault';
 import { ledger, type Ledger, type VaultConfig } from '@codicil/contracts/vault';
 import { createWitnesses, vaultEventName, type CodicilPrivateState } from '@codicil/sdk';
+import type { CallOutcome, CircuitRun, CreateVaultOptions, VaultChain, VaultHost } from '../chain/types.js';
 import { installBufferShim } from './buffer-shim.js';
 import { VERIFIER_KEY_TEMPLATE_BASE64 } from './verifier-template.js';
 
@@ -44,20 +45,7 @@ export type CompiledContract = Omit<Module, 'Contract'> & {
   readonly Contract: new (witnesses: any) => any;
 };
 
-export interface CircuitRun {
-  address: ContractAddress;
-  circuitId: string;
-}
-
-export interface CallOutcome {
-  /** Values the transaction would publish, besides the proof. */
-  publicTranscript: unknown;
-  events: { name: string }[];
-  /** Unshielded payouts requested by this call: [user address hex, amount]. */
-  payouts: [string, bigint][];
-  /** Every circuit this transaction ran, in the order they finished: callees first. */
-  trace: CircuitRun[];
-}
+export type { CallOutcome, CircuitRun };
 
 const VK_TEMPLATE = Uint8Array.from(atob(VERIFIER_KEY_TEMPLATE_BASE64), (c) => c.charCodeAt(0));
 
@@ -73,9 +61,10 @@ function verifierKeyFor(name: string, circuitId: string): Uint8Array {
   return key;
 }
 
-export class DemoChain implements ContractStateProvider, ContractModuleProvider {
+export class DemoChain implements VaultChain, ContractStateProvider, ContractModuleProvider {
   private readonly states = new Map<ContractAddress, ContractState>();
   private readonly modules = new Map<ContractAddress, CompiledContract>();
+  private readonly listeners = new Set<() => void>();
   private vault: ContractAddress = '';
   /** Demo clock, unix seconds. */
   now: number;
@@ -109,6 +98,18 @@ export class DemoChain implements ContractStateProvider, ContractModuleProvider 
 
   advance(seconds: number): void {
     this.now += Math.max(0, Math.floor(seconds));
+    // Time is part of what a watcher sees: deadlines pass without any transaction.
+    this.listeners.forEach((fn) => fn());
+  }
+
+  /** The in-memory ledger is always current, so there is nothing to fetch. */
+  async refresh(): Promise<Ledger> {
+    return this.ledger;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
   }
 
   // ─── Providers for cross-contract calls ───────────────────────────────────
@@ -189,6 +190,7 @@ export class DemoChain implements ContractStateProvider, ContractModuleProvider 
     for (const [[, to], amount] of context.callContext.currentQueryContext.effects.claimedUnshieldedSpends) {
       if (to.tag === 'user') payouts.push([to.address, amount]);
     }
+    this.listeners.forEach((fn) => fn());
     return {
       publicTranscript: trace[trace.length - 1]?.publicTranscript,
       events: context.events.map((e) => ({ name: vaultEventName(e as { data: unknown }) ?? 'unknown' })),
@@ -196,4 +198,52 @@ export class DemoChain implements ContractStateProvider, ContractModuleProvider 
       trace: trace.map((t) => ({ address: t.contractAddress, circuitId: t.circuitId })),
     };
   }
+}
+
+/**
+ * The in-memory chain as a place vaults live: what the live store runs on in
+ * its unit tests, with `now` set by the test instead of a wall clock.
+ */
+export class MemoryHost implements VaultHost {
+  readonly kind = 'memory' as const;
+  readonly networkId = 'memory';
+  readonly tokenColor: Uint8Array;
+  private readonly vaults = new Map<string, DemoChain>();
+  private clock: number;
+
+  constructor(now: number, tokenColor: Uint8Array = new Uint8Array(32).fill(7)) {
+    this.clock = now;
+    this.tokenColor = tokenColor;
+  }
+
+  get now(): number {
+    return this.clock;
+  }
+
+  /** Move this host's clock, and every vault on it, forward. */
+  advance(seconds: number): void {
+    const by = Math.max(0, Math.floor(seconds));
+    this.clock += by;
+    for (const chain of this.vaults.values()) chain.advance(by);
+  }
+
+  async createVault(config: VaultConfig, options: CreateVaultOptions): Promise<DemoChain> {
+    const resumed = options.resume && this.vaults.get(options.resume.address);
+    if (resumed) return resumed;
+    const chain = await DemoChain.deploy(config, this.clock);
+    this.vaults.set(chain.address, chain);
+    options.onStage?.({ step: 'deploy', total: 1 });
+    // One step, no maintenance key: the in-memory ledger has no block limit.
+    await options.onRecord({ address: chain.address, maintenanceKey: '', deferred: [], inserted: [], complete: true });
+    return chain;
+  }
+
+  async openVault(address: string): Promise<DemoChain> {
+    const chain = this.vaults.get(address);
+    if (!chain) throw new Error(`there is no vault at ${address}`);
+    return chain;
+  }
+
+  /** Nothing can stand in the way of a call here: no proof server, no wallet. */
+  async preflight(): Promise<void> {}
 }

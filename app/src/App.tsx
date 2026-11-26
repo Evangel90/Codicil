@@ -7,8 +7,13 @@ import { useTheme } from './theme.js';
 
 // The demo pulls in the contract runtime (WASM); load it only when opened.
 const Demo = lazy(() => import('./views/Demo.js').then((m) => ({ default: m.Demo })));
+// The live app adds Midnight.js and the ledger on top of that.
+const LiveApp = lazy(() => import('./views/live/LiveApp.js').then((m) => ({ default: m.LiveApp })));
 
-const route = () => (window.location.hash.startsWith('#/demo') ? 'demo' : 'home');
+const route = () => {
+  const hash = window.location.hash;
+  return hash.startsWith('#/demo') ? 'demo' : /^#\/app(\/|$)/.test(hash) ? 'app' : 'home';
+};
 
 function Loading() {
   return (
@@ -32,6 +37,10 @@ export function App() {
       {page === 'demo' ? (
         <Suspense fallback={<Loading />}>
           <Demo />
+        </Suspense>
+      ) : page === 'app' ? (
+        <Suspense fallback={<Loading />}>
+          <LiveApp />
         </Suspense>
       ) : <Landing />}
     </div>
