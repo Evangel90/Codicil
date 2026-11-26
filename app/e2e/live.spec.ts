@@ -15,8 +15,8 @@ import { bech32m } from '@scure/base';
 import { expect, test, type Page } from '@playwright/test';
 
 /**
- * Set to use the real Preview indexer and the proof server on this machine,
- * which takes the owner test one step further: the vault's deployment is built
+ * Set to use the real Preview indexer, which takes the owner test one step
+ * further: the vault's deployment is built
  * and offered to the wallet, which declines it. Without it the test stops
  * where the app first needs the network, and checks that message instead.
  */
@@ -64,8 +64,9 @@ async function withWallet(page: Page, mock: Mock) {
       },
     };
   }, { mock, address: key('addr', mock.network, 0x21), cpk: key('shield-cpk', mock.network, 0x22), epk: key('shield-epk', mock.network, 0x23), indexer: INDEXER });
-  // The proof server is asked whether it is there. Answer for it, so the test needs no Docker.
-  if (!REAL_PREVIEW) await page.route('http://localhost:6300/version', (route) => route.fulfill({ status: 200, contentType: 'text/plain', headers: { 'access-control-allow-origin': '*' }, body: '9.0.2' }));
+  // The proof server is asked whether it is there. Answer for it, so the test needs no Docker:
+  // creating a vault makes no proof (a deployment carries verifier keys, not proofs).
+  await page.route('http://localhost:6300/version', (route) => route.fulfill({ status: 200, contentType: 'text/plain', headers: { 'access-control-allow-origin': '*' }, body: '9.0.2' }));
 }
 
 async function addVirtualPasskey(page: Page) {
