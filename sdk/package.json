@@ -6,7 +6,8 @@
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./staged-deploy": "./src/staged-deploy.ts"
   },
   "scripts": {
     "test": "vitest run",
@@ -15,6 +16,8 @@
   "dependencies": {
     "@codicil/contracts": "0.1.0",
     "@midnight-ntwrk/compact-runtime": "0.21.0",
+    "@midnight-ntwrk/midnight-js": "5.0.1",
+    "@midnight-ntwrk/midnight-js-protocol": "5.0.1",
     "@noble/curves": "2.4.0",
     "@noble/hashes": "2.4.0"
   }
