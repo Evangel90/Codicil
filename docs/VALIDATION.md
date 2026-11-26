@@ -27,6 +27,7 @@ simulator tests in `test/`.
 | V13 | Events visible | **PASS** (simulator 2026-11-23; read from the Preprod indexer 2026-11-26, V14) | 2026-11-26 |
 | V14 | End-to-end on Preprod | **PASS** on Preprod and Preview: 10 transactions each. The vault has to deploy in stages ([D19](DECISIONS.md)) | 2026-11-26 |
 | V15 | Curve25519 Montgomery ⇄ Edwards | **PASS** | 2026-11-23 |
+| Live | The web app's live mode on a network | **PARTLY**: its store and chain code ran end to end on Preview from a script. In a browser a vault was created and funded, then the first check-in crashed the tab; the fix is not yet run on a network. Not run on Preprod or with Lace ([below](#live-mode-on-a-network-2026-11-26)) | 2026-11-26 |
 
 ---
 
@@ -363,6 +364,78 @@ Still unknown until the real run: proving time and memory on the proof server (t
 k = 18 proof at 17 s and 5 GiB on an Apple M4), fees, whether the wallet balances and signs these
 transactions as built, the first wallet sync on Preprod (the docs report about three and a half
 hours), and what the indexer returns for the release event.
+
+## Live mode on a network (2026-11-26)
+
+The web app's live mode (`#/app`, [ARCHITECTURE.md](ARCHITECTURE.md#two-chains-and-the-wallet-boundary))
+was run on a real network three ways the same day. Stated as it happened, including what failed.
+
+**1. The live store and live chain, from a script, on Preview: PASS.** `npm run live:e2e` drives the
+app's own code (not a copy) with the test wallet built from its seed in place of Lace, and a
+software key in the passkey format in place of Face ID. Three stores stood for three people's
+browsers. 14 transactions, all `SucceedEntirely`, in 13 minutes: a staged deployment (deploy with
+nine circuits, then seven added), a deposit, **a guardian's vote** (`guardianAttest`, a circuit no
+earlier run had called on a network), a passkey check-in (65 s, of which 27 s proving), the timeout,
+the release and an heir's claim of 6 tNIGHT. A backup of the owner's store then opened in an empty
+store and read the vault as released. Vault `9a65aa34f18a79fa6c8974fcea355b4d9c2947dc7ffcfc37a7dda5169de091cc`;
+every hash is in [`preprod/results/live-app-preview.md`](../preprod/results/live-app-preview.md).
+The circuit keys were fetched over HTTP, as a browser fetches them.
+
+**2. The screens, in a real browser, on Preview: PARTLY, then a crash.** A Playwright test
+([`app/e2e/live-network.spec.ts`](../app/e2e/live-network.spec.ts)) clicked through `#/app` in
+headless Chromium. The Lace extension was replaced by a stand-in under `window.midnight` with the
+DApp connector's shape, which handed every request to the same test wallet; the passkey was a
+Chrome virtual authenticator. What worked, through the screens: connect, the wizard with a WebAuthn
+passkey, **the eight-transaction deployment in 165 seconds**, and a deposit of 10 tNIGHT. Then the
+first check-in **crashed the tab**, and the proof server's container was killed for lack of memory
+at the same moment (Docker reported exit code 137).
+
+- **Cause, as far as it could be established.** A passkey check-in's proving key is 448 MB, and the
+  proof server is sent it with the request. Midnight.js's HTTP proof client fetches the key once to
+  check the call and again to prove it, copies it into the ledger's WebAssembly memory, copies the
+  finished request out, and copies it once more before sending: three to four gigabytes in one tab.
+  The app's own key cache added two more copies while saving the download. Whether the tab or the
+  proof server failed first could not be told afterwards; on one laptop they compete for the same
+  memory.
+- **Fix.** The app now has its own client for the proof server
+  ([`app/src/live/prover.ts`](../app/src/live/prover.ts)). It sends the same bytes, with the key as
+  a Blob that points at the browser's cached copy, so the key is never an array in the page; the
+  download goes from the network into Cache Storage as a stream.
+- **Evidence for the fix, all without a network.** The request body built by hand is identical,
+  byte for byte, to the ledger's `createProvingPayload` for key sizes on both sides of every length
+  boundary, on a real proof preimage (unit tests). In Chromium with an ordinary profile, the real
+  448 MB key went from the app's server into Cache Storage and out again inside a request body, all
+  469,862,216 bytes arriving, with the page's JavaScript heap at 5 MB throughout. In a private
+  window Chromium refuses to cache a file that large; the app then holds the key in memory once,
+  which was also tried and survived.
+- **Not done.** No proof has been made on a network with the new client, from a browser or from the
+  script. The proof server could not be restarted in the session that found this. So a check-in
+  from a browser is unproven, and run 1 above was made with Midnight.js's client, not this one.
+
+**3. Preprod: not run.** The live code has only been run on Preview. The contract itself ran on
+Preprod (above). Nothing in the live code is specific to a network: it takes the network and its
+services from the wallet.
+
+**Never run at all:** the Lace extension. Everything behind the wallet boundary ran; the adapter
+for the real extension ([`app/src/live/lace.ts`](../app/src/live/lace.ts)) is written from the DApp
+connector 4.1.0 types and exercised only against stand-ins with that shape.
+
+**To finish this gate:** start the proof server again (give Docker more than 8 GB if you can), then
+`MIDNIGHT_NETWORK=preview npm run live:e2e -- --fresh`, the same with `MIDNIGHT_NETWORK=preprod`,
+and `E2E_LIVE_NETWORK=preview E2E_PORT=5199 npx playwright test e2e/live-network.spec.ts` from
+`app/` after `npm run build`.
+
+### What these runs found
+
+1. **A browser tab cannot afford Midnight.js's proof client for a large circuit** (above).
+2. **A private window will not cache a 448 MB key.** The app falls back to memory.
+3. **A network's clock trails the browser's.** The app waits 30 seconds past a deadline before
+   offering what the deadline unlocks, and stamps a guardian's vote 30 seconds in the past; with
+   that margin `triggerTimeout`, `finalizeRelease` and `guardianAttest` were accepted first time.
+4. **The vault accepts a passkey from any `http://localhost:NNNN`.** The circuit pins the relying
+   party (`localhost`) and the origin's length, not the port. Useful for tests; worth knowing.
+5. **The generated `ledger()` needs the Compact runtime's own `ContractState`**, not the one
+   Midnight.js re-exports from the ledger, even though both read the same bytes.
 
 ## V15: Curve25519 conversion
 

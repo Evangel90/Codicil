@@ -39,7 +39,11 @@ flowchart TB
 | [`contracts/src/inheritable_escrow.compact`](../contracts/src/inheritable_escrow.compact) | Example integrator using a cross-contract call |
 | [`contracts/test/`](../contracts/test) | Simulator tests; every successful call is also checked against the ZK circuit |
 | [`sdk/src/`](../sdk/src) | Keys, commitments, will builder, witnesses, signing, letters, error catalogue |
-| [`app/src/`](../app/src) | Web app: landing page, setup wizard, owner / heir / guardian / public views, Privacy Lens |
+| [`sdk/src/staged-deploy.ts`](../sdk/src/staged-deploy.ts) | Deploying the vault in stages, resumably; shared by the app and the Preprod script ([D19](DECISIONS.md)) |
+| [`app/src/`](../app/src) | Web app: landing page, the guided demo, and live mode on a test network |
+| [`app/src/chain/`](../app/src/chain) | The chain boundary both chains implement |
+| [`app/src/live/`](../app/src/live) | Live mode: the live chain, the wallet boundary and Lace, the live store, records and backups |
+| [`app/scripts/`](../app/scripts) | `npm run live:e2e`: live mode end to end on a real network with a wallet from a seed |
 | [`preprod/`](../preprod) | Gate V14: the vault end to end on a real network with Midnight.js and the wallet SDK ([PREPROD.md](PREPROD.md)) |
 | [`codicil-spike/`](../codicil-spike) | Phase 0 validation spike, kept as a record ([VALIDATION.md](VALIDATION.md)) |
 | [`tools/webauthn-capture/`](../tools/webauthn-capture) | Page that captured the real passkey and wallet signatures used as test fixtures |
@@ -257,6 +261,9 @@ works on phones).
 - **Demo** (`#/demo`): an eight-step setup wizard, then the vault from four points of view: the
   owner (Amara), an heir (Ada, Ben, Cleo, Kofi), a guardian, and "Anyone" (the public inspector).
   The owner has three more tabs: Will, Settings (guardians, attestor and the recovery key) and Savings.
+- **Live mode** (`#/app`): a real vault on a Midnight test network, through the person's own Lace
+  wallet. Three ways in: create a vault, open an invitation as an heir or a guardian, or restore a
+  backup file. See [Two chains and the wallet boundary](#two-chains-and-the-wallet-boundary).
 
 ### What the demo runs
 
@@ -292,11 +299,78 @@ Pure helpers keep the views simple and testable:
 [`commands.ts`](../app/src/demo/commands.ts) (the ⌘K palette),
 [`ics.ts`](../app/src/demo/ics.ts) (calendar reminders made on the device).
 
-### From demo to network
+### Two chains and the wallet boundary
 
-Going live replaces the in-memory chain with Midnight.js providers (wallet, proof server, indexer)
-and keeps the SDK, witnesses and views. The same step has been done from the command line: gate V14
-([VALIDATION.md](VALIDATION.md)) ran the vault on Preprod, deploying it in stages because it does
-not fit one block ([D19](DECISIONS.md)). The app's own network mode is next on the
-[roadmap](ROADMAP.md) and can reuse that provider wiring
-([`preprod/src/providers.ts`](../preprod/src/providers.ts), [PREPROD.md](PREPROD.md)).
+The app runs the same contract in two places, and one small interface sits between the app and
+whichever it is on ([`app/src/chain/types.ts`](../app/src/chain/types.ts)):
+
+```
+VaultChain   one vault: its address, its public ledger, the chain's time,
+             call(circuit, privateState, ...args), refresh(), subscribe()
+VaultHost    where vaults live: createVault(config, { resume, onRecord }), openVault(address)
+```
+
+| | In-memory chain (`#/demo`) | Live chain (`#/app`) |
+|---|---|---|
+| Code | [`demo/chain.ts`](../app/src/demo/chain.ts) | [`live/live-chain.ts`](../app/src/live/live-chain.ts) |
+| Public state | A map in this tab | The network's indexer, read again every 12 s while a vault is open |
+| A call | The circuit runs once, in WebAssembly | The circuit runs, a proof server proves it, the wallet pays the fee and signs, a node includes it |
+| Time | A clock the demo moves | Real time. The app waits 30 s past a deadline before offering what the deadline unlocks, because a network's clock trails the browser's |
+| Creating a vault | One step | Eight transactions, resumable ([D19](DECISIONS.md)) |
+
+A store written against the interface does not know which one it has. The live store
+([`live/store.ts`](../app/src/live/store.ts)) is unit-tested on the in-memory chain and runs
+unchanged on a network. It is a separate store from the demo's because a real person differs from a
+guided tour: the heirs and guardians are the ones the owner types in, there is no "act as" and no
+clock control, and every secret is in a record that survives a reload.
+
+**The live chain** is Midnight.js 5.0.1: the indexer public-data provider,
+a client for the proof server, and the wallet for balancing and submitting. The circuit artifacts are fetched over HTTP from
+`/zk/codicil_vault/` ([`zk-server.ts`](../app/zk-server.ts) serves `contracts/managed/codicil_vault`
+in the dev and preview servers). A proving key is up to 448 MB, so downloads report progress and
+finished ones are kept in the browser's Cache Storage until the file changes
+([`live/zk-artifacts.ts`](../app/src/live/zk-artifacts.ts)). Private state is not kept by
+Midnight.js: the store hands each call exactly the secrets it needs.
+
+**Proofs** are requested by the app's own client for the proof server
+([`live/prover.ts`](../app/src/live/prover.ts)), not Midnight.js's. The proof server is sent the
+circuit's proving key with every request, and Midnight.js's client fetches the key twice per proof,
+copies it into the ledger's WebAssembly memory and back out, and copies the request once more:
+several times 448 MB for a passkey check-in, which a browser tab did not survive. The app's client
+sends the same bytes with the key as a Blob that points at the browser's cached copy, so the key
+never becomes an array in the page. The body is built around the key by hand and checked byte for
+byte against the ledger's `createProvingPayload` in the tests. It has not yet made a proof on a
+network ([VALIDATION.md](VALIDATION.md#live-mode-on-a-network-2026-11-26)).
+
+**The wallet boundary** ([`live/wallet.ts`](../app/src/live/wallet.ts)) is five things: which
+services to use, the person's address, their balances, "balance and sign this transaction", and
+"submit it". Transactions cross as bytes. There are two implementations:
+
+- [`live/lace.ts`](../app/src/live/lace.ts): the Lace extension through the Midnight DApp connector
+  (API 4.1.0, `window.midnight`). The network id and the indexer, node and proof-server addresses
+  come from the wallet's own configuration, so the app holds no endpoint and no provider token, and
+  works on whichever test network the wallet is on (Preview or Preprod).
+- [`scripts/headless-wallet.ts`](../app/scripts/headless-wallet.ts): a wallet built from a seed with
+  the wallet SDK, sharing its code with the Preprod script. `npm run live:e2e` uses it to drive the
+  live store and the live chain end to end on a real network with nobody clicking.
+
+**What the browser keeps** ([`live/records.ts`](../app/src/live/records.ts)): one record per vault
+the person owns, inherits from or guards, in local storage, tagged with its network. An owner's
+record holds the will and its salts, the heirs' keys, the guardians' secrets and the vault's
+maintenance key. Invitations (one line of text, or a link whose fragment carries it) hand an heir or
+a guardian what they need to act from their own browser. A backup file holds every record,
+encrypted with a key derived from a passphrase (PBKDF2-SHA-256, AES-256-GCM). A device passkey is
+never in a record or a backup: it stays in the authenticator.
+
+**Creating a vault in stages.** The record, with every key, is saved before anything is sent. The
+vault's address and maintenance key are saved before the deploy transaction is sent (the address is
+known in advance). After an interruption the app asks the indexer which circuits the contract has
+and adds only the missing ones (`missingCircuits` in
+[`sdk/src/staged-deploy.ts`](../sdk/src/staged-deploy.ts), which the Preprod script shares).
+
+**When something goes wrong**, [`live/problems.ts`](../app/src/live/problems.ts) turns it into a
+title, what happened and what to do: no wallet, a wallet on another network, no tNIGHT (with the
+right faucet), no DUST yet, no proof server (with the command), a declined approval, a transaction a
+node refused (with the node's own reason), a dropped connection.
+
+Limits of live mode today are listed in the [roadmap](ROADMAP.md#live-mode-what-it-does-not-do-yet).

@@ -17,9 +17,10 @@ npm run e2e          # builds the app and runs Playwright in Chrome
 |---|---|---|---|
 | Contract simulator + ZK constraint checks | `npm test -w @codicil/contracts` | 186 | ~6 s |
 | SDK | `npm test -w @codicil/sdk` | 34 | ~1 s |
-| App logic (the demo store and helpers) | `npm test -w @codicil/app` | 66 | ~6 s |
+| App logic (the demo store, the live store and helpers) | `npm test -w @codicil/app` | 111 | ~15 s |
 | Network script, offline parts | `npm test -w @codicil/preprod` | 88 (one more when the proving keys are present) | ~3 s |
-| Browser end-to-end | `npm run e2e` | 4 | ~75 s |
+| Browser end-to-end | `npm run e2e` | 10 (one more, on a network, is opt-in) | ~90 s |
+| Live mode on a real network | `npm run live:e2e` | 14 transactions | ~13 min |
 | Full compile with proving keys | `npm run compile:full` | 16 circuits | several minutes |
 
 Property tests run 12 cases per property by default. Run more with `FC_RUNS=500 npm test -w @codicil/contracts`.
@@ -93,6 +94,29 @@ letter, older will, another vault, which key opens it).
   screen, the code shown on screen checked against the contract source, and the `Buffer` stand-in
   the browser needs.
 
+Live mode has two more files. They run the **live store** on the in-memory chain, which is the same
+store the app runs on a network: only the host behind the chain boundary differs
+([ARCHITECTURE.md](ARCHITECTURE.md#two-chains-and-the-wallet-boundary)).
+
+- [`live-store.test.ts`](../app/test/live-store.test.ts): three people as three stores with their
+  own storage. An owner seals a will with their own heirs and guardians; an heir and two guardians
+  open invitations; votes start the switch and a check-in cancels it; timeout, release, claims, a
+  backup heir who must wait and then may claim. What survives a reload; a vault on another network
+  is refused with the network's name. **A deployment interrupted after three of eight
+  transactions** keeps everything typed, says why it stopped, and continues in a new store from the
+  saved record. A missing proof server stops an action before anything is sent.
+- [`live-parts.test.ts`](../app/test/live-parts.test.ts): the pure parts. The chain boundary on the
+  in-memory chain; amounts and Bech32m addresses; records; **backups** (round trip into a clean
+  store, wrong passphrase, tampered file, nothing readable without the passphrase, merging);
+  invitations (inside a link or a sentence, and what is wrong with a bad one); the **Lace
+  connector** against a stand-in with the connector's shape (which wallet, which network, a decline
+  stops at once); circuit keys over HTTP (progress, kept until the file changes, "never built" told
+  apart from a dropped connection, a key handed over as the cached copy and never read into memory,
+  a cache that refuses it); **the request to the proof server**, built around a large key by hand
+  and compared byte for byte with the ledger's own `createProvingPayload` for key sizes on both
+  sides of every length boundary, on a real proof preimage; and **every message for what can go wrong**, including the
+  node's own reason for a refused transaction and that a provider token never reaches the screen.
+
 ## 4. Network script tests
 
 [`preprod/test/`](../preprod/test) covers the parts of the Preprod script ([PREPROD.md](PREPROD.md))
@@ -127,6 +151,34 @@ Privacy Lens show the grace length, "no release fee" and the cancelled recovery,
 vote is void, the removed guardian is refused, the new one votes → a recovery with the saved key
 creates a second passkey in the virtual authenticator → the delay is skipped and anyone finishes it
 → the old passkey is refused and the new one checks in.
+
+[`app/e2e/live.spec.ts`](../app/e2e/live.spec.ts) opens live mode with a stand-in for the Lace
+extension under `window.midnight`, shaped as the DApp connector 4.1.0 types describe. No wallet: it
+is told to install Lace. A wallet on another network, or with an old connector: told what to do. On
+Preview and on Preprod: the three ways in, the wizard with a real (virtual-authenticator) passkey,
+sealing, and what is saved across a reload; the backup file downloads. A wallet with no tokens is
+sent to the faucet for its network. These tests use no network, so they stop where the app first
+needs one. With `E2E_LIVE_PREVIEW=1` the owner test goes one step further: it builds the staged
+deployment in the browser and offers it to the wallet, which declines.
+
+[`app/e2e/live-network.spec.ts`](../app/e2e/live-network.spec.ts) is opt-in
+(`E2E_LIVE_NETWORK=preview`). It clicks through live mode in headless Chromium **on the real
+Preview network**: create a vault, deposit, check in with a WebAuthn passkey, open an heir's
+invitation in a second browser context, start the switch, release, claim. The stand-in wallet hands
+every request to the test wallet in the Node process, so the app's Lace adapter is exercised against
+a wallet that really balances, signs and submits. **It has not passed yet.** Its one run, on
+26 November 2026, created the vault and made the deposit through the screens and then lost the tab
+at the check-in ([VALIDATION.md](VALIDATION.md#live-mode-on-a-network-2026-11-26)); the cause is
+fixed in the code and the test has not been run again.
+
+`npm run live:e2e` ([`app/scripts/live-e2e.ts`](../app/scripts/live-e2e.ts)) needs no browser: it
+drives the live store and the live chain on a real network with the same test wallet, as three
+stores (owner, guardian, heir), and writes every transaction hash to `preprod/results/`. It is
+resumable. It ran on Preview on 26 November 2026
+([results](../preprod/results/live-app-preview.md)), before the proof client was rewritten.
+
+The suite runs on port 5173. If that port is taken, `E2E_PORT=5199 npm run e2e` uses another: the
+vault accepts a passkey from any `http://localhost:NNNN` origin of the same length.
 
 Run against your local Chrome with `PW_CHANNEL=chrome npm run e2e`. On failure CI uploads Playwright
 traces.

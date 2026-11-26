@@ -167,6 +167,21 @@ in exactly the formats the circuits verify, as the tests do. The proofs are real
 | You want to start over with a new vault | `npm run preprod:run -- --fresh` (the old run is set aside, not deleted) |
 | Lines from libraries are hidden and you want them | `CODICIL_DEBUG=1 npm run preprod:run` |
 
+## The web app's own code on a network
+
+`npm run live:e2e` does for the web app's live mode what `preprod:run` does for the contract. It
+drives the app's live store and live chain (the code behind `#/app`) through a vault's whole life on
+a real network, with this same test wallet in place of Lace: a staged deployment, a deposit, a
+guardian's vote, a passkey check-in, the timeout, the release and an heir's claim, as three separate
+stores for the three people. It needs the same setup as above, is resumable (`--fresh` starts a new
+vault), takes about 13 minutes, and writes `preprod/results/live-app-<network>.md`.
+
+```bash
+MIDNIGHT_NETWORK=preview npm run live:e2e
+```
+
+Its timers are `CODICIL_LIVE_EVERY_S` (300) and `CODICIL_LIVE_WINDOW_S` (120).
+
 ## Without a network
 
 `npm run preprod:dryrun -- --escrow` builds every transaction of the run offline, through the same

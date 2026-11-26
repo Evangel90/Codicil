@@ -57,8 +57,14 @@ or death-registry service), **any third party** (every trigger is permissionless
   Midnight.js, the vault has a maintenance authority: a key that can insert and remove circuits'
   verifier keys. The staged deployment uses it for a few minutes (D19). Afterwards it is a standing
   risk: whoever holds it could swap a circuit for one with different rules. Today the deploying
-  device keeps it. Giving it up after deployment, so the vault is immutable, is planned and not yet
+  device keeps it: in live mode it is in the owner's vault record in the browser, and in their
+  backup file. Giving it up after deployment, so the vault is immutable, is planned and not yet
   built. Until then it needs the same care as the owner's keys.
+- **In live mode the owner's browser holds every heir's key.** The owner's device generates the
+  heirs' keys and hands each over in an invitation. Anyone who reads the owner's browser storage, an
+  unlocked backup file, or one heir's invitation can claim the matching share once the will is
+  released (never before). The backup file is encrypted with a passphrase; the browser's own copy is
+  not. Heirs making their own keys removes this ([ROADMAP.md](ROADMAP.md)).
 - **A recovery key is a second secret to protect.** If it is stolen and the owner signs nothing for
   `recoveryDelay` (because they are not watching, or because they have died with more than that left
   before the deadline), the thief becomes the owner and can rewrite the will. The delay, the event
