@@ -179,7 +179,7 @@ const clamp = (x: number) => Math.min(1, Math.max(0, x));
 /** Camera keyframes: [t, x offset, y offset, scale]. The field sits to the right of the text, and spreads out behind the ledger. */
 function view(t: number, narrow: boolean): number[] {
   const K = narrow
-    ? [[0, 0, -0.76, 0.3], [0.8, 0, 0, 0.62], [4.2, 0, 0, 0.62], [5, 0, 0, 0.7], [7.2, 0, 0, 0.7], [8, 0, 0, 0.6]]
+    ? [[0, 0, -0.86, 0.27], [0.8, 0, 0, 0.62], [4.2, 0, 0, 0.62], [5, 0, 0, 0.7], [7.2, 0, 0, 0.7], [8, 0, 0, 0.6]]
     : [[0, 0.42, 0.02, 0.72], [0.6, 0.44, 0, 0.64], [4.2, 0.44, 0, 0.64], [5, 0, -0.02, 0.98], [7.2, 0, -0.02, 0.98], [8, 0.54, 0, 0.52]];
   let i = 0;
   while (i < K.length - 2 && t > K[i + 1][0]) i++;
@@ -207,36 +207,50 @@ function storyTime(anchors: HTMLElement[]): number {
 }
 
 // ─── Content ────────────────────────────────────────────────────────────────
+// Written for the person deciding whether to use it, not for someone studying
+// how it is built. The technical account lives in the docs the footer links to.
+
+/** Where "Create your vault" goes. */
+const APP = '#/demo';
+const DEMO = '#/demo';
+
+/** What people do today, and how each goes wrong. */
+const TODAY: [string, string][] = [
+  ['Tell nobody', 'If only you know the keys, your crypto is gone the day you are. Nobody can recover it for your family, however much it is worth.'],
+  ['Write the keys down', 'A seed phrase in a will or a drawer can be used by anyone who reads it, long before you die: a relative, a clerk, a burglar.'],
+  ['Use a public contract', 'Inheritance contracts on other blockchains work, and publish everything: who your heirs are, what each will get, and how recently you were active.'],
+];
+
 const STEPS: { t: number; title: string; body: string; rows: [string, string, 'pub' | 'priv' | 'txt'][] }[] = [
   {
     t: 1,
-    title: 'Write the will on your phone',
-    body: 'Name your heirs, what each one gets and when they can claim it. The will stays on your device. Midnight stores a single 32-byte fingerprint of it, which says nothing about who or how much.',
-    rows: [['Stored on-chain', 'one fingerprint, 32 bytes', 'pub'], ['Names and amounts', 'not stored', 'txt'], ['Number of heirs', 'not stored', 'txt']],
+    title: 'Name your heirs',
+    body: 'Choose who gets what share, and when: straight away, or on a date you pick, such as a child’s 21st birthday. Name a backup for anyone who might not be able to claim. The will is written and kept on your own device.',
+    rows: [['Takes', 'about ten minutes', 'txt'], ['You need', 'Face ID or Touch ID, and a Midnight wallet', 'txt'], ['Change the will', 'whenever you like', 'txt']],
   },
   {
     t: 2,
-    title: 'Check in with one touch',
-    body: 'Every month or so, tap “I’m alive”. Face ID signs on your phone and a zero-knowledge proof moves your deadline forward. The proof never shows your key, so nobody can tell the check-in was yours.',
-    rows: [['Signed with', 'your passkey (Face ID or Touch ID)', 'txt'], ['Visible on-chain', 'a new deadline', 'pub'], ['Linked to you', 'no', 'txt']],
+    title: 'Check in now and then',
+    body: 'Pick a rhythm you will keep, say once a month. One touch of Face ID tells your vault you are still here and moves your deadline forward. Codicil can put reminders in your calendar, and they say only “Check in”.',
+    rows: [['Each check-in', 'one touch', 'txt'], ['How often', 'you decide', 'txt'], ['If you are a few days late', 'an optional grace period covers it', 'txt']],
   },
   {
     t: 3,
-    title: 'If you go quiet, a clock starts',
-    body: 'Miss your deadline, or have enough of your guardians report your death, and anyone can start the switch. You then have a challenge window, 14 days unless you choose otherwise, to cancel it with one touch. A false alarm costs nothing.',
-    rows: [['Who can start it', 'anyone, once the deadline passes', 'txt'], ['To cancel', 'one check-in during the window', 'txt'], ['Which guardians voted', 'never revealed', 'priv']],
+    title: 'If you stop, nothing happens fast',
+    body: 'A missed deadline starts a waiting period, two weeks unless you choose otherwise. One check-in during it cancels everything, so a month without signal or a false alarm costs you nothing. Guardians, a few people you trust, can start the same waiting period sooner if you die.',
+    rows: [['A missed deadline starts', 'a waiting period, not a payout', 'txt'], ['To cancel it', 'one check-in', 'txt'], ['Guardians can', 'start the wait early, and nothing else', 'txt']],
   },
   {
     t: 4,
-    title: 'Your heirs claim, privately',
-    body: 'Each heir has a letter from you and a key of their own. Their phone proves they are in the will and their date has come, and their share goes to an address they choose. The chain records a one-time stamp, not who claimed.',
-    rows: [['The heir proves', 'they are in the will, and the date has come', 'txt'], ['Recorded on-chain', 'a one-time stamp', 'pub'], ['Which heir claimed', 'not revealed', 'priv']],
+    title: 'Your heirs claim their share',
+    body: 'You give each heir a letter, printed or as a file. When the waiting period has ended they open Codicil, show the letter and receive their share at an address of their own. No heir sees what another one gets, and no lawyer or company has to approve anything.',
+    rows: [['An heir needs', 'their letter and their key', 'txt'], ['They can check the letter', 'any time, years ahead', 'txt'], ['If an heir cannot claim', 'their backup can, after a wait', 'txt']],
   },
 ];
 
 const LEDGER: [string, string, string][] = [
   ['Heirs', 'root 0x7c3a…e91f', 'Ada 50%, Ben 30%, Cleo 20%'],
-  ['Owner', 'commitment 0xa04d…22b8', 'Amara, passkey on this phone'],
+  ['Owner', 'commitment 0xa04d…22b8', 'Amara, Face ID on her phone'],
   ['Activity', 'counter 7', 'Checked in 12 February at 09:14'],
   ['Guardians', 'root 0x51e0…9a3c, 2 must agree', 'Dr. Mensah, Sarah Lin, Tomás'],
   ['Claims', '1 one-time stamp', 'Ben claimed on 2 April'],
@@ -244,19 +258,20 @@ const LEDGER: [string, string, string][] = [
 ];
 
 const PEOPLE: [string, string, string][] = [
-  ['You', 'Write the will and check in now and then, with Face ID or a Cardano wallet. Change the will whenever you like; your heirs get new letters each time.', 'Needs your phone.'],
-  ['Your heirs', 'Keep the letter you give them, and a key of their own. They can check the letter on their phone at any time, years before it is needed. Neither works without the other.', 'Need a letter and their key.'],
-  ['Your guardians', 'A few people you trust. If you die before your deadline, enough of them can start the clock early. They never see the will, and nobody can tell which of them voted.', 'Need a secret you give them.'],
+  ['You', 'Write the will, fund the vault and check in. You can change your heirs, their shares or your guardians at any time, and nobody is told that you did.', 'You need your phone or laptop.'],
+  ['Your heirs', 'Keep the letter you give them somewhere safe. They can open Codicil and check that it is still valid whenever they like. When the time comes, the letter and their own key are all they need.', 'They need a letter and their key.'],
+  ['Your guardians', 'A doctor, a lawyer, a sibling: people who would know if you had died. If enough of them say so, the waiting period starts without waiting for your deadline. They cannot see the will, move money or stop you cancelling.', 'They need a secret you give them.'],
 ];
 
 const REPO = 'https://github.com/Evangel90/Codicil';
 const FAQ: [string, React.ReactNode][] = [
-  ['What if someone says I died while I’m still alive?', 'Every way of starting the switch only opens a challenge window. One check-in cancels it and clears any guardian votes. Nothing is paid out until the window has ended.'],
-  ['What if I lose my phone?', 'Passkeys sync through iCloud Keychain or Google Password Manager, so a new phone has the same key. You can also register a Cardano wallet as a second way to check in. If every key is lost, the vault releases to your heirs at the deadline, as you set it up to.'],
-  ['Can Codicil take my money?', 'No. The vault is a contract on Midnight with no admin key. Funds move only by its rules: after the switch has run its course, to an heir who proves their claim.'],
-  ['What can a stranger learn from the blockchain?', <>That a vault exists, its next deadline, its balance and how many shares have been claimed. Not who owns it, who the heirs are or what each gets. The amount of each claim is visible today; hiding it is on the roadmap. <a href={`${REPO}/blob/main/docs/PRIVACY.md`}>Every field, explained</a>.</>],
-  ['Is this a legal will?', 'No. Codicil moves crypto you hold, by rules you set. Use it alongside a legal will, not instead of one. Nothing here is legal advice.'],
-  ['Is it live?', 'The contract, the app and their tests are built. Deployment to Midnight’s Preprod test network is next. The demo runs the real contract in your browser, with a clock you can move forward.'],
+  ['What if I am reported dead while I am alive?', 'Nothing is paid out. A report, like a missed deadline, only starts the waiting period. One check-in cancels it and wipes the report. Your heirs can claim only after the waiting period has ended without a word from you.'],
+  ['What if I lose my phone?', 'A passkey normally follows you to a new phone through iCloud Keychain or Google Password Manager. You can add a wallet as a second way to check in, and keep a recovery key on paper that installs a new passkey after a public delay. If you lose every one of them, the vault does what it would do if you had died: it releases to your heirs.'],
+  ['Can Codicil take my money or read my will?', <>No. Your will never leaves your device, and the funds sit in a contract that pays only by its rules: to an heir who proves their claim, after the waiting period. One thing to know while this is on a test network: the device that creates a vault keeps a maintenance key that could change the contract. Removing that key after set-up is planned. <a href={`${REPO}/blob/main/docs/THREAT_MODEL.md`}>What we protect against, and what we don’t yet</a>.</>],
+  ['What does it cost?', 'Network fees only. On Midnight they are paid in DUST, which your wallet generates by itself from the NIGHT it holds. Creating a vault takes eight small transactions; a check-in is one. Codicil takes nothing.'],
+  ['What happens to my heirs if Codicil disappears?', <>Nothing changes for them. The vault is a contract on Midnight, not an account with us, and <a href={REPO}>the app is open source</a>. An heir needs their letter, their key and a copy of the app, which anyone can run.</>],
+  ['Is this a legal will?', 'No. Codicil moves crypto you hold, by rules you set. Use it next to a legal will, not in place of one. Nothing here is legal advice.'],
+  ['Can I use it for real money today?', 'Not yet. Codicil runs on Midnight’s Preprod test network, where tokens are free and worth nothing. The whole path, from creating a vault to an heir’s claim, has been run there. It is not on mainnet and has not had a security audit, so treat it as a rehearsal.'],
 ];
 
 // ─── Page ───────────────────────────────────────────────────────────────────
@@ -352,12 +367,12 @@ export function Landing() {
           <Brand />
           <nav aria-label="On this page" className="lx-nav">
             <button type="button" onClick={jump('how')}>How it works</button>
-            <button type="button" onClick={jump('privacy')}>Privacy</button>
+            <button type="button" onClick={jump('privacy')}>What stays private</button>
             <button type="button" onClick={jump('questions')}>Questions</button>
           </nav>
           <span className="lx-header-end">
             <ThemeToggle />
-            <a href="#/demo" className="btn btn-primary btn-sm">Launch the demo</a>
+            <a href={APP} className="btn btn-primary btn-sm">Create your vault</a>
           </span>
         </div>
       </header>
@@ -365,25 +380,40 @@ export function Landing() {
       <main>
         <section className="lx-wrap lx-hero" data-t="0" aria-labelledby="lx-title">
           <div className="lx-hero-text">
-            <h1 id="lx-title" className="lx-h1 fade-in">Your will, proven private.</h1>
+            <h1 id="lx-title" className="lx-h1 fade-in">Leave your crypto to the people you choose.</h1>
             <p className="lx-lede fade-in" style={{ animationDelay: '150ms' }}>
-              Decide who inherits what, and when. Check in with Face ID now and then. If you stop, your heirs can claim
-              their shares, and the blockchain never learns who they are.
+              Codicil is a will for crypto. You name your heirs and check in with Face ID now and then. If you ever stop,
+              they can claim what you left them. Until that day, nobody can see who they are or what they will get.
             </p>
             <div className="lx-actions fade-in" style={{ animationDelay: '300ms' }}>
-              <a href="#/demo" className="btn btn-primary btn-lg">Launch the demo</a>
-              <button type="button" className="btn btn-secondary btn-lg" onClick={jump('how')}>See how it works</button>
+              <a href={APP} className="btn btn-primary btn-lg">Create your vault</a>
+              <a href={DEMO} className="btn btn-secondary btn-lg">Try the guided demo</a>
             </div>
             <p className="lx-note fade-in" style={{ animationDelay: '450ms' }}>
-              The demo runs the real contract in your browser. No wallet, no sign-up.
+              On Midnight’s test network for now: free test tokens, nothing real at risk.
             </p>
           </div>
         </section>
 
+        <section className="lx-wrap lx-why" aria-labelledby="why-h">
+          <div className="lx-intro">
+            <h2 id="why-h" className="lx-h2">Crypto has no next of kin</h2>
+            <p>A bank can be told that you have died. A wallet cannot. That leaves three ways to plan, and each one costs you something.</p>
+          </div>
+          <dl className="lx-people-list">
+            {TODAY.map(([plan, cost]) => (
+              <div key={plan}>
+                <dt>{plan}</dt>
+                <dd><p>{cost}</p></dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+
         <section id="how" className="lx-wrap lx-how" aria-labelledby="how-h">
           <div className="lx-intro">
-            <h2 id="how-h" className="lx-h2">How it works</h2>
-            <p>Four moments, from writing the will to the day your heirs claim. Built on Midnight, where a contract can check a proof without seeing what it proves.</p>
+            <h2 id="how-h" className="lx-h2">How Codicil works</h2>
+            <p>You keep your keys and your will. The network holds the funds and enforces the rules, without being shown who they are for.</p>
           </div>
           <ol className="lx-steps">
             {STEPS.map((s, i) => (
@@ -403,10 +433,10 @@ export function Landing() {
 
         <section id="privacy" className="lx-wrap lx-lens" data-t="5.6" aria-labelledby="privacy-h">
           <div className="lx-intro lx-intro-wide">
-            <h2 id="privacy-h" className="lx-h2">What the chain sees, and what it doesn’t</h2>
+            <h2 id="privacy-h" className="lx-h2">What a stranger can see</h2>
             <p>
-              Drag across the table. On the left is everything Midnight records about Amara’s vault. On the right is what
-              exists only on her phone.
+              A blockchain is public, so what matters is what gets written to it. Drag across this example. On the left
+              is everything the network records about a vault. On the right is what exists only on its owner’s phone.
             </p>
           </div>
           <div
@@ -415,13 +445,13 @@ export function Landing() {
             onPointerDown={lensFrom}
           >
             <div className="lx-tcol">
-              <div className="lx-thead"><span className="lx-k">Field</span><span className="lx-pub">What Midnight sees</span></div>
+              <div className="lx-thead"><span className="lx-k">Field</span><span className="lx-pub">What anyone can read</span></div>
               {LEDGER.map(([k, pub]) => (
                 <div key={k} className="lx-trow"><span className="lx-k">{k}</span><span className="mono lx-pub">{pub}</span></div>
               ))}
             </div>
             <div className="lx-tcol lx-private" aria-hidden={lens > 98} style={{ clipPath: `inset(0 0 0 ${lens.toFixed(2)}%)` }}>
-              <div className="lx-thead"><span className="lx-k">Field</span><span className="lx-priv lx-right">Only on Amara’s phone</span></div>
+              <div className="lx-thead"><span className="lx-k">Field</span><span className="lx-priv lx-right">Only on the owner’s phone</span></div>
               {LEDGER.map(([k, , priv]) => (
                 <div key={k} className="lx-trow"><span className="lx-k">{k}</span><span className="lx-priv lx-right">{priv}</span></div>
               ))}
@@ -442,12 +472,15 @@ export function Landing() {
               </div>
             </div>
           </div>
-          <p className="lx-note">The demo’s Privacy Lens shows the same split for a vault you set up yourself.</p>
+          <p className="lx-note">
+            Not hidden yet: how much a vault holds, and the size of each share at the moment it is claimed.{' '}
+            <a href={`${REPO}/blob/main/docs/PRIVACY.md`}>Every field, explained</a>.
+          </p>
         </section>
 
         <section className="lx-wrap lx-people" data-t="8" aria-labelledby="people-h">
           <div className="lx-intro">
-            <h2 id="people-h" className="lx-h2">Who does what</h2>
+            <h2 id="people-h" className="lx-h2">Who is involved</h2>
           </div>
           <dl className="lx-people-list">
             {PEOPLE.map(([who, what, needs]) => (
@@ -474,9 +507,12 @@ export function Landing() {
         </section>
 
         <section className="lx-wrap lx-cta" aria-labelledby="cta-h">
-          <h2 id="cta-h" className="lx-h2">Try it with Amara’s vault</h2>
-          <p>Write a will, check in with Face ID, skip ahead a month and watch an heir claim. It takes about five minutes.</p>
-          <a href="#/demo" className="btn btn-primary btn-lg">Launch the demo</a>
+          <h2 id="cta-h" className="lx-h2">Set it up once. After that, it is one touch.</h2>
+          <p>Create a vault on the test network in about ten minutes. Or watch one work first: the guided demo plays a whole inheritance, from the will to an heir’s claim, in five.</p>
+          <div className="lx-actions">
+            <a href={APP} className="btn btn-primary btn-lg">Create your vault</a>
+            <a href={DEMO} className="btn btn-secondary btn-lg">Try the guided demo</a>
+          </div>
         </section>
       </main>
 
@@ -485,12 +521,12 @@ export function Landing() {
           <Brand />
           <nav aria-label="Project" className="lx-footer-links">
             <a href={REPO}>Source code</a>
-            <a href={`${REPO}/blob/main/docs/JUDGES_QUICKSTART.md`}>Documentation</a>
+            <a href={`${REPO}#readme`}>Documentation</a>
             <a href={`${REPO}/blob/main/docs/PRIVACY.md`}>Privacy details</a>
             <a href={`${REPO}/blob/main/docs/THREAT_MODEL.md`}>Threat model</a>
             <a href="https://midnight.network">Built on Midnight</a>
           </nav>
-          <p className="lx-fine">Apache-2.0. Not legal advice.</p>
+          <p className="lx-fine">Open source. Test network, not audited. Not legal advice.</p>
         </div>
       </footer>
     </div>

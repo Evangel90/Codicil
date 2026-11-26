@@ -39,8 +39,8 @@ async function finish(page: Page, expectText: RegExp) {
 test('landing page tells the story and opens the demo', async ({ page }) => {
   const errors = watchErrors(page);
   await page.goto('/');
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Your will, proven private.');
-  await page.getByRole('link', { name: /Launch the demo/ }).first().click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Leave your crypto to the people you choose.');
+  await page.getByRole('link', { name: /Try the guided demo/ }).first().click();
   await expect(page.getByRole('heading', { name: 'Protect your vault with your face or fingerprint.' })).toBeVisible();
   expect(errors).toEqual([]);
 });
