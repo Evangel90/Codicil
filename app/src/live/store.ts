@@ -307,7 +307,11 @@ function guardianSetFrom(r: Pick<OwnerRecord, 'guardians' | 'threshold'>): Guard
   return r.guardians.length === 0 ? undefined : buildGuardianSet(r.guardians.map((g) => guardianLeaf(g.secret)), r.threshold);
 }
 
-export function factsFrom(address: string, l: Ledger, now: number): VaultFacts {
+/**
+ * @param margin seconds to wait past a time before saying "now you can": 0 on
+ * the in-memory chain, `CLOCK_MARGIN` on a network, whose clock trails ours
+ */
+export function factsFrom(address: string, l: Ledger, now: number, margin = 0): VaultFacts {
   const switchOpensAt = Number(timeoutOpensAt(l));
   return {
     address,
@@ -326,8 +330,8 @@ export function factsFrom(address: string, l: Ledger, now: number): VaultFacts {
     guardianVotes: Number(l.guardianVotes),
     guardianThreshold: Number(l.guardianThreshold),
     guardianRound: l.guardianRound,
-    canStartSwitch: l.phase === Phase.armed && now >= switchOpensAt,
-    canRelease: l.phase === Phase.pending && now >= Number(l.pendingUntil),
+    canStartSwitch: l.phase === Phase.armed && now >= switchOpensAt + margin,
+    canRelease: l.phase === Phase.pending && now >= Number(l.pendingUntil) + margin,
   };
 }
 
@@ -384,8 +388,8 @@ export class LiveStore {
 
   private note(id: string, what: string, tone: ActivityEntry['tone'], txHash?: string) {
     const r = this.record(id);
-    if (r?.role !== 'owner') return;
-    this.update<OwnerRecord>(id, { activity: [{ at: this.now, what, tone, txHash }, ...r.activity].slice(0, 200) });
+    if (!r) return;
+    this.update<VaultRecord>(id, { activity: [{ at: this.now, what, tone, txHash }, ...(r.activity ?? [])].slice(0, 200) });
   }
 
   private get now(): number {
@@ -760,6 +764,7 @@ export class LiveStore {
       const out = await chain.call(r.backup ? 'claimAsBackup' : 'claim', state, { bytes: encodeUserAddress(to.toLowerCase()) });
       const amount = chain.ledger.estatePaid - paidBefore;
       this.update<HeirRecord>(r.id, { claimed: { at: chain.now, amount, to: to.toLowerCase(), txHash: out.receipt?.txHash } });
+      this.note(r.id, `Share claimed: ${formatNight(amount)} tNIGHT`, 'released', out.receipt?.txHash);
       return `${formatNight(amount)} tNIGHT is on its way to your wallet.`;
     }, (code, l) => (code === 'primary claim window open'
       ? `You are the backup for this share. Its first heir can claim until ${fmtWhen(Number(l.releasedAt + l.claimWindow))}. If they have not by then, you can.`
@@ -775,8 +780,9 @@ export class LiveStore {
       const round = chain.ledger.guardianRound;
       stage('proof');
       // Stamped a little in the past: the vault accepts a vote whose time is not ahead of the block's.
-      await chain.call('guardianAttest', { guardian: { secret: r.secret, path: r.path } }, BigInt(chain.now - CLOCK_MARGIN));
+      const out = await chain.call('guardianAttest', { guardian: { secret: r.secret, path: r.path } }, BigInt(chain.now - CLOCK_MARGIN));
       this.update<GuardianRecord>(r.id, { votedRound: round });
+      this.note(r.id, 'Vote cast', 'pending', out.receipt?.txHash);
       const l = chain.ledger;
       return l.phase === Phase.pending
         ? `Your vote is recorded. Enough guardians agreed, so the switch has started. ${r.ownerName} can cancel until ${fmtWhen(Number(l.pendingUntil))}.`
@@ -872,7 +878,7 @@ export class LiveStore {
     const now = this.now;
     const active = this.record();
     const chain = active ? this.chains.get(active.id) : undefined;
-    const facts = chain ? factsFrom(chain.address, chain.ledger, now) : undefined;
+    const facts = chain ? factsFrom(chain.address, chain.ledger, now, this.host?.kind === 'network' ? CLOCK_MARGIN : 0) : undefined;
     return {
       now,
       network: this.host?.networkId,

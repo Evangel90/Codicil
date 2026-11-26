@@ -1,0 +1,23 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Layout for the live app's own pieces. Colours, type and controls come from
+   obsidian.css, styles.css and layout.css; nothing new is introduced here. */
+
+.live-bar .demobar-row { min-height: 48px; }
+.live-wallet { display: inline-flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.live-switch .field { min-height: 36px; padding: 6px 40px 6px 12px; font-size: 13px; max-width: 320px; }
+.live-top-note { padding-top: 24px; }
+
+.live-row { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; }
+.live-row > .field-label, .live-row > .field { flex: 1 1 220px; min-width: 0; }
+.live-row > .check { flex: 2 1 280px; align-self: center; }
+.live-row > .live-narrow { flex: 0 1 180px; }
+
+.live-copy { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.live-copy code { flex: 1 1 260px; min-width: 0; padding: 10px 12px; border: 1px solid var(--o-line); border-radius: var(--o-r-sm); background: var(--o-surface-2); font-size: 12px; line-height: 1.5; word-break: break-all; }
+.live-detail { word-break: break-word; }
+.live-kit { flex: 1 1 100%; padding: 4px 0 8px; }
+
+.live-dialog { width: min(560px, calc(100% - 32px)); }
+.live-loading { min-height: 40vh; display: grid; place-content: center; gap: 16px; justify-items: center; }
+
+.err-body code.err-code { padding: 8px 10px; border: 1px solid var(--o-line); border-radius: var(--o-r-xs); background: var(--o-surface-2); color: var(--o-text-2); word-break: break-all; }

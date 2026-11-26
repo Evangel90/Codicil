@@ -172,7 +172,7 @@ export function describeProblem(e: unknown, ctx: ProblemContext = {}): Problem {
   if (e instanceof ProofServerDown) {
     return {
       kind: 'proof-server', title: 'Start your proof server',
-      body: `Every transaction needs a zero-knowledge proof, and the proof is made on your own computer so your secrets never leave it. Nothing answered at ${e.url}. Start Docker, run the command below once, wait a few seconds, and try again.`,
+      body: `Every transaction needs a zero-knowledge proof, and the proof is made on your own computer so your secrets never leave it. Nothing answered at ${e.url}. Start Docker, run the command below, wait a few seconds, and try again. If you have run it before, the container already exists: run \`docker start proof-server\` instead.`,
       command: PROOF_SERVER_COMMAND, detail, retry: true,
     };
   }
@@ -215,7 +215,7 @@ export function describeProblem(e: unknown, ctx: ProblemContext = {}): Problem {
   if (named(e, 'ProofServerError') || has(chain, /proof server|prove-tx|failed to prove/i)) {
     return {
       kind: 'proof-server', title: 'The proof could not be made',
-      body: `The proof server at ${ctx.proofServer ?? LOCAL_PROOF_SERVER} stopped or refused the request. The largest proof needs about 5 GB of memory: in Docker Desktop, give Docker at least 8 GB, start the proof server again, and try again. Nothing was sent.`,
+      body: `The proof server at ${ctx.proofServer ?? LOCAL_PROOF_SERVER} stopped or refused the request. The largest proof needs about 5 GB of memory: in Docker Desktop, give Docker at least 8 GB, start the proof server again (\`docker start proof-server\`), and try again. Nothing was sent.`,
       command: PROOF_SERVER_COMMAND, detail, retry: true,
     };
   }

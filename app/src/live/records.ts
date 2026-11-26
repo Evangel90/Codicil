@@ -96,6 +96,8 @@ export interface HeirRecord {
   /** True when this person is the backup for the entry, not its first heir. */
   backup: boolean;
   claimed?: { at: number; amount: bigint; to: string; txHash?: string };
+  /** What this person did from this browser. */
+  activity?: ActivityEntry[];
 }
 
 export interface GuardianRecord {
@@ -109,6 +111,8 @@ export interface GuardianRecord {
   path: MerklePath;
   /** The round this guardian last voted in. */
   votedRound?: bigint;
+  /** What this person did from this browser. */
+  activity?: ActivityEntry[];
 }
 
 export type VaultRecord = OwnerRecord | HeirRecord | GuardianRecord;
