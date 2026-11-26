@@ -28,7 +28,6 @@ import {
   type PublicDataProvider,
 } from '@midnight-ntwrk/midnight-js/types';
 import { findDeployedContract, type Ledger9ContractProviders } from '@midnight-ntwrk/midnight-js/contracts';
-import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { Contract as VaultContract, ledger as vaultLedger, type Ledger, type VaultConfig } from '@codicil/contracts/vault';
 import { createWitnesses, type CodicilPrivateState } from '@codicil/sdk';
@@ -37,7 +36,9 @@ import type {
   CallOutcome, CallStage, CreateVaultOptions, DeploymentRecord, StageListener, VaultChain, VaultHost,
 } from '../chain/types.js';
 import { ProofServerDown, WrongNetwork } from './problems.js';
+import { proofServerProofProvider } from './prover.js';
 import type { WalletAdapter, WalletServices } from './wallet.js';
+import type { KeySource } from './prover.js';
 import { HttpZkConfigProvider, type ArtifactCache } from './zk-artifacts.js';
 
 /** How long a built transaction stays valid. One hour, as Midnight's own test kit uses. */
@@ -60,6 +61,8 @@ export interface LiveHostOptions {
   allowedNetworks?: readonly string[];
   /** A proof can take a minute on a laptop; give up after this long. */
   proofTimeoutMs?: number;
+  /** Another way to make proofs, for tests. The default asks the proof server the wallet names. */
+  proofProvider?: (keys: KeySource) => ProofProvider;
   fetch?: typeof fetch;
   /** Diagnostics for the end-to-end script. The app passes none. */
   log?: (line: string) => void;
@@ -130,15 +133,19 @@ export class LiveHost implements VaultHost {
     });
     this.publicData = indexerPublicDataProvider({ queryURL: services.indexerUri, subscriptionURL: services.indexerWsUri });
 
-    const prover = httpClientProofProvider({ url: services.proofServerUri, zkConfigProvider: this.zk, timeout: options.proofTimeoutMs ?? 15 * 60_000 });
+    // Our own client for the proof server: Midnight.js's holds a 448 MB proving key
+    // in memory several times over, which a browser tab does not survive (prover.ts).
+    const prover = options.proofProvider?.(this.zk)
+      ?? proofServerProofProvider(services.proofServerUri, this.zk, { fetch: options.fetch, timeoutMs: options.proofTimeoutMs });
     const proofProvider: ProofProvider = {
       supportedEras: prover.supportedEras,
-      proveTx: async (tx, config) => {
+      proveTx: async (tx) => {
         emit({ stage: 'proving' });
         const started = Date.now();
         try {
-          return await prover.proveTx(tx, config);
+          return await prover.proveTx(tx);
         } finally {
+          this.zk.release();
           this.log(`  proved in ${((Date.now() - started) / 1000).toFixed(1)} s`);
         }
       },

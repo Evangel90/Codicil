@@ -32,11 +32,16 @@ export interface ArtifactProgress {
   cached: boolean;
 }
 
-/** Somewhere to keep downloaded artifacts between visits. */
+/**
+ * Somewhere to keep downloaded artifacts between visits. It deals in HTTP
+ * responses, not byte arrays, so a 448 MB key can go from the network into
+ * the browser's cache as a stream, without a second copy in the page's memory.
+ */
 export interface ArtifactCache {
-  /** The stored bytes, if a copy with this exact tag is held. */
-  get(url: string, tag: string): Promise<Uint8Array | undefined>;
-  put(url: string, tag: string, bytes: Uint8Array): Promise<void>;
+  /** The stored copy, if one with this exact tag is held. */
+  get(url: string, tag: string): Promise<Response | undefined>;
+  /** Keep `response` (its body is read to the end). Never rejects. */
+  put(url: string, tag: string, response: Response): Promise<void>;
 }
 
 /** The app could not get an artifact. `status` 404 means the keys were never built or served. */
@@ -62,16 +67,17 @@ export function browserArtifactCache(name = 'codicil-zk-v1'): ArtifactCache | un
     async get(url, tag) {
       try {
         const hit = await (await caches.open(name)).match(url);
-        if (!hit || hit.headers.get(TAG_HEADER) !== tag) return undefined;
-        return new Uint8Array(await hit.arrayBuffer());
+        return hit && hit.headers.get(TAG_HEADER) === tag ? hit : undefined;
       } catch {
         return undefined;
       }
     },
-    async put(url, tag, bytes) {
+    async put(url, tag, response) {
       try {
-        const body = new Blob([bytes.slice().buffer as ArrayBuffer]);
-        await (await caches.open(name)).put(url, new Response(body, { headers: { [TAG_HEADER]: tag, 'content-length': String(bytes.length) } }));
+        const headers: Record<string, string> = { [TAG_HEADER]: tag };
+        const length = response.headers.get('content-length');
+        if (length) headers['content-length'] = length;
+        await (await caches.open(name)).put(url, new Response(response.body, { headers }));
       } catch {
         // Out of space, or a private window: the download still worked, it is just not kept.
       }
@@ -82,10 +88,12 @@ export function browserArtifactCache(name = 'codicil-zk-v1'): ArtifactCache | un
 export class HttpZkConfigProvider<K extends string> extends ZKConfigProvider<K> {
   private readonly base: string;
   private readonly fetchFn: typeof fetch;
-  private readonly cache?: ArtifactCache;
+  private cache?: ArtifactCache;
   private readonly onProgress?: (p: ArtifactProgress) => void;
   private readonly inFlight = new Map<string, Promise<Uint8Array>>();
   private readonly small = new Map<string, Uint8Array>();
+  /** The proving key in use. Midnight.js asks for it more than once per proof; it must not be fetched, or held, twice. */
+  private held?: { circuit: string; bytes: Uint8Array };
   private runtimeVersion?: Promise<string>;
 
   /** @param baseUrl where the compiler's output directory is served, e.g. `http://localhost:5173/zk/codicil_vault` */
@@ -98,7 +106,62 @@ export class HttpZkConfigProvider<K extends string> extends ZKConfigProvider<K> 
   }
 
   async getProverKey(circuitId: K): Promise<ProverKey> {
-    return createProverKey(await this.load(`keys/${circuitId}.prover`, circuitId, 'prover'));
+    if (this.held?.circuit !== circuitId) {
+      this.held = undefined;
+      const bytes = await this.load(`keys/${circuitId}.prover`, circuitId, 'prover');
+      this.held = { circuit: circuitId, bytes };
+    }
+    return createProverKey(this.held.bytes);
+  }
+
+  /**
+   * The proving key as a Blob. With a cache this is the cache's own copy: the
+   * download goes from the network into the cache as a stream, and the Blob
+   * points at it, so a 448 MB key never becomes an array in this page.
+   * Without a cache (Node), it is the bytes in memory.
+   */
+  async getProverKeyBlob(circuitId: K): Promise<Blob> {
+    const url = new URL(`keys/${circuitId}.prover`, this.base).toString();
+    const tag = this.cache && (await this.tagOf(url));
+    if (!this.cache || !tag) return new Blob([await this.getProverKey(circuitId) as BlobPart]);
+    const report = (loaded: number, total: number, cached: boolean) => this.onProgress?.({ circuit: circuitId, kind: 'prover', loaded, total, cached });
+    let kept = await this.cache.get(url, tag);
+    if (kept) {
+      const blob = await kept.blob();
+      report(blob.size, blob.size, true);
+      return blob;
+    }
+    const res = await this.request(url);
+    const total = Number(res.headers.get('content-length') ?? 0);
+    if (!res.body) return new Blob([await this.getProverKey(circuitId) as BlobPart]);
+    let loaded = 0;
+    let lastReport = 0;
+    report(0, total, false);
+    const counted = res.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        loaded += chunk.length;
+        if (loaded - lastReport >= 1 << 20) {
+          lastReport = loaded;
+          report(loaded, total, false);
+        }
+        controller.enqueue(chunk);
+      },
+    }));
+    await this.cache.put(url, tag, new Response(counted, { headers: new Headers(res.headers) }));
+    kept = await this.cache.get(url, tag);
+    if (!kept) {
+      // The cache would not take it. A private window keeps its cache in memory and refuses a file
+      // this large (seen in Chromium, 26 Nov 2026). Stop using it, and hold the key in memory once.
+      this.cache = undefined;
+      return new Blob([await this.getProverKey(circuitId) as BlobPart]);
+    }
+    report(loaded, total || loaded, false);
+    return kept.blob();
+  }
+
+  /** Let go of the proving key kept in memory. The copy in the browser's cache stays. */
+  release(circuitId?: string): void {
+    if (circuitId === undefined || this.held?.circuit === circuitId) this.held = undefined;
   }
 
   async getVerifierKey(circuitId: K): Promise<VerifierKey> {
@@ -151,16 +214,19 @@ export class HttpZkConfigProvider<K extends string> extends ZKConfigProvider<K> 
       const tag = await this.tagOf(url);
       if (tag) {
         const kept = await this.cache.get(url, tag);
-        if (kept) {
-          report(kept.length, kept.length, true);
-          return kept;
-        }
-        const fresh = await this.fetchBytes(url, report);
-        await this.cache.put(url, tag, fresh);
-        return fresh;
+        if (kept) return this.read(kept, (loaded, total) => report(loaded, total, true));
+        // One download, two readers: the cache takes its copy as a stream while the page reads the other.
+        const res = await this.request(url);
+        const [mine, theirs] = res.body ? res.body.tee() : [null, null];
+        if (!mine || !theirs) return this.read(res, (loaded, total) => report(loaded, total, false));
+        const headers = new Headers(res.headers);
+        const keeping = this.cache.put(url, tag, new Response(theirs, { headers }));
+        const bytes = await this.read(new Response(mine, { headers }), (loaded, total) => report(loaded, total, false));
+        await keeping;
+        return bytes;
       }
     }
-    const bytes = await this.fetchBytes(url, report);
+    const bytes = await this.read(await this.request(url), (loaded, total) => report(loaded, total, false));
     if (kind !== 'prover') this.small.set(path, bytes);
     return bytes;
   }
@@ -176,7 +242,7 @@ export class HttpZkConfigProvider<K extends string> extends ZKConfigProvider<K> 
     }
   }
 
-  private async fetchBytes(url: string, report: (loaded: number, total: number, cached: boolean) => void): Promise<Uint8Array> {
+  private async request(url: string): Promise<Response> {
     let res: Response;
     try {
       res = await this.fetchFn(url);
@@ -186,10 +252,15 @@ export class HttpZkConfigProvider<K extends string> extends ZKConfigProvider<K> 
     if (!res.ok) throw new ArtifactError(`${url} answered ${res.status}`, url, res.status);
     // A single-page app's server answers a missing file with its index page.
     if ((res.headers.get('content-type') ?? '').includes('text/html')) throw new ArtifactError(`${url} is not being served`, url, 404);
+    return res;
+  }
+
+  /** Read a response to the end into one buffer, reporting as it goes. */
+  private async read(res: Response, report: (loaded: number, total: number) => void): Promise<Uint8Array> {
     const total = Number(res.headers.get('content-length') ?? 0);
     if (!res.body) {
       const all = new Uint8Array(await res.arrayBuffer());
-      report(all.length, all.length, false);
+      report(all.length, all.length);
       return all;
     }
     const reader = res.body.getReader();
@@ -197,7 +268,7 @@ export class HttpZkConfigProvider<K extends string> extends ZKConfigProvider<K> 
     let out = total > 0 ? new Uint8Array(total) : new Uint8Array(1 << 16);
     let loaded = 0;
     let lastReport = 0;
-    report(0, total, false);
+    report(0, total);
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -210,10 +281,10 @@ export class HttpZkConfigProvider<K extends string> extends ZKConfigProvider<K> 
       loaded += value.length;
       if (loaded - lastReport >= 1 << 20) {
         lastReport = loaded;
-        report(loaded, total, false);
+        report(loaded, total);
       }
     }
-    report(loaded, total || loaded, false);
+    report(loaded, total || loaded);
     return loaded === out.length ? out : out.slice(0, loaded);
   }
 }

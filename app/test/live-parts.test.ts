@@ -7,9 +7,11 @@
 
 import { describe, expect, it } from 'vitest';
 import type { ConnectedAPI, InitialAPI } from '@midnight-ntwrk/dapp-connector-api';
-import { unshieldedToken } from '@midnight-ntwrk/midnight-js-protocol/v9';
-import { Phase } from '@codicil/contracts/vault';
-import { VAULT_OPTIONS_OFF, rpIdHash } from '@codicil/sdk';
+import { createCircuitContext, createConstructorContext, sampleContractAddress } from '@midnight-ntwrk/compact-runtime';
+import { createProvingPayload, unshieldedToken } from '@midnight-ntwrk/midnight-js-protocol/v9';
+import { proofDataIntoSerializedPreimage } from '@midnightntwrk/onchain-runtime-v4';
+import { Contract, Phase } from '@codicil/contracts/vault';
+import { createWitnesses, VAULT_OPTIONS_OFF, rpIdHash } from '@codicil/sdk';
 import type { VaultChain, VaultHost } from '../src/chain/types.js';
 import { DemoChain, MemoryHost } from '../src/demo/chain.js';
 import { approveWithPasskey, createDemoPasskey } from '../src/demo/passkey.js';
@@ -22,6 +24,7 @@ import {
   decodeKit, decodeRecords, encodeRecords, exportBackup, importBackup, kitLink, memoryStorage, mergeRecords,
   type OwnerRecord, type VaultRecord,
 } from '../src/live/records.js';
+import { compactLength, LARGE_KEY_BYTES, proofServerProver, provingPayloadParts } from '../src/live/prover.js';
 import { LiveStore, type OwnerView } from '../src/live/store.js';
 import {
   addressFromHex, addressToHex, coinPublicKeyToHex, DUST_FOR_DEPLOYMENT, formatDust, formatNight, parseNight, SPECK_PER_DUST, STAR_PER_NIGHT,
@@ -275,6 +278,16 @@ describe('the wallet connector', () => {
   });
 });
 
+/** Cache Storage, as far as the app uses it. */
+function memoryCache(): ArtifactCache & { size: number } {
+  const kept = new Map<string, { tag: string; bytes: Uint8Array }>();
+  return {
+    get size() { return kept.size; },
+    get: async (url, tag) => (kept.get(url)?.tag === tag ? new Response(kept.get(url)!.bytes.slice().buffer as ArrayBuffer) : undefined),
+    put: async (url, tag, response) => { kept.set(url, { tag, bytes: new Uint8Array(await response.arrayBuffer()) }); },
+  };
+}
+
 function fakeServer(files: Record<string, Uint8Array>, tags: Record<string, string> = {}) {
   const requests: string[] = [];
   const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -318,11 +331,7 @@ describe('circuit keys over HTTP', () => {
   });
 
   it('keeps a proving key between visits, until the file on the server changes', async () => {
-    const kept = new Map<string, { tag: string; bytes: Uint8Array }>();
-    const cache: ArtifactCache = {
-      get: async (url, tag) => (kept.get(url)?.tag === tag ? kept.get(url)!.bytes : undefined),
-      put: async (url, tag, bytes) => { kept.set(url, { tag, bytes }); },
-    };
+    const cache = memoryCache();
     const tags = { '/zk/keys/claim.prover': '"v1"' };
     const { fetchFn, requests } = fakeServer(files, tags);
     const progress: ArtifactProgress[] = [];
@@ -337,6 +346,42 @@ describe('circuit keys over HTTP', () => {
     expect(requests.filter((r) => r.startsWith('GET'))).toHaveLength(2);
   });
 
+  it('asked twice in one proof, a proving key is fetched and held once, and can be let go', async () => {
+    const { fetchFn, requests } = fakeServer(files);
+    const zk = new HttpZkConfigProvider<string>('http://app.test/zk', { fetch: fetchFn });
+    const first = await zk.getProverKey('claim');
+    expect(await zk.getProverKey('claim')).toBe(first);
+    expect(requests.filter((r) => r === 'GET /zk/keys/claim.prover')).toHaveLength(1);
+    zk.release('claim');
+    await zk.getProverKey('claim');
+    expect(requests.filter((r) => r === 'GET /zk/keys/claim.prover')).toHaveLength(2);
+  });
+
+  it('hands a proving key over as a Blob that is the cached copy, downloaded once as a stream', async () => {
+    const cache = memoryCache();
+    const { fetchFn, requests } = fakeServer(files);
+    const progress: ArtifactProgress[] = [];
+    const zk = new HttpZkConfigProvider<string>('http://app.test/zk', { fetch: fetchFn, cache, onProgress: (p) => progress.push(p) });
+    const blob = await zk.getProverKeyBlob('claim');
+    expect(same(new Uint8Array(await blob.arrayBuffer()), big)).toBe(true);
+    expect(cache.size).toBe(1);
+    expect(progress[0]).toMatchObject({ kind: 'prover', loaded: 0, total: big.length, cached: false });
+    expect(progress.at(-1)).toMatchObject({ loaded: big.length, cached: false });
+    expect((await zk.getProverKeyBlob('claim')).size).toBe(big.length);
+    expect(progress.at(-1)).toMatchObject({ loaded: big.length, cached: true });
+    expect(requests.filter((r) => r.startsWith('GET'))).toEqual(['GET /zk/keys/claim.prover']);
+    // With nowhere to keep it (Node), the Blob is made from memory.
+    const plain = new HttpZkConfigProvider<string>('http://app.test/zk', { fetch: fetchFn });
+    expect((await plain.getProverKeyBlob('claim')).size).toBe(big.length);
+    // A cache that refuses the file (a private window) is given up on, and the key still arrives.
+    let puts = 0;
+    const refusing: ArtifactCache = { get: async () => undefined, put: async (_u, _t, response) => { puts++; await response.body?.cancel(); } };
+    const priv = new HttpZkConfigProvider<string>('http://app.test/zk', { fetch: fetchFn, cache: refusing });
+    expect(same(new Uint8Array(await (await priv.getProverKeyBlob('claim')).arrayBuffer()), big)).toBe(true);
+    await priv.getProverKeyBlob('claim');
+    expect(puts).toBe(1);
+  });
+
   it('tells "the keys were never built" apart from a dropped connection', async () => {
     const { fetchFn } = fakeServer(files);
     const zk = new HttpZkConfigProvider<string>('http://app.test/zk', { fetch: fetchFn });
@@ -345,6 +390,106 @@ describe('circuit keys over HTTP', () => {
     expect(describeProblem(missing)).toMatchObject({ kind: 'keys-missing', command: 'npm run compile:full', retry: false });
     const offline = new HttpZkConfigProvider<string>('http://app.test/zk', { fetch: (async () => { throw new TypeError('Failed to fetch'); }) as typeof fetch });
     expect(describeProblem(await offline.getVerifierKey('claim').catch((e: unknown) => e))).toMatchObject({ kind: 'network', retry: true });
+  });
+});
+
+/** A real proof preimage: a deposit run through the compiled vault, as the proof server would receive it. */
+async function depositPreimage(): Promise<Uint8Array> {
+  const contract = new Contract(createWitnesses());
+  const init = await contract.initialState(createConstructorContext({}, '0'.repeat(64)), {
+    ownerPasskeyCommit: new Uint8Array(32).fill(1), ownerEdCommit: new Uint8Array(32), passkeyRpIdHash: rpIdHash('localhost'),
+    willRoot: 5n, firstDeadline: BigInt(T0 + 600), maxPeriod: 1200n, challengeWindow: 120n, claimWindow: 600n,
+    tokenColor: new Uint8Array(32).fill(7), guardianRoot: 0n, guardianThreshold: 0n, attestorKeyCommit: new Uint8Array(32), ...VAULT_OPTIONS_OFF,
+  });
+  const ctx = createCircuitContext({
+    circuitId: 'deposit', contractAddress: sampleContractAddress(), coinPublicKeyOrZswapState: '0'.repeat(64),
+    contractState: init.currentContractState, privateState: {}, time: T0, parentBlockHash: '0'.repeat(64),
+  });
+  const out = await contract.impureCircuits.deposit(ctx, 9n);
+  const data = out.context.callProofDataTrace.at(-1)!;
+  return proofDataIntoSerializedPreimage(data.input, data.output, data.publicTranscript, data.privateTranscriptOutputs, 'deposit');
+}
+
+function pattern(n: number, seed: number): Uint8Array {
+  const out = new Uint8Array(n);
+  for (let i = 0; i < n; i++) out[i] = (i * 31 + seed) & 0xff;
+  return out;
+}
+const joined = async (parts: (Uint8Array | Blob)[]) => new Uint8Array(await new Blob(parts as BlobPart[]).arrayBuffer());
+/** Byte equality that stays quick, and quiet on failure, for megabytes. */
+const same = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && Buffer.from(a.buffer, a.byteOffset, a.length).equals(Buffer.from(b.buffer, b.byteOffset, b.length));
+
+describe('asking the proof server, without a 448 MB key in memory', () => {
+  const verifierKey = pattern(1353, 3);
+  const ir = pattern(1026, 5);
+
+  it('writes lengths the way the ledger does', () => {
+    expect([...compactLength(0)]).toEqual([0]);
+    expect([...compactLength(63)]).toEqual([0xfc]);
+    expect([...compactLength(64)]).toEqual([0x01, 0x01]);
+    expect([...compactLength(16383)]).toEqual([0xfd, 0xff]);
+    expect([...compactLength(16384)]).toEqual([0x02, 0x00, 0x01, 0x00]);
+    // The passkey check-in's proving key, 448 MB: four bytes, little-endian, the length times four plus two.
+    const big = compactLength(469_859_416);
+    expect(new DataView(big.buffer).getUint32(0, true)).toBe(469_859_416 * 4 + 2);
+    expect(() => compactLength(2 ** 30)).toThrow(/out of range/);
+  });
+
+  it("builds the request body around the key, byte for byte what the ledger's own function gives", async () => {
+    const preimage = await depositPreimage();
+    for (const size of [0, 1, 63, 64, 300, 16_383, 16_384, 70_000, 3_000_000]) {
+      for (const binding of [undefined, 77n]) {
+        const proverKey = pattern(size, 9);
+        const whole = createProvingPayload(preimage, binding, { proverKey, verifierKey, ir });
+        expect(same(await joined(provingPayloadParts(preimage, binding, { proverKey, verifierKey, ir })), whole), `key of ${size} bytes`).toBe(true);
+        // The key as a Blob: it is never read here, only placed.
+        expect(same(await joined(provingPayloadParts(preimage, binding, { proverKey: new Blob([proverKey as BlobPart]), verifierKey, ir })), whole), `Blob of ${size} bytes`).toBe(true);
+      }
+    }
+  });
+
+  it('sends a small key packed by the ledger and a large one spliced in as a Blob, and both arrive whole', async () => {
+    const preimage = await depositPreimage();
+    const posts: { path: string; body: Uint8Array }[] = [];
+    const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      posts.push({ path: new URL(String(input)).pathname, body: new Uint8Array(await new Response(init?.body).arrayBuffer()) });
+      return new Response(new Uint8Array([1, 2, 3]));
+    }) as typeof fetch;
+    const small = pattern(200_000, 1);
+    const large = pattern(LARGE_KEY_BYTES + 5, 2);
+    let blobAsked = 0;
+    let released = 0;
+    const keys = (proverKey: Uint8Array, asBlob: boolean) => ({
+      getProverKey: async () => proverKey,
+      getVerifierKey: async () => verifierKey,
+      getZKIR: async () => ir,
+      ...(asBlob ? { getProverKeyBlob: async () => { blobAsked++; return new Blob([proverKey as BlobPart]); } } : {}),
+      release: () => { released++; },
+    });
+
+    expect(await proofServerProver('http://localhost:6300/', keys(small, false), { fetch: fetchFn }).prove(preimage, 'deposit', undefined)).toEqual(new Uint8Array([1, 2, 3]));
+    expect(posts[0].path).toBe('/prove');
+    expect(same(posts[0].body, createProvingPayload(preimage, undefined, { proverKey: small, verifierKey, ir }))).toBe(true);
+    expect(released).toBe(1);
+
+    await proofServerProver('http://localhost:6300', keys(large, true), { fetch: fetchFn }).prove(preimage, 'deposit', 5n);
+    expect(blobAsked).toBe(1);
+    expect(same(posts[1].body, createProvingPayload(preimage, 5n, { proverKey: large, verifierKey, ir }))).toBe(true);
+
+    // Large, but only available as bytes (Node): still spliced, still identical.
+    await proofServerProver('http://localhost:6300', keys(large, false), { fetch: fetchFn }).prove(preimage, 'deposit', undefined);
+    expect(same(posts[2].body, createProvingPayload(preimage, undefined, { proverKey: large, verifierKey, ir }))).toBe(true);
+  });
+
+  it('says so when the proof server refuses or is not there', async () => {
+    const preimage = await depositPreimage();
+    const keys = { getProverKey: async () => pattern(10, 1), getVerifierKey: async () => verifierKey, getZKIR: async () => ir };
+    const refusing = proofServerProver('http://localhost:6300', keys, { fetch: (async () => new Response('no', { status: 500, statusText: 'Internal Server Error' })) as typeof fetch });
+    const refused = await refusing.prove(preimage, 'deposit').catch((e: unknown) => e);
+    expect(String(refused)).toMatch(/the proof server answered 500 Internal Server Error/);
+    expect(describeProblem(refused)).toMatchObject({ kind: 'proof-server', title: 'The proof could not be made' });
+    const absent = proofServerProver('http://localhost:6300', keys, { fetch: (async () => { throw new TypeError('Failed to fetch'); }) as typeof fetch });
+    expect(describeProblem(await absent.check(preimage, 'deposit').catch((e: unknown) => e))).toMatchObject({ kind: 'proof-server' });
   });
 });
 
