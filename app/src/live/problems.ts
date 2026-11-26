@@ -189,6 +189,16 @@ export function describeProblem(e: unknown, ctx: ProblemContext = {}): Problem {
   if (code === 'Rejected' || code === 'PermissionRejected' || has(chain, /user (rejected|denied|declined|cancell?ed)|rejected by (the )?user|request (was )?rejected/i)) {
     return { kind: 'rejected', title: 'You declined in your wallet', body: `Nothing was sent and nothing changed. If that was a mistake, try again and approve the request in ${wallet}.`, retry: true };
   }
+  // Lace answers "Wallet is unavailable" when the site is connected but the
+  // wallet behind that connection is not running: it is locked, still loading,
+  // or was switched to another network since connecting. (Read in Lace 2.5.2.)
+  if (has(chain, /wallet is unavailable|no account is connected for this dapp/i)) {
+    return {
+      kind: 'disconnected', title: `${cap(wallet)} is not ready`,
+      body: `${cap(wallet)} is installed, but its Midnight wallet did not answer. Nothing was sent. Open ${wallet}, unlock it, check it is on the test network you meant to use, and wait until your balance shows. Then try again. If it keeps happening, reload this page and connect again.`,
+      detail, retry: true,
+    };
+  }
   if (code === 'Disconnected' || has(chain, /\bdisconnected\b|connection (to the wallet )?(was )?lost/i)) {
     return { kind: 'disconnected', title: `${cap(wallet)} disconnected`, body: `The connection to ${wallet} was lost. Unlock the wallet and connect again. Nothing was sent.`, detail, retry: true };
   }

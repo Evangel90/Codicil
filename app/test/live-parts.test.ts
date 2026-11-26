@@ -502,6 +502,10 @@ describe('what can go wrong, in words a person can act on', () => {
     expect(describeProblem(connector('InsufficientFunds', 'not enough'))).toMatchObject({ kind: 'no-dust', title: 'Not enough DUST for the fee yet' });
     expect(describeProblem(new Error('balancing failed', { cause: new Error('could not balance dust') })).kind).toBe('no-dust');
     expect(describeProblem(connector('Disconnected', 'gone'), { wallet: 'Lace' })).toMatchObject({ kind: 'disconnected', title: 'Lace disconnected' });
+    // What Lace 2.5.2 answers when the wallet behind a connection is locked or not loaded.
+    const notReady = describeProblem(connector('InternalError', 'Wallet is unavailable'), { wallet: 'Lace' });
+    expect(notReady).toMatchObject({ kind: 'disconnected', title: 'Lace is not ready', retry: true });
+    expect(notReady.body).toMatch(/unlock it/);
     expect(describeProblem(Object.assign(new Error('The operation either timed out or was not allowed'), { name: 'NotAllowedError' }))).toMatchObject({ kind: 'rejected', title: 'The passkey was not used' });
     const down = describeProblem(new ProofServerDown('http://localhost:6300'));
     expect(down).toMatchObject({ kind: 'proof-server', title: 'Start your proof server', retry: true });
