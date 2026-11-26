@@ -117,7 +117,7 @@ npm run dev                               # then open http://localhost:5173/#/ap
 ```
 
 1. **Connect Lace.** The bar under the header names the network and shows your tNIGHT and DUST.
-2. **Create a vault**: your name, a passkey, your heirs and their shares, guardians if you want
+2. **Create your will**: your name, a passkey, your heirs and their shares, guardians if you want
    them, and the timers. To see the whole life of a vault in one sitting, choose **Trying it out, in
    minutes** on the timers step.
 3. **Seal the will.** Lace asks you to approve **eight transactions** over about three minutes: the

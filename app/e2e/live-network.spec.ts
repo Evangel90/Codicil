@@ -143,7 +143,7 @@ test('an owner creates a vault and checks in; an heir starts the switch, release
   await expect(owner.getByText('Midnight Preview. Tokens here have no value.')).toBeVisible();
   await expect(owner.getByText(`${formatNight(start.night, 0)} tNIGHT`)).toBeVisible({ timeout: 30_000 });
 
-  await owner.getByRole('button', { name: 'Create a vault' }).click();
+  await owner.getByRole('button', { name: 'Create your will' }).click();
   await owner.getByLabel('Your name').fill('Ngozi Adeyemi');
   await owner.getByRole('button', { name: 'Create a passkey on this device' }).click();
   await expect(owner.getByText('Passkey created on this device.')).toBeVisible();

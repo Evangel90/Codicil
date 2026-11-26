@@ -210,7 +210,7 @@ function storyTime(anchors: HTMLElement[]): number {
 // Written for the person deciding whether to use it, not for someone studying
 // how it is built. The technical account lives in the docs the footer links to.
 
-/** Where "Create your vault" goes. */
+/** Where "Create your will" goes. */
 const APP = '#/app';
 const DEMO = '#/demo';
 
@@ -372,7 +372,7 @@ export function Landing() {
           </nav>
           <span className="lx-header-end">
             <ThemeToggle />
-            <a href={APP} className="btn btn-primary btn-sm">Create your vault</a>
+            <a href={APP} className="btn btn-primary btn-sm">Create your will</a>
           </span>
         </div>
       </header>
@@ -386,7 +386,7 @@ export function Landing() {
               they can claim what you left them. Until that day, nobody can see who they are or what they will get.
             </p>
             <div className="lx-actions fade-in" style={{ animationDelay: '300ms' }}>
-              <a href={APP} className="btn btn-primary btn-lg">Create your vault</a>
+              <a href={APP} className="btn btn-primary btn-lg">Create your will</a>
               <a href={DEMO} className="btn btn-secondary btn-lg">Try the guided demo</a>
             </div>
             <p className="lx-note fade-in" style={{ animationDelay: '450ms' }}>
@@ -508,9 +508,9 @@ export function Landing() {
 
         <section className="lx-wrap lx-cta" aria-labelledby="cta-h">
           <h2 id="cta-h" className="lx-h2">Set it up once. After that, it is one touch.</h2>
-          <p>Create a vault on the test network in about ten minutes. Or watch one work first: the guided demo plays a whole inheritance, from the will to an heir’s claim, in five.</p>
+          <p>Create your will on the test network in about ten minutes. Or watch one work first: the guided demo plays a whole inheritance, from the will to an heir’s claim, in five.</p>
           <div className="lx-actions">
-            <a href={APP} className="btn btn-primary btn-lg">Create your vault</a>
+            <a href={APP} className="btn btn-primary btn-lg">Create your will</a>
             <a href={DEMO} className="btn btn-secondary btn-lg">Try the guided demo</a>
           </div>
         </section>

@@ -97,9 +97,9 @@ function Start({ onCreate, onBackup, onBack, network, elsewhere }: {
         {onBack && <div><button type="button" className="btn btn-ghost btn-sm" onClick={onBack}>Back to my vault</button></div>}
       </div>
       <section className="card pad-24 stack-12">
-        <h2 className="disp h-card">I want to create a vault</h2>
+        <h2 className="disp h-card">I want to create my will</h2>
         <p className="muted">Name your heirs, choose how often you will check in, and seal your will. About ten minutes, most of it waiting for the network.</p>
-        <div><button type="button" className="btn btn-primary" onClick={onCreate}>Create a vault</button></div>
+        <div><button type="button" className="btn btn-primary" onClick={onCreate}>Create your will</button></div>
       </section>
       <section className="card pad-24 stack-12">
         <h2 className="disp h-card">I was given an invitation</h2>

@@ -101,7 +101,7 @@ npm run dev
 1. Open `http://localhost:5173/#/app` and press **Connect Lace**. If something is missing, the page
    says what and how to fix it: no wallet, another network, no tNIGHT (with the faucet for your
    network), no DUST yet, no proof server.
-2. **Create a vault.** On the timers step choose **Trying it out, in minutes**, so a deadline is
+2. **Create your will.** On the timers step choose **Trying it out, in minutes**, so a deadline is
    minutes away, not a month.
 3. **Seal the will.** Approve the eight transactions in Lace, about three minutes in all. The page
    explains why there are eight. Close the tab in the middle if you like: it continues afterwards.

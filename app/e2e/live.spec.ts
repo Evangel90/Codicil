@@ -135,7 +135,7 @@ for (const network of (REAL_PREVIEW ? ['preview'] : ['preview', 'preprod']) as (
     await expect(page.getByText('5,000 tNIGHT')).toBeVisible();
     await expect(heading(page, 'What brings you here?')).toBeVisible();
     await expect(page.getByText(`no vaults in this browser on Midnight ${Network} yet`)).toBeVisible();
-    for (const way of ['I want to create a vault', 'I was given an invitation', 'I have a backup file']) await expect(heading(page, way)).toBeVisible();
+    for (const way of ['I want to create my will', 'I was given an invitation', 'I have a backup file']) await expect(heading(page, way)).toBeVisible();
 
     // A bad invitation says what is wrong with it.
     await page.getByLabel('Your invitation').fill('hello');
@@ -143,7 +143,7 @@ for (const network of (REAL_PREVIEW ? ['preview'] : ['preview', 'preprod']) as (
     await expect(page.getByText(/That is not a Codicil invitation/)).toBeVisible();
 
     // The wizard: the owner's own people, a real passkey.
-    await page.getByRole('button', { name: 'Create a vault' }).click();
+    await page.getByRole('button', { name: 'Create your will' }).click();
     await page.getByLabel('Your name').fill('Ngozi Adeyemi');
     await page.getByRole('button', { name: 'Create a passkey on this device' }).click();
     await expect(page.getByText('Passkey created on this device.')).toBeVisible();
@@ -211,7 +211,7 @@ test('a wallet with no tokens is sent to the right faucet, and one with no DUST 
   });
   await page.goto('/#/app');
   await page.getByRole('button', { name: 'Connect Lace' }).click();
-  await page.getByRole('button', { name: 'Create a vault' }).click();
+  await page.getByRole('button', { name: 'Create your will' }).click();
   await page.getByLabel('Your name').fill('Ngozi');
   // No passkey hardware here: the app offers a key kept in the browser, and says what that costs.
   await expect(page.getByText(/less safe than a passkey/)).toBeVisible();
