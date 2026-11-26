@@ -165,6 +165,16 @@ export function HeirView({ s, id, openTab }: { s: Snapshot; id: HeirProfile['id'
         </section>
       )}
 
+      {s.messages.some((m) => m.to === id) && (
+        <button type="button" className="card rowlink savings-row" onClick={() => openTab('messages')}>
+          <span className="savings-row-icon" aria-hidden="true"><Icon d={ICONS.letter} size={17} stroke={1.5} /></span>
+          <span className="lens-text">
+            <span>{OWNER_FIRST} left you a sealed message</span>
+            <span>{s.messages.find((m) => m.to === id)!.opened ? 'Opened on this device' : released ? 'It can be opened once guardians hand over their pieces' : 'It opens after the will is released'}</span>
+          </span>
+        </button>
+      )}
+
       {id === s.position.beneficiary && (
         <button type="button" className="card rowlink savings-row" onClick={() => openTab('savings')}>
           <span className="savings-row-icon" aria-hidden="true"><Icon d={ICONS.chain} size={17} stroke={1.5} /></span>

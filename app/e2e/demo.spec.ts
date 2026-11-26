@@ -393,3 +393,82 @@ test('new guardians, and a lost passkey recovered with the saved key', async ({ 
 
   expect(errors).toEqual([]);
 });
+
+test('a sealed message: shut until the release, then opened by the one person it is for', async ({ page }) => {
+  const errors = watchErrors(page);
+  await createVault(page);
+  const nav = page.getByRole('navigation', { name: 'Sections' });
+  const main = page.getByRole('main');
+  const actAs = page.getByRole('group', { name: 'Act as' });
+  const nextBar = page.getByRole('status').filter({ hasText: /^Next/ });
+  const messages = () => nav.getByRole('button', { name: 'Messages' }).click();
+  const SECRET = 'harbor velvet orbit lantern copper meadow';
+
+  // Amara writes to Ada and seals it. No transaction sheet opens: nothing goes to the chain.
+  await messages();
+  await expect(nextBar).toContainText('Amara can seal a message for one person.');
+  await main.getByRole('button', { name: 'Write to Ada' }).click();
+  await expect(main.getByRole('button', { name: 'Seal for Ada' })).toBeDisabled();
+  await main.getByRole('button', { name: 'a recovery phrase' }).click();
+  await expect(main.getByLabel('Your message for Ada')).toHaveValue(new RegExp(SECRET));
+  await main.getByRole('button', { name: 'Seal for Ada' }).click();
+  await expect(page.locator('.toast')).toContainText('Each of your 3 guardians holds a piece of the key. 2 of them are needed.');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(main).toContainText('Dr. Mensah, Sarah Lin and Tomás each hold a piece of its key. Any 2 of them open it, together with Ada.');
+
+  // The chain has no record of it; the private side of the lens does.
+  await nav.getByRole('button', { name: 'Privacy Lens' }).click();
+  await expect(page.locator('.lens-public')).toContainText('nothing · no field');
+  await expect(page.locator('.lens-public')).not.toContainText('Ada');
+  await expect(page.locator('.lens-private .ledger')).toContainText('1, for Ada');
+
+  // Ada holds sealed text she cannot open, and a guardian's app keeps its piece.
+  await actAs.getByRole('button', { name: 'Heir' }).click();
+  await page.getByRole('group', { name: 'Which heir' }).getByRole('button', { name: 'Ada' }).click();
+  await nav.getByRole('button', { name: 'Your share' }).click();
+  await main.getByRole('button', { name: /Amara left you a sealed message/ }).click();
+  await expect(main.getByRole('heading', { name: 'Amara left you a sealed message.' })).toBeVisible();
+  await expect(main).not.toContainText(SECRET);
+  await main.getByRole('button', { name: 'Open the message' }).click();
+  await expect(main.getByRole('alert')).toHaveText('It is still locked. It needs 2 guardian pieces and none has arrived.');
+  await actAs.getByRole('button', { name: 'Guardian' }).click();
+  await messages();
+  await expect(main.getByRole('heading', { name: 'You hold a piece of a key.' })).toBeVisible();
+  await main.getByRole('button', { name: 'Hand over my piece' }).click();
+  await expect(main.getByRole('alert')).toHaveText('The vault has not released, so your piece stays on this device. Nothing was sent.');
+
+  // Amara stops checking in. The switch starts, nobody cancels, the will is released.
+  await page.getByRole('button', { name: 'Skip to deadline' }).click();
+  await nav.getByRole('button', { name: 'Guardian' }).click();
+  await nextBar.getByRole('button', { name: /Start the switch/ }).click();
+  await finish(page, /switch has started|countdown/i);
+  await page.getByRole('button', { name: 'Skip challenge window' }).click();
+  await nextBar.getByRole('button', { name: /Release the will/ }).click();
+  await finish(page, /The will is released/);
+
+  // Two guardians hand over their pieces; the first alone is not enough.
+  await messages();
+  await expect(nextBar).toContainText('2 more are needed before Ada can open the message.');
+  await main.getByRole('button', { name: 'Hand over my piece' }).click();
+  await expect(main).toContainText('Your piece is handed over.');
+  await expect(nextBar).toContainText('One more is needed');
+  await page.getByRole('group', { name: 'Which guardian' }).getByRole('button', { name: /Tomás/ }).click();
+  await main.getByRole('button', { name: 'Hand over my piece' }).click();
+  await expect(nextBar).toContainText('Enough pieces have arrived. Ada can open the message now.');
+
+  // Ada opens it on her own device, with real decryption in the browser.
+  await nextBar.getByRole('button', { name: 'Act as Ada' }).click();
+  await expect(main.getByRole('img', { name: '2 of 2 pieces have arrived' })).toBeVisible();
+  await main.getByRole('button', { name: 'Open the message' }).click();
+  await expect(main.getByRole('heading', { name: "Amara's message to you." })).toBeVisible();
+  await expect(main.getByRole('article', { name: 'Message from Amara' })).toContainText(SECRET);
+
+  // Nobody else sees it, and it is still not on the chain.
+  await page.getByRole('group', { name: 'Which heir' }).getByRole('button', { name: 'Ben' }).click();
+  await expect(main.getByRole('heading', { name: 'No sealed message on this device.' })).toBeVisible();
+  await nav.getByRole('button', { name: 'Privacy Lens' }).click();
+  await expect(page.locator('.lens-public')).toContainText('nothing · no field');
+  await expect(page.locator('.lens-public')).not.toContainText(/Ada|harbor/);
+
+  expect(errors).toEqual([]);
+});

@@ -53,6 +53,13 @@ or death-registry service), **any third party** (every trigger is permissionless
   loss discovered later than that cannot be recovered and the vault releases to the heirs (D18).
   Without a recovery key the vault always releases. Mitigations: register both a passkey (synced
   via iCloud/Google) and a wallet, and keep a recovery key.
+- **Sealed messages rest on the guardians' promise.** The chain cannot keep a secret, so a sealed
+  message's key is held by people (D20). The needed number of guardians, acting together with the
+  recipient, can open a message before the vault releases; nothing on the chain stops or records
+  it. If too many guardians lose their pieces, the message never opens. A message that was changed
+  or removed can still be opened after a release by anyone who kept the old pieces and the old
+  sealed text. An owner under duress can be made to keep checking in, which keeps a message shut.
+  This is unaudited: do not rely on it where someone's safety depends on a disclosure.
 - **The maintenance key can change the vault's rules.** Like every contract deployed through
   Midnight.js, the vault has a maintenance authority: a key that can insert and remove circuits'
   verifier keys. The staged deployment uses it for a few minutes (D19). Afterwards it is a standing

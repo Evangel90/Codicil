@@ -266,7 +266,7 @@ export function TxSheet({ tx, onDismiss = () => demo.dismissTx(), onRetry = () =
 }
 
 /** Glass pill toast; auto-dismisses after 7 seconds. */
-export function Toast({ toast, onDismiss = () => demo.dismissToast() }: { toast?: Pick<ToastT, 'id' | 'title'>; onDismiss?: () => void }) {
+export function Toast({ toast, onDismiss = () => demo.dismissToast() }: { toast?: Pick<ToastT, 'id' | 'title'> & { body?: string }; onDismiss?: () => void }) {
   useEffect(() => {
     if (!toast) return;
     const id = setTimeout(onDismiss, 7000);
@@ -277,7 +277,7 @@ export function Toast({ toast, onDismiss = () => demo.dismissToast() }: { toast?
   return (
     <div className="toast glass" role="status" key={toast.id}>
       <span className="toast-icon"><Icon d={ICONS.check} size={16} stroke={2} /></span>
-      <span className="toast-text">{toast.title}</span>
+      <span className="toast-text">{toast.title}{toast.body && <span className="toast-body">{toast.body}</span>}</span>
       <button type="button" className="icon-btn icon-btn-sm" aria-label="Dismiss" onClick={onDismiss}>
         <Icon d={ICONS.close} size={14} stroke={1.8} />
       </button>

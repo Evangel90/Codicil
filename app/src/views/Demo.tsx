@@ -12,7 +12,7 @@ import { jumpsFor, type CommandContext, type Tab } from '../demo/commands.js';
 import { calendarFile, downloadCalendar, remindersFor } from '../demo/ics.js';
 import { IS_MAC, Palette, usePaletteShortcut } from './Palette.js';
 import { DAY, demo, guardianById, HEIRS, OWNER_FIRST, useDemo, type Actor, type Snapshot } from '../demo/store.js';
-import { nextUp, positionNext, positionStage, sameActor, type NextUp } from '../demo/guide.js';
+import { messagesNext, nextUp, positionNext, positionStage, sameActor, type NextUp } from '../demo/guide.js';
 import { Wizard } from './Wizard.js';
 import { OwnerView } from './OwnerView.js';
 import { WillView } from './WillView.js';
@@ -22,6 +22,7 @@ import { LensView } from './LensView.js';
 import { InspectView } from './InspectView.js';
 import { SavingsView } from './SavingsView.js';
 import { SettingsView } from './SettingsView.js';
+import { MessagesView } from './MessagesView.js';
 
 export type { Tab };
 
@@ -31,7 +32,7 @@ const upper = (t: number) =>
 function Nav({ s, tab, setTab }: { s: Snapshot; tab: Tab; setTab: (t: Tab) => void }) {
   const first = s.actor.kind === 'owner' ? 'Vault' : s.actor.kind === 'heir' ? 'Your share' : s.actor.kind === 'guardian' ? 'Guardian' : 'Inspect';
   const mine: [Tab, string][] = s.actor.kind === 'owner' ? [['will', 'Will'], ['settings', 'Settings']] : [];
-  const items: [Tab, string][] = [['vault', first], ...mine, ['savings', 'Savings'], ['lens', 'Privacy Lens']];
+  const items: [Tab, string][] = [['vault', first], ...mine, ['savings', 'Savings'], ['messages', 'Messages'], ['lens', 'Privacy Lens']];
   return (
     <nav className="pillnav" aria-label="Sections">
       {items.map(([id, label]) => (
@@ -89,8 +90,8 @@ function ActAs({ s, up }: { s: Snapshot; up: NextUp }) {
 }
 
 function DemoBar({ s, tab, setTab, onReset }: { s: Snapshot; tab: Tab; setTab: (t: Tab) => void; onReset: () => void }) {
-  // The savings screen has its own next step; everywhere else the vault's story leads.
-  const up = tab === 'savings' ? positionNext(s) : nextUp(s);
+  // The savings and messages screens have their own next step; everywhere else the vault's story leads.
+  const up = tab === 'savings' ? positionNext(s) : tab === 'messages' ? messagesNext(s) : nextUp(s);
   const jumps = jumpsFor(s);
   const day = Math.floor((s.now - s.deployedAt) / DAY) + 1;
   return (
@@ -205,6 +206,7 @@ export function Demo() {
         <main className="wrap page" id="main">
           {tab === 'lens' ? <LensView s={s} />
             : tab === 'savings' ? <SavingsView s={s} />
+            : tab === 'messages' ? <MessagesView s={s} />
             : tab === 'will' && s.actor.kind === 'owner' ? <WillView s={s} />
             : tab === 'settings' && s.actor.kind === 'owner' ? <SettingsView s={s} />
             : s.actor.kind === 'owner' ? <OwnerView s={s} openTab={setTab} />

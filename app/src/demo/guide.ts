@@ -8,7 +8,8 @@
 import { Phase } from '@codicil/contracts/vault';
 import { VAULT_EVENTS } from '@codicil/sdk';
 import {
-  ATTESTOR, CLAIM_WINDOW, DAY, fmtDate, guardianById, HEIRS, OWNER_FIRST, span, spanAdj, type Actor, type RecoveryView, type Snapshot, type VaultSetup,
+  ATTESTOR, CLAIM_WINDOW, DAY, fmtDate, guardianById, HEIRS, OWNER_FIRST, span, spanAdj,
+  type Actor, type MessageView, type RecoveryView, type Snapshot, type VaultSetup,
 } from './store.js';
 
 const d = (seconds: number) => {
@@ -191,6 +192,43 @@ export function positionNext(s: Snapshot): NextUp {
 }
 
 // ─── The will in plain words ────────────────────────────────────────────────
+// ─── The messages screen ────────────────────────────────────────────────────
+/** Where a sealed message is: shut, waiting for guardians' pieces, ready to open, or read. */
+export type MessageStage = 'sealed' | 'collecting' | 'ready' | 'opened';
+
+export const messageStage = (s: Pick<Snapshot, 'phase'>, m: MessageView): MessageStage =>
+  m.opened ? 'opened' : m.handed.length >= m.needed ? 'ready' : s.phase === Phase.released ? 'collecting' : 'sealed';
+
+/** What to try on the messages screen: seal one, then follow it through the release to its reader. */
+export function messagesNext(s: Snapshot): NextUp {
+  const name = (m: MessageView) => HEIRS.find((h) => h.id === m.to)!.name;
+  if (s.messages.length === 0) {
+    return s.phase === Phase.released
+      ? { tone: 'done', who: [], text: 'The will is released and no message was sealed. Reset the demo to seal one and follow it through.' }
+      : { tone: 'attention', who: [{ kind: 'owner' }], text: `${OWNER_FIRST} can seal a message for one person. It opens only after the vault releases.` };
+  }
+  const at = (stage: MessageStage) => s.messages.filter((m) => messageStage(s, m) === stage);
+  const ready = at('ready');
+  if (ready.length) {
+    return { tone: 'attention', who: ready.map((m): Actor => ({ kind: 'heir', id: m.to })), text: `Enough pieces have arrived. ${name(ready[0])} can open the message now.` };
+  }
+  const collecting = at('collecting');
+  if (collecting.length) {
+    const m = collecting[0];
+    const waiting = [...new Set(collecting.flatMap((c) => c.holders.filter((id) => !c.handed.includes(id))))];
+    const more = m.needed - m.handed.length;
+    return {
+      tone: 'attention', who: waiting.map((id): Actor => ({ kind: 'guardian', id })),
+      text: `The vault has released, so guardians can hand over their pieces. ${more === 1 ? 'One more is' : `${more} more are`} needed before ${name(m)} can open the message.`,
+    };
+  }
+  if (at('sealed').length) {
+    const up = nextUp(s);
+    return { ...up, text: `Sealed, and shut until the vault releases. ${up.text}` };
+  }
+  return { tone: 'done', who: [], text: 'Every sealed message has been opened by the person it was for. None of it touched the chain.' };
+}
+
 export interface Rule { topic: string; rule: string; meaning: string }
 export interface Warning { topic: string; tone: 'warn' | 'info'; text: string }
 

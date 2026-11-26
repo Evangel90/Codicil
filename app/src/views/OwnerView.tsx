@@ -251,6 +251,17 @@ export function OwnerView({ s, openTab }: { s: Snapshot; openTab: (t: Tab) => vo
             <span className="lens-text"><span>Open the Privacy Lens</span><span>See exactly what the chain knows</span></span>
             <span aria-hidden="true" className="muted">→</span>
           </button>
+          <button type="button" className="rowlink savings-row" onClick={() => openTab('messages')}>
+            <span className="savings-row-icon" aria-hidden="true"><Icon d={ICONS.letter} size={17} stroke={1.5} /></span>
+            <span className="lens-text">
+              <span>Sealed messages</span>
+              <span>
+                {s.messages.length === 0 ? 'A letter, a recovery phrase or documents, opened only after release'
+                  : s.phase === Phase.released ? `${s.messages.filter((m) => m.opened).length} of ${s.messages.length} opened by the person it was for`
+                  : `${s.messages.length} sealed · shut until this will is released`}
+              </span>
+            </span>
+          </button>
           <button type="button" className="rowlink savings-row" onClick={() => openTab('savings')}>
             <span className="savings-row-icon" aria-hidden="true"><Icon d={ICONS.chain} size={17} stroke={1.5} /></span>
             <span className="lens-text">

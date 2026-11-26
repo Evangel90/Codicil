@@ -16,8 +16,8 @@ npm run e2e          # builds the app and runs Playwright in Chrome
 | Level | Command | Count | Time |
 |---|---|---|---|
 | Contract simulator + ZK constraint checks | `npm test -w @codicil/contracts` | 186 | ~6 s |
-| SDK | `npm test -w @codicil/sdk` | 34 | ~1 s |
-| App logic (the demo store, the live store and helpers) | `npm test -w @codicil/app` | 111 | ~15 s |
+| SDK | `npm test -w @codicil/sdk` | 49 | ~1 s |
+| App logic (the demo store, the live store and helpers) | `npm test -w @codicil/app` | 135 | ~15 s |
 | Network script, offline parts | `npm test -w @codicil/preprod` | 88 (one more when the proving keys are present) | ~3 s |
 | Browser end-to-end | `npm run e2e` | 10 (one more, on a network, is opt-in) | ~90 s |
 | Live mode on a real network | `npm run live:e2e` | 14 transactions | ~13 min |
@@ -61,6 +61,13 @@ passkey and CIP-30 format conversion, the will builder and Merkle paths, witness
 encoding (every entry round-trips; it fits a QR code), and the on-device letter check (current
 letter, older will, another vault, which key opens it).
 
+[`sealed.test.ts`](../sdk/test/sealed.test.ts) covers sealed messages (D20). Splitting a key: every
+choice of the needed pieces rebuilds it, fewer give another value, one missing piece leaves every
+secret possible, 255 pieces work, and pieces that cannot belong together are refused. Sealing: a
+message opens with any needed pieces, not with fewer, not with a forged piece (which is named), not
+with another message's pieces, not by the guardians without the recipient's half, and not after the
+sealed text, its nonce or its vault is changed.
+
 ## 3. App tests
 
 [`app/test/`](../app/test) drives the demo store, which runs the real contract in-memory:
@@ -93,6 +100,12 @@ letter, older will, another vault, which key opens it).
   trace, the vault hook closed to direct calls, the guidance and palette commands for the savings
   screen, the code shown on screen checked against the contract source, and the `Buffer` stand-in
   the browser needs.
+- [`messages.test.ts`](../app/test/messages.test.ts): sealed messages. Sealing changes nothing on
+  the chain and publishes nothing; a guardian's app keeps its piece while the vault is armed or
+  pending; the recipient cannot open with their half alone; after the release any two of three
+  pieces open it and one does not; a check-in that cancels the switch keeps it shut; changing the
+  guardians seals it again so the removed guardian holds nothing; and the guidance and palette
+  commands for the screen.
 
 Live mode has two more files. They run the **live store** on the in-memory chain, which is the same
 store the app runs on a network: only the host behind the chain boundary differs
@@ -150,7 +163,10 @@ Privacy Lens show the grace length, "no release fee" and the cancelled recovery,
 **New guardians and a lost passkey:** one guardian has voted when the owner replaces another → the
 vote is void, the removed guardian is refused, the new one votes → a recovery with the saved key
 creates a second passkey in the virtual authenticator → the delay is skipped and anyone finishes it
-→ the old passkey is refused and the new one checks in.
+→ the old passkey is refused and the new one checks in. **A sealed message:** the owner seals one
+for Ada with no transaction → the Privacy Lens shows nothing on the public side → Ada cannot open
+it and a guardian's app refuses to hand over its piece → timeout and release → one guardian's piece
+is not enough, a second is → Ada opens it with real decryption in the browser, and Ben sees nothing.
 
 [`app/e2e/live.spec.ts`](../app/e2e/live.spec.ts) opens live mode with a stand-in for the Lace
 extension under `window.midnight`, shaped as the DApp connector 4.1.0 types describe. No wallet: it

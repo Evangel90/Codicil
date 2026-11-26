@@ -398,3 +398,41 @@ intended end state is to give it up after the last insert, by replacing the auth
 nobody can satisfy, so the vault is immutable. That step is not built or tested yet
 ([THREAT_MODEL.md](THREAT_MODEL.md)); until it is, the maintenance key deserves the same care as the
 owner's own keys.
+
+## D20: Sealed messages are kept off the chain; the vault is only their signal (2026-11-26)
+
+**Problem.** A dead man's switch is wanted for more than money: a letter, the recovery phrase of a
+wallet kept outside the vault, documents a journalist wants published if they cannot publish them.
+A contract can pay out because the chain holds the tokens. It cannot hold a secret: everything a
+contract stores is public, so someone outside the chain has to keep a decryption key until release.
+A time-lock service does not fit, because a time lock cannot be cancelled by a check-in.
+
+**Decision.** A message is encrypted on the owner's device (AES-256-GCM) under a key derived from
+two halves. The recipient holds one half and the sealed text. The other half is split among the
+vault's guardians with Shamir's scheme over GF(256): one piece each, and as many needed as the
+vault needs guardian votes. Guardians hand their pieces over when the vault's public state says
+released. The code is [`sdk/src/sealed.ts`](../sdk/src/sealed.ts); the demo's Messages tab runs it.
+
+- Guardians alone cannot read a message: they never hold the recipient's half.
+- The recipient alone cannot read it early: they never hold the guardians' half.
+- Every piece has a fingerprint in what the recipient holds, so a wrong or damaged piece is caught
+  on arrival and named.
+- The key is bound to the vault's address, so sealed text moved to another vault does not open.
+
+**Nothing goes on the chain.** Sealing, handing over a piece and opening are not transactions. The
+ledger has no field for messages, so it does not show that one exists, who wrote it or who it is
+for. The contract is unchanged.
+
+**What it does not enforce.** The vault enforces the timing of money. For a message it only gives
+the signal, and keeping a piece until then is a promise: the needed number of guardians, together
+with the recipient, could open a message early. Taking a message back relies on guardians' apps
+replacing their pieces, so a kept copy of an old piece and the old sealed text would still open the
+old message after a release. Both are in [THREAT_MODEL.md](THREAT_MODEL.md).
+
+**Why reuse the guardians.** They are already the people the owner trusts to say the owner has
+died, they are already hidden on the chain, and the owner already chose how many must agree. A
+second set of key holders would be a second thing to set up and explain.
+
+**Not built yet.** Live mode has no messages. There, pieces and sealed text have to travel inside
+the guardian and heir invitations, and a guardian needs a way to deliver a piece without learning
+who the recipient is. Files, not only text, need storage outside the app.

@@ -6,7 +6,7 @@
 
 import { Phase } from '@codicil/contracts/vault';
 import { ATTESTOR, CLAIM_WINDOW, DAY, demo, guardianById, HEIRS, OWNER_FIRST, type Actor, type Snapshot } from './store.js';
-import { checkInState, nextUp, positionStage, recoveryLive, sameActor } from './guide.js';
+import { checkInState, messageStage, nextUp, positionStage, recoveryLive, sameActor } from './guide.js';
 
 export interface Jump { label: string; to: number }
 
@@ -30,7 +30,7 @@ export function jumpsFor(s: Snapshot): Jump[] {
   return out;
 }
 
-export type Tab = 'vault' | 'will' | 'settings' | 'savings' | 'lens';
+export type Tab = 'vault' | 'will' | 'settings' | 'savings' | 'messages' | 'lens';
 
 export interface Command {
   id: string;
@@ -125,6 +125,24 @@ export function commands(s: Snapshot, ctx: CommandContext): Command[] {
         run: () => { demo.setActor(beneficiary); ctx.setTab('savings'); void demo.withdrawPosition(beneficiary); },
       });
     }
+    // Sealed messages: guardians hand over pieces after the release, then the recipient opens.
+    for (const m of s.messages) {
+      const stage = messageStage(s, m);
+      const name = HEIRS.find((h) => h.id === m.to)!.name;
+      if (stage === 'ready') {
+        out.push({
+          id: `open-message:${m.to}`, label: `Open the sealed message as ${name}`, group: 'Do', keywords: 'sealed message read decrypt disclosure',
+          run: () => { demo.setActor({ kind: 'heir', id: m.to }); ctx.setTab('messages'); void demo.openMessage(m.to); },
+        });
+      }
+    }
+    const holder = s.messages.filter((m) => messageStage(s, m) === 'collecting').flatMap((m) => m.holders.filter((id) => !m.handed.includes(id)))[0];
+    if (holder !== undefined) {
+      out.push({
+        id: 'hand-over', label: `Hand over a piece of the key as ${guardianById(holder).name}`, group: 'Do', keywords: 'sealed message piece share guardian release',
+        run: () => { demo.setActor({ kind: 'guardian', id: holder }); ctx.setTab('messages'); demo.handOverPieces(holder); },
+      });
+    }
   }
 
   const [day, ...skips] = jumpsFor(s);
@@ -151,6 +169,7 @@ export function commands(s: Snapshot, ctx: CommandContext): Command[] {
   if (owner) out.push({ id: 'go:will', label: 'Will and heir letters', group: 'Go to', keywords: 'edit change letters qr', run: () => ctx.setTab('will') });
   if (owner) out.push({ id: 'go:settings', label: 'Guardians, attestor and recovery key', group: 'Go to', keywords: 'settings change add remove replace threshold lost passkey recover', run: () => ctx.setTab('settings') });
   out.push({ id: 'go:savings', label: s.position.name, group: 'Go to', hint: 'inheritable position', keywords: 'inheritable position escrow cross-contract integration developer hook', run: () => ctx.setTab('savings') });
+  out.push({ id: 'go:messages', label: 'Sealed messages', group: 'Go to', hint: s.messages.length ? `${s.messages.length} sealed` : undefined, keywords: 'message letter disclosure journalist secret recovery phrase documents pieces', run: () => ctx.setTab('messages') });
   out.push({ id: 'go:lens', label: 'Privacy Lens', group: 'Go to', keywords: 'ledger public private', run: () => ctx.setTab('lens') });
 
   out.push({ id: 'theme', label: 'Switch theme', group: 'Demo', keywords: 'dark light appearance', run: ctx.toggleTheme });

@@ -33,6 +33,10 @@ results are written down ([VALIDATION.md](VALIDATION.md), [DECISIONS.md](DECISIO
    parameters, [D12](DECISIONS.md)) and deploy the static app.
 6. **Heirs create their own keys** on their own devices, and send the owner only a commitment.
    Today the owner's device generates them, in the demo and in live mode.
+7. **Sealed messages in live mode.** The demo seals a message for one person and opens it after the
+   release, with the key split among the guardians ([D20](DECISIONS.md)). Live mode needs the pieces
+   and the sealed text carried in the invitations, a way for a guardian to deliver a piece without
+   learning who it is for, and files as well as text.
 
 ## Live mode: what it does not do yet
 

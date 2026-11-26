@@ -30,7 +30,7 @@ export function Activity({ s }: { s: Snapshot }) {
                 <div className="act-split fade-in">
                   <div className="tone-public">
                     <span className="eyebrow">Published</span>
-                    <ul>{a.published.map((p) => <li key={p}>{p}</li>)}</ul>
+                    {a.published.length ? <ul>{a.published.map((p) => <li key={p}>{p}</li>)}</ul> : <p className="small muted">Nothing. This was not a transaction, so the chain has no record of it.</p>}
                   </div>
                   <div className="tone-private">
                     <span className="eyebrow">Stayed on the device</span>

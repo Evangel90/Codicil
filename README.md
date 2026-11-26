@@ -77,18 +77,23 @@ generation and network fees are skipped.
    holds tokens for Ben and calls the vault before it pays. Before the release it refuses with its
    own error, `vault not released`; after, the same button pays. The screen shows the one line of
    Compact that makes any contract inheritable.
-8. On the owner's **Settings** tab: add, remove or replace **guardians**, change how many must
+8. Open the **Messages** tab as the owner and seal a message for one person: a letter, a recovery
+   phrase, documents to publish. It is encrypted in your browser, and half of its key is split among
+   the guardians. Before the release the recipient cannot open it and a guardian's app keeps its
+   piece; after, two guardians hand theirs over and the recipient reads it. None of it is a
+   transaction, and the Privacy Lens shows the chain has no record of it.
+9. On the owner's **Settings** tab: add, remove or replace **guardians**, change how many must
    agree, or name an attestor, all in one update signed like a check-in. It starts a new voting
    round and is locked once a countdown has started. With a recovery key, play **"I lost my
    passkey"**: start a recovery with the saved key, then either skip the delay and finish it (the new
    passkey works, the old one is refused) or check in as Amara, which cancels it and retires the key
    for good. While a recovery is in progress her dashboard shows a warning that cannot be missed.
-9. Open the **Privacy Lens** at any point: the real public ledger beside what only the owner's
+10. Open the **Privacy Lens** at any point: the real public ledger beside what only the owner's
    device knows. Or **Act as Anyone** for the public inspector: what a stranger can learn from the
    vault address alone.
-9. The owner can download check-in reminders as a calendar file, made on the device, so no server
+11. The owner can download check-in reminders as a calendar file, made on the device, so no server
    learns the deadline.
-10. Press **⌘K** (Ctrl+K) to do anything from the keyboard: check in, skip ahead, act as anyone.
+12. Press **⌘K** (Ctrl+K) to do anything from the keyboard: check in, skip ahead, act as anyone.
 
 `npm run compile:full` also generates the proving keys (several minutes; sizes in
 [docs/VALIDATION.md](docs/VALIDATION.md)).

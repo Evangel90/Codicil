@@ -42,11 +42,14 @@ import {
   newP256Key,
   newRecoverySecret,
   newSalt,
+  openMessageText,
   payoutFor,
   recoveryCommitment,
   recoveryConfig,
   recoveryStatus,
   rpIdHash,
+  sealMessage as sealForRecipient,
+  SealedError,
   settingsDigest,
   signAttestation,
   timeoutOpensAt,
@@ -59,8 +62,10 @@ import {
   type GuardianSecrets,
   type GuardianSet,
   type HeirKey,
+  type KeyPiece,
   type P256Key,
   type RecoveryStatus,
+  type SealedMessage,
   type VaultEventName,
   type Will,
 } from '@codicil/sdk';
@@ -304,6 +309,32 @@ export interface GuardianView extends GuardianProfile {
   current: boolean;
 }
 
+/** The longest message the demo seals, in characters. */
+export const MESSAGE_MAX = 2000;
+
+/**
+ * A sealed message, as the demo cast holds it. Each part is on a different
+ * person's device; none of it is on the chain.
+ */
+export interface MessageView {
+  to: HeirProfile['id'];
+  sealedAt: number;
+  /** What the owner wrote, as the owner's own device keeps it. */
+  text: string;
+  /** Size of the sealed text the recipient holds, in bytes. */
+  bytes: number;
+  /** The start of the sealed text, hex: what it looks like without its key. */
+  sealedStart: string;
+  /** How many guardian pieces open it, together with the recipient's own half of the key. */
+  needed: number;
+  /** Guardians who hold a piece. */
+  holders: number[];
+  /** Guardians whose piece has reached the recipient. */
+  handed: number[];
+  /** What the recipient read, once it was opened on their device. */
+  opened?: { at: number; text: string };
+}
+
 export interface RecoveryView {
   /** From the SDK's `recoveryStatus()`: public ledger fields and the clock, nothing else. */
   state: RecoveryStatus['state'];
@@ -379,6 +410,8 @@ export interface Snapshot {
   heirs: HeirView[];
   /** The savings contract that pays out when this vault is released. */
   position: PositionView;
+  /** Sealed messages, in the order of the cast. */
+  messages: MessageView[];
   /** Leaf hashes, computed on the owner's device only. */
   leafHashes: string[];
   votedThisRound: number[];
@@ -455,6 +488,20 @@ const POSITION_REFUSALS: Record<PositionRefusal, string> = {
   'already withdrawn': `${POSITION.name} has already paid out. There is nothing left to withdraw.`,
 };
 
+/** One sealed message and where each part of it is. */
+interface HeldMessage {
+  /** On the owner's device: what she wrote. */
+  text: string;
+  sealedAt: number;
+  /** On the recipient's device: the sealed text and their half of the key. */
+  sealed: SealedMessage;
+  /** On each guardian's device: their piece of the other half. */
+  pieces: Map<number, KeyPiece>;
+  /** Pieces that have reached the recipient, and when. */
+  handed: Map<number, number>;
+  opened?: { at: number; text: string };
+}
+
 interface World extends Keys {
   chain: DemoChain;
   passkey: OwnerPasskey;
@@ -486,6 +533,8 @@ interface World extends Keys {
   claimed: Map<number, string>;   // leaf → nullifier hex
   /** Letters each heir has loaded on their own device. */
   held: Map<HeirProfile['id'], string>;
+  /** Sealed messages, by recipient. */
+  messages: Map<HeirProfile['id'], HeldMessage>;
   votedRound: Map<number, bigint>;
 }
 
@@ -612,7 +661,7 @@ class DemoStore {
     );
     this.world = {
       ...k, chain, passkey, setup: { ...setup, attestor: false }, will, guardianSet, deployedAt: now, lastCheckIn: now,
-      claimed: new Map(), votedRound: new Map(), held: new Map(),
+      claimed: new Map(), votedRound: new Map(), held: new Map(), messages: new Map(),
       // Each guardian's device gets the path to its leaf; nobody else does.
       guardianHeld: new Map(setup.guardians.map((id) => [id, guardianSecrets(guardianSet, k.guardianSecretsList[id])])),
       guardianCast: [...setup.guardians],
@@ -971,6 +1020,9 @@ class DemoStore {
         w.guardianHeld.set(id, guardianSecrets(set, w.guardianSecretsList[id]));
         if (!w.guardianCast.includes(id)) w.guardianCast.push(id);
       }
+      // A sealed message's key is cut into one piece per guardian, so new
+      // guardians mean a new key and new pieces.
+      const resealed = await this.resealMessages(w);
       const voided = before.guardianVotes;
       this.log(OWNER_NAME, `Guardians and attestor updated · ${change.threshold} must agree`, 'plain', [
         'The guardians root, the number that must agree, and the attestor commitment (zeros for none)',
@@ -985,6 +1037,7 @@ class DemoStore {
         removed.length ? `${names(removed)} can no longer vote.` : '',
         attestorChanged ? (change.attestor ? `${ATTESTOR.name} can now start the switch with a signed notice.` : `${ATTESTOR.name} can no longer start the switch.`) : '',
         `A new voting round has started${voided > 0n ? `, so the ${voided === 1n ? 'vote' : `${voided} votes`} cast before no longer count${voided === 1n ? 's' : ''}` : ''}.`,
+        resealed ? `Your sealed message${resealed === 1 ? ' was' : 's were'} sealed again, with a new piece of the key for each guardian.` : '',
       ].filter(Boolean).join(' ') + this.afterOwnerSigned(stood);
     }, {
       explain: (code) => {
@@ -1089,6 +1142,111 @@ class DemoStore {
       this.log(who, 'Challenge window ended · will released', 'released', ['Vault state: released', `Estate snapshot: ${this.world!.chain.ledger.estateSnapshot.toLocaleString()}`, 'A "released" event'], []);
       return 'The will is released. Heirs can now claim their shares.';
     });
+  }
+
+  // ─── Sealed messages ──────────────────────────────────────────────────────
+  // None of these is a transaction. A message is sealed, handed over and
+  // opened between people's devices; the chain only says when: "released".
+
+  private async sealFor(w: World, text: string): Promise<HeldMessage> {
+    const holders = w.setup.guardians;
+    const { sealed, pieces } = await sealForRecipient({ vault: w.chain.address, message: text, pieces: holders.length, needed: w.setup.threshold });
+    return { text, sealedAt: w.chain.now, sealed, pieces: new Map(holders.map((id, i) => [id, pieces[i]])), handed: new Map() };
+  }
+
+  /** Seal every message again for the current guardians. Returns how many. */
+  private async resealMessages(w: World): Promise<number> {
+    for (const [to, m] of w.messages) w.messages.set(to, await this.sealFor(w, m.text));
+    return w.messages.size;
+  }
+
+  /**
+   * Seal a message for one person, replacing any earlier one for them.
+   * Returns what went wrong, in words to show, or nothing when it worked.
+   */
+  async sealMessage(to: HeirProfile['id'], text: string): Promise<string | undefined> {
+    const w = this.world;
+    if (!w) return 'There is no vault yet.';
+    const body = text.trim();
+    if (!body) return 'Write the message first.';
+    if (body.length > MESSAGE_MAX) return `That is ${body.length.toLocaleString()} characters. The demo seals up to ${MESSAGE_MAX.toLocaleString()}.`;
+    if (w.chain.ledger.phase === Phase.released) return 'Your vault has released, so messages can no longer be sealed or changed.';
+    const replaced = w.messages.has(to);
+    w.messages.set(to, await this.sealFor(w, body));
+    const name = HEIRS.find((h) => h.id === to)!.name;
+    const n = w.setup.guardians.length;
+    this.log(OWNER_NAME, replaced ? `Sealed message for ${name} replaced` : `Message sealed for ${name}`, 'plain', [], [
+      'The message', 'That a message exists, and who it is for', `The key: half with ${name}, half cut into ${n} piece${n === 1 ? '' : 's'} for your guardians`,
+    ]);
+    this.toast = {
+      id: Date.now(), title: `Sealed for ${name}`,
+      body: n === 1
+        ? `${guardianById(w.setup.guardians[0]).name} holds the guardians' half of the key.`
+        : `Each of your ${n} guardians holds a piece of the key. ${w.setup.threshold} of them are needed.`,
+    };
+    this.emit();
+    return undefined;
+  }
+
+  /** Take a sealed message back. Returns what went wrong, if anything. */
+  removeMessage(to: HeirProfile['id']): string | undefined {
+    const w = this.world;
+    if (!w?.messages.has(to)) return 'There is no sealed message for that person.';
+    if (w.chain.ledger.phase === Phase.released) return 'Your vault has released, so messages can no longer be sealed or changed.';
+    w.messages.delete(to);
+    const name = HEIRS.find((h) => h.id === to)!.name;
+    this.log(OWNER_NAME, `Sealed message for ${name} removed`, 'plain', [], ['That a message existed, and who it was for']);
+    this.toast = { id: Date.now(), title: `Removed the message for ${name}`, body: "Your guardians' apps deleted their pieces of its key." };
+    this.emit();
+    return undefined;
+  }
+
+  /**
+   * A guardian hands over every piece their device holds. Their app reads the
+   * vault's state from the chain first and keeps the pieces unless it says released.
+   */
+  handOverPieces(id: number): string | undefined {
+    const w = this.world;
+    if (!w) return 'There is no vault yet.';
+    const mine = [...w.messages.values()].filter((m) => m.pieces.has(id) && !m.handed.has(id));
+    if (mine.length === 0) return 'This device holds no piece to hand over.';
+    if (w.chain.ledger.phase !== Phase.released) {
+      return `The vault has not released, so your piece${mine.length === 1 ? ' stays' : 's stay'} on this device. Nothing was sent.`;
+    }
+    for (const m of mine) m.handed.set(id, w.chain.now);
+    this.log('A guardian', mine.length === 1 ? 'A guardian handed over a piece of a key' : `A guardian handed over ${mine.length} pieces of keys`, 'plain', [], [
+      `That it was ${guardianById(id).name}`, 'The piece itself', 'Who it went to',
+    ]);
+    this.toast = {
+      id: Date.now(), title: mine.length === 1 ? 'Your piece is handed over' : `Your ${mine.length} pieces are handed over`,
+      body: `${mine.length === 1 ? 'It' : 'Each'} went to the person the message is for, and to nobody else.`,
+    };
+    this.emit();
+    return undefined;
+  }
+
+  /** The recipient opens their message with their own half of the key and the pieces they were handed. */
+  async openMessage(to: HeirProfile['id']): Promise<string | undefined> {
+    const w = this.world;
+    const m = w?.messages.get(to);
+    if (!w || !m) return 'This device holds no sealed message.';
+    if (m.opened) return undefined;
+    let text: string;
+    try {
+      text = await openMessageText(m.sealed, [...m.handed.keys()].map((id) => m.pieces.get(id)!));
+    } catch (e) {
+      if (e instanceof SealedError && e.problem === 'not enough pieces') {
+        const have = m.handed.size;
+        return `It is still locked. It needs ${m.sealed.needed} guardian piece${m.sealed.needed === 1 ? '' : 's'} and ${have === 0 ? 'none has' : have === 1 ? 'one has' : `${have} have`} arrived.`;
+      }
+      if (e instanceof SealedError && e.problem === 'not a genuine piece') return 'One of the pieces is not a piece of this message’s key. Ask that guardian to send theirs again.';
+      return 'The sealed text does not match its key, so it cannot be opened.';
+    }
+    m.opened = { at: w.chain.now, text };
+    const name = HEIRS.find((h) => h.id === to)!.name;
+    this.log(name, 'A sealed message was opened', 'released', [], ['The message', 'That it was opened, and by whom']);
+    this.emit();
+    return undefined;
   }
 
   // ─── Recovery key ─────────────────────────────────────────────────────────
@@ -1339,7 +1497,7 @@ class DemoStore {
         },
         guardians: [], events: [],
         recovery: { state: 'off', readyAt: 0, delay: 0, lastStart: 0, nextKeyToSave: false, formerPasskey: false },
-        heirs: [], leafHashes: [], votedThisRound: [], activity: [], tx: this.tx, toast: this.toast,
+        heirs: [], messages: [], leafHashes: [], votedThisRound: [], activity: [], tx: this.tx, toast: this.toast,
         position: { name: POSITION.name, address: '', vault: '', beneficiaryCommit: '', held: 0n, withdrawn: false, beneficiary: POSITION.beneficiary },
       };
     }
@@ -1413,6 +1571,13 @@ class DemoStore {
         };
       }),
       position: this.positionView(w),
+      messages: HEIRS.flatMap((h): MessageView[] => {
+        const m = w.messages.get(h.id);
+        return m ? [{
+          to: h.id, sealedAt: m.sealedAt, text: m.text, bytes: m.sealed.ciphertext.length, sealedStart: hex(m.sealed.ciphertext.slice(0, 24)),
+          needed: m.sealed.needed, holders: [...m.pieces.keys()], handed: [...m.handed.keys()], opened: m.opened,
+        }] : [];
+      }),
       leafHashes: leaves.map((leaf) => hex(pureCircuits.heirLeafHash(leaf))),
       votedThisRound: [...w.votedRound].filter(([, r]) => r === l.guardianRound).map(([id]) => id),
       activity: this.activity,
