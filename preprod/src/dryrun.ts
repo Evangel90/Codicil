@@ -60,7 +60,8 @@ import { checkArtifacts, circuitK, ESCROW_RUN_CIRCUITS, VAULT_ESCROW_CIRCUITS, V
 import { ESCROW_DIR, REPO_ROOT, VAULT_DIR } from './paths.js';
 import { escrowContract, makeProofProvider, TTL_SECONDS, vaultContract, WASM_MAX_K, type EscrowPrivateState, type ProofTimings } from './providers.js';
 import { formatNight } from './results.js';
-import { castFrom, newActors, RELEASE_EVENT_NAME, vaultConfigFor } from './run.js';
+import { castFrom, newActors, RELEASE_EVENT_NAME, VAULT_DEFER_ORDER, vaultConfigFor } from './run.js';
+import { planDeploy, type DeployPlan } from './staged-deploy.js';
 import { DEFAULT_TIMERS, extendedDeadline, finalDeadline, type Timers } from './timers.js';
 import { deriveIdentity, newSeedHex } from './wallet.js';
 
@@ -78,6 +79,8 @@ export interface DryRunStep {
 }
 
 export interface DryRunReport {
+  /** How the vault deployment has to be split to fit a block (src/staged-deploy.ts). */
+  deployPlan?: DeployPlan;
   /** `real`: keys from the full compile. `stub`: stand-in verifier keys, enough to build but not to prove. */
   artifacts: 'real' | 'stub';
   steps: DryRunStep[];
@@ -245,7 +248,11 @@ export async function buildAll(opts: DryRunOptions): Promise<DryRunReport> {
   const a = await deployVault(DEFAULT_TIMERS, nowS());
   let sA = a.state;
   let lA = vaultLedger(sA.deserialize({ v9: ContractState }).data);
-  await record('deploy', a.tx, `vault ${a.address.slice(0, 12)}…, ${sA.deserialize({ v9: ContractState }).operations().length} circuits, phase ${Phase[lA.phase]}`, lA.phase === Phase.armed);
+  const deployPlan = planDeploy(sA.deserialize({ v9: ContractState }).serialize(), VAULT_DEFER_ORDER, config.networkId);
+  const staged = deployPlan.deferred.length === 0
+    ? `fits one block (${(deployPlan.writeShare * 100).toFixed(0)}% of its write limit)`
+    : `too big for one block (${(deployPlan.writeShareAllAtOnce * 100).toFixed(0)}% of its write limit), so ${deployPlan.deferred.length} circuits are inserted after the deploy (${(deployPlan.writeShare * 100).toFixed(0)}%)`;
+  await record('deploy', a.tx, `vault ${a.address.slice(0, 12)}…, ${sA.deserialize({ v9: ContractState }).operations().length} circuits, phase ${Phase[lA.phase]}; ${staged}`, lA.phase === Phase.armed);
 
   {
     const r = await callVault(a.address, sA, cast.base, 'deposit', [deposit]);
@@ -378,7 +385,7 @@ export async function buildAll(opts: DryRunOptions): Promise<DryRunReport> {
     }
   }
 
-  return { artifacts: real ? 'real' : 'stub', steps, ok: steps.every((s) => s.ok) };
+  return { artifacts: real ? 'real' : 'stub', steps, ok: steps.every((s) => s.ok), deployPlan };
 }
 
 export async function dryRun(opts: DryRunOptions): Promise<boolean> {

@@ -295,6 +295,8 @@ Pure helpers keep the views simple and testable:
 ### From demo to network
 
 Going live replaces the in-memory chain with Midnight.js providers (wallet, proof server, indexer)
-and keeps the SDK, witnesses and views. That step is gate V14 ([VALIDATION.md](VALIDATION.md)) and
-is next on the [roadmap](ROADMAP.md). The provider wiring already exists for a command-line run
+and keeps the SDK, witnesses and views. The same step has been done from the command line: gate V14
+([VALIDATION.md](VALIDATION.md)) ran the vault on Preprod, deploying it in stages because it does
+not fit one block ([D19](DECISIONS.md)). The app's own network mode is next on the
+[roadmap](ROADMAP.md) and can reuse that provider wiring
 ([`preprod/src/providers.ts`](../preprod/src/providers.ts), [PREPROD.md](PREPROD.md)).

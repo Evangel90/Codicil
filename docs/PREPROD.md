@@ -98,7 +98,14 @@ ledger, and its first wallet sync is much faster. Everything below works the sam
 ## How long the run takes
 
 About **15 minutes** for the vault, and about 3 more with `--escrow`, once the wallet is synced
-and holds DUST. Seven minutes of that are waits that cannot be skipped, because a real network
+and holds DUST. Measured on 26 November 2026: 15 minutes for the whole run with `--escrow`, on
+both networks. Before that, allow for the wallet's first sync: about 8 minutes on Preview and
+2 hours 40 minutes on Preprod, once.
+
+The deployment itself is eight transactions, not one. The vault's sixteen circuits write more
+state than a block allows, so the script deploys nine and inserts the other seven afterwards
+([D19](DECISIONS.md)). It needs about 30 DUST in all; if the wallet has less, the script says how
+much the next transaction needs and waits for it to generate. Seven minutes of that are waits that cannot be skipped, because a real network
 has no clock to move forward:
 
 | Wait | Default | Why |
@@ -111,8 +118,7 @@ room to prove and land each transaction: the last check-in must be included in a
 the deadline it sets. If the first check-in turns out slow on your machine, the script lengthens
 the second one's deadline by itself. All timers can be changed in `.env` (see `.env.example`).
 
-The rest is seven transactions at roughly a minute each. That figure is an estimate until this
-gate has been run once; the real numbers land in the results file.
+The rest is transactions of 20 to 50 seconds each; the real numbers are in the results file.
 
 ## Where the results land
 
@@ -123,8 +129,8 @@ gate has been run once; the real numbers land in the results file.
 | `.midnight/codicil/preprod/state.json` | Progress, and the throwaway vault's keys. Gitignored. Do not share |
 | `.midnight/codicil/preprod/wallet.json` | Saved wallet sync state. Gitignored |
 
-`npm run preprod:status` shows the progress without touching the network. Then copy the numbers
-into [VALIDATION.md](VALIDATION.md) under V10, V12, V13 and V14.
+`npm run preprod:status` shows the progress without touching the network. The results of the
+26 November 2026 runs are committed and summarised in [VALIDATION.md](VALIDATION.md) V14.
 
 ## What the run does
 
@@ -154,7 +160,10 @@ in exactly the formats the circuits verify, as the tests do. The proofs are real
 | The log says `the deadline passed before this check-in` | Nothing to do. The script starts the countdown and lets the check-in veto it, which the contract allows |
 | The first proof of a size is very slow | The proof server is downloading public parameters (50 MB for the passkey circuit). `run` fetches them before it deploys, so this should only delay the start |
 | A check-in fails with `deadline must be in the future` | It landed after its own deadline. Set `CODICIL_FINAL_PERIOD_S` higher and rerun |
-| `Insufficient Funds: could not balance dust` | The wallet ran out of DUST. Run `npm run preprod:dust` and wait, then rerun |
+| `not enough DUST yet … trying again every minute` | Nothing to do. The script waits for the wallet to generate what the transaction needs (about 2.5 DUST a minute per 5,000 tNIGHT) |
+| `Transaction would exhaust the block limits` | The transaction writes too much state for one block. The script prints how many bytes it writes; for a deployment, lower `WRITE_BUDGET` in `preprod/src/staged-deploy.ts` so more circuits are inserted afterwards |
+| `Custom error: 110` on a deployment | `VerifierKeyNotSet`: a circuit was declared without its key. See [D19](DECISIONS.md) |
+| `wallet sync hit an error and is retrying`, often | The connection to the indexer dropped. It resumes by itself; on Preprod a first sync can take hours |
 | You want to start over with a new vault | `npm run preprod:run -- --fresh` (the old run is set aside, not deleted) |
 | Lines from libraries are hidden and you want them | `CODICIL_DEBUG=1 npm run preprod:run` |
 

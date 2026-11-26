@@ -21,11 +21,11 @@ simulator tests in `test/`.
 | V7 | Cardano CIP-30 `signData` | **PASS**: COSE_Sign1 is plain Ed25519; verified in-circuit (real captures checked locally) | 2026-11-24 |
 | V8 | Merkle membership | **PASS** (simulator): depth-10 will tree; outsiders rejected | 2026-11-23 |
 | V9 | Division | **PASS**: no `/` in Compact; witness quotient + in-circuit check | 2026-11-23 |
-| V10 | Unshielded token flow | **PASS** (simulator); Preprod PENDING (V14) | 2026-11-23 |
+| V10 | Unshielded token flow | **PASS** (simulator 2026-11-23; Preprod 2026-11-26, V14) | 2026-11-26 |
 | V11 | Shielded payout | **PASS** (simulator): recipient hidden; amount still derivable (D8) | 2026-11-23 |
-| V12 | Cross-contract call | **PASS** (simulator): escrow → vault hook, 2 proofs per tx; Preprod PENDING | 2026-11-23 |
-| V13 | Events visible | **PASS** (simulator); indexer PENDING (V14) | 2026-11-23 |
-| V14 | End-to-end on Preprod | PENDING: script ready ([PREPROD.md](PREPROD.md)), not yet run on a network | |
+| V12 | Cross-contract call | **PASS**: escrow → vault hook, 2 proofs per tx (simulator 2026-11-23; Preprod 2026-11-26, V14) | 2026-11-26 |
+| V13 | Events visible | **PASS** (simulator 2026-11-23; read from the Preprod indexer 2026-11-26, V14) | 2026-11-26 |
+| V14 | End-to-end on Preprod | **PASS** on Preprod and Preview: 10 transactions each. The vault has to deploy in stages ([D19](DECISIONS.md)) | 2026-11-26 |
 | V15 | Curve25519 Montgomery ⇄ Edwards | **PASS** | 2026-11-23 |
 
 ---
@@ -197,7 +197,7 @@ is ready to report upstream.
   unshielded input (600 for a 600 deposit).
 - `claim` calls `sendUnshielded(tokenColor, q, right(UserAddress))`. The call's
   `claimedUnshieldedSpends` effect pays exactly `q` to the heir's chosen address.
-- **Still to do:** a real Preprod run (V14).
+- **Preprod (2026-11-26):** done in V14: deposit and claim on a network.
 
 ## V11: Shielded payout (simulator)
 
@@ -246,17 +246,88 @@ is ready to report upstream.
   - (1) Generated `Contract` constructors validate that every declared witness is a
     function, even for circuits that never call it, so non-beneficiary callers get a throwing stub.
   - (2) `callProofDataTrace` is in completion order (the callee first).
-- **Remaining:** Preprod transaction (V14).
+- **Preprod (2026-11-26):** done in V14: the withdrawal carried both proofs in one transaction.
 
 ## V13: Events (simulator)
 
 - `finalizeRelease` emits `Misc { name: "codicil:released:v1", … }`. The test finds exactly one
   event and the name bytes in its payload.
-- **Still to do:** read the event from the indexer on Preprod (V14).
+- **Preprod (2026-11-26):** done in V14: the indexer returned the event for the vault.
 
-## V14: End-to-end on Preprod (prepared, not run)
+## V14: End-to-end on Preprod
 
-- **Status:** PENDING. No transaction has been submitted to any network. The run needs Docker (for
+- **Status:** **PASS** on 2026-11-26, on Preprod and on Preview. Ten transactions on each network,
+  every one `SucceedEntirely`: deploy, deposit, a passkey check-in, a wallet check-in, the timeout,
+  the release, a claim, then the example escrow's deploy, deposit and cross-contract withdrawal.
+  The release event was read back from the indexer. Hashes, blocks, proving times and fees are in
+  [`preprod/results/v14-preprod.md`](../preprod/results/v14-preprod.md) and
+  [`v14-preview.md`](../preprod/results/v14-preview.md), written by the run itself.
+- **On Preprod:** vault `4f3b21e1c8117afd7f874885139d18bd19bede372be425b0536dcb848cc2c853`, escrow `c937e24b6ae8f391713652b321e04b82901b77ff12edc58f114a1dd51a54a933`.
+  They can be looked up on a Preprod explorer (preprod.midnightexplorer.com, midnight-preprod.subscan.io).
+
+| Step (Preprod) | Block | Proving | Fee (DUST) |
+|---|---|---|---|
+| deploy (9 circuits, then 7 inserted) | 3580086 | none | 12.83 |
+| deposit | 3580112 | 0.3 s | 0.43 |
+| `checkInPasskey` (k = 18) | 3580120 | 26.6 s | 0.25 |
+| `checkInEd25519` (k = 17) | 3580126 | 13.6 s | 0.26 |
+| `triggerTimeout` | 3580177 | 0.4 s | 0.24 |
+| `finalizeRelease` | 3580197 | 0.4 s | 0.25 |
+| `claim` (k = 16) | 3580202 | 6.4 s | 0.53 |
+| escrow deploy | 3580206 | none | 2.88 |
+| escrow deposit | 3580210 | 0.4 s | 0.47 |
+| escrow withdrawal (2 proofs) | 3580214 | 1.2 s | 0.58 |
+
+Proving ran on the Docker proof server 9.0.2 on a laptop with 8 GB given to Docker. Preview's times
+were within two seconds of these.
+
+**What this closes.** V10: unshielded tokens went into the vault and out to an heir on a network.
+V12: the escrow's withdrawal carried two proofs in one transaction, the vault's
+`isReleasedForContract` first. V13: the indexer returned `codicil:released:v1` for the vault, found
+by the `finalizeRelease` transaction hash.
+
+**What it does not show.** The check-ins were signed by software keys in the exact formats a passkey
+and a Cardano wallet produce; a check-in from a real Touch ID on a network needs the app's live mode
+(real Touch ID signatures are verified in the simulator, V6). Nine of the vault's sixteen circuits
+were not called on a network: both will updates, both settings updates, `guardianAttest`,
+`triggerAttestation`, `claimAsBackup`, `startRecovery` and `finishRecovery`. Their verifier keys are
+on-chain; their logic is covered by the simulator tests with constraint checks.
+
+### What the first real runs found
+
+1. **The vault is too big to deploy in one transaction.** A block may write 50,000 bytes of state
+   (read from the live ledger parameters of both networks). Deploying all sixteen circuits writes
+   48,637 bytes before the fee payment is added, almost all of it verifier keys, and the node
+   answers `1010: Invalid Transaction: Transaction would exhaust the block limits`. A deployment
+   writing 39,403 bytes (79%, thirteen circuits) was refused the same way; one writing 27,749 bytes
+   (55%, nine circuits) was accepted. Where between 55% and 79% the real ceiling for one transaction
+   lies was not measured. The twelve-circuit vault of 24 November would have been refused too.
+2. **A circuit cannot be declared with an empty key slot.** Deploying with a slot left blank is
+   refused with `Custom error: 110` (`VerifierKeyNotSet`). Leaving the circuit out altogether and
+   adding it afterwards with a maintenance transaction works.
+3. **So the vault deploys in stages** ([D19](DECISIONS.md)): nine circuits in the deploy
+   transaction, then seven verifier-key inserts, each its own transaction of about 20 seconds.
+   Eight transactions, about two and a half minutes. The script plans this from the measured size
+   ([`preprod/src/staged-deploy.ts`](../preprod/src/staged-deploy.ts)) and can resume part-way.
+4. **Fees.** The deploy transaction cost 12.83 DUST and each insert was estimated at about
+   2.5 DUST; calls cost 0.24 to 0.58 DUST. A wallet with 5,000 tNIGHT generates about 2.5 DUST a
+   minute, so a new wallet waits a few minutes before it can deploy. The fee column and totals in
+   the results files do not include the seven inserts.
+5. **A new wallet's first sync on Preprod took 2 hours 40 minutes** through Blockfrost, with the
+   connection dropping more than 28 times (each drop cost about two minutes). On Preview the same
+   sync took about eight minutes. Later runs start in seconds from saved state.
+6. **Midnight.js hides why a node refused a transaction.** The script now prints the node's own
+   message, which is how (1) and (2) were found.
+7. **One check was wrong, not the chain.** The run reported that it could not match the claim's
+   payout in the indexer's record. By hand: the indexer lists one created output of 6,000,000 units
+   owned by the test wallet in that transaction, on both networks. The script had compared a hex
+   address with the indexer's `mn_addr_…` form; fixed.
+
+### Before the run (2026-11-25)
+
+Kept as written the day before, when nothing had been submitted to a network.
+
+- **Status then:** PENDING. No transaction has been submitted to any network. The run needs Docker (for
   the proof server), a Blockfrost token for Preprod and one faucet request; the runbook is
   [PREPROD.md](PREPROD.md) and the script is [`preprod/`](../preprod).
 - **Versions** (compatibility matrix on docs.midnight.network, read 2026-11-25): Preprod and

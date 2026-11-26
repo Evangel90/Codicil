@@ -1,0 +1,286 @@
+{
+  "gate": "V14",
+  "network": "preprod",
+  "generatedAt": "2026-11-26T00:58:03.615Z",
+  "complete": true,
+  "remaining": [],
+  "vaultAddress": "4f3b21e1c8117afd7f874885139d18bd19bede372be425b0536dcb848cc2c853",
+  "escrowAddress": "c937e24b6ae8f391713652b321e04b82901b77ff12edc58f114a1dd51a54a933",
+  "walletAddress": "mn_addr_preprod1ucfa5n7sadm7xtfhdukmqt30fd2a375q8lmtmhyl8dp7wv4eep5s2tpl6u",
+  "timers": {
+    "firstDeadlineS": 1200,
+    "maxPeriodS": 1200,
+    "finalPeriodS": 300,
+    "challengeWindowS": 120,
+    "claimWindowS": 600
+  },
+  "versions": {
+    "Midnight.js": "5.0.1",
+    "Wallet SDK": "2.0.1",
+    "compact-runtime": "0.21.0",
+    "Compact compiler": "0.36.1",
+    "Proof server": "9.0.2",
+    "Node": "Midnight Preprod 2.1.101-913ec011, ledger 1.0.1 (tag: crate-ledger-9.1.0.1, rev: 3e69c5e3092fa29c1e8b1728a68fc3ca98774e34)",
+    "Indexer protocol version": "2001100"
+  },
+  "steps": [
+    {
+      "step": "deploy",
+      "startedAt": "2026-11-26T00:44:50.729Z",
+      "finishedAt": "2026-11-26T00:47:26.014Z",
+      "totalMs": 155285,
+      "notes": [
+        "vault address 4f3b21e1c8117afd7f874885139d18bd19bede372be425b0536dcb848cc2c853",
+        "first deadline 2026-11-26T01:04:50.000Z",
+        "deployed in 8 transactions: all at once it would use 97% of a block's write limit, so 7 verifier keys were inserted afterwards (updateSettingsEd25519 599e08ae69693ac236a12511e6f5e75d3b46a699ef65c72d62aa385a07c18b0e; updateSettingsPasskey 9ad7cf7149719a4d56280a3d698e10874d710c416c3bc9b8eee645b2fc5137eb; startRecovery 388ac33c8d6f22b5fec476598d20cd330d675fb46c871024791f0c26f5eb73a9; finishRecovery 7af473ad93c5f7f16127e813302d83a642c92610d6b9b1b40b780d1732fbc178; updateWillEd25519 56b49d17da2084a6b68708225aec54532f37f9e4a6b4a3669d65feb5572f156e; updateWillPasskey fb8c1df8e5c0e5c9cb84028753c62fb233861ebf9ecfdfa8a143de84d71aba9c; triggerAttestation a6ea60748082d065af28529a996a30eca3dd63eca2b3315b5eb7c77ad307fca0)"
+      ],
+      "txId": "006e313eacfc1c45f6df82077723e7964028865f46493ce57de32b6b152b9bffce",
+      "txHash": "04bbb303ae2ba26d93617d88a729d0ec727643ea2637635fd3c381fe1a74e199",
+      "blockHeight": 3580086,
+      "blockHash": "18190dd0b6055a28e4fd7610559038a341f3330fb4adfde9a8007c988c0b8768",
+      "blockTimestamp": 1795653900,
+      "status": "SucceedEntirely",
+      "feePaid": "12830047820035828",
+      "feeEstimated": "12830047820035828",
+      "proveMs": 25,
+      "balanceMs": 758,
+      "confirmMs": 658
+    },
+    {
+      "step": "deposit",
+      "startedAt": "2026-11-26T00:47:27.943Z",
+      "finishedAt": "2026-11-26T00:47:52.011Z",
+      "totalMs": 24068,
+      "notes": [
+        "deposited 10.000000 tNIGHT; the indexer shows the vault holding 10.000000"
+      ],
+      "txId": "000073e9bd7855692249c31e70ded5c75acd00752ad3a8c5bea1c018bfccde2ee8",
+      "txHash": "82f8f81f19e677a0f981a16cbb7863381007cfb04647e81ce9018a8cedca196f",
+      "blockHeight": 3580112,
+      "blockHash": "4f3c97f2b3cc1988f7fb00f645e67f3e2da0059ed03fd96d6b75aab861693388",
+      "blockTimestamp": 1795654056,
+      "status": "SucceedEntirely",
+      "feePaid": "425159870128572",
+      "feeEstimated": "425159870128572",
+      "proveMs": 280,
+      "balanceMs": 1030,
+      "confirmMs": 976,
+      "circuits": [
+        "deposit"
+      ]
+    },
+    {
+      "step": "checkInPasskey",
+      "startedAt": "2026-11-26T00:47:52.014Z",
+      "finishedAt": "2026-11-26T00:48:38.742Z",
+      "totalMs": 46728,
+      "notes": [
+        "WebAuthn-format assertion (software P-256 key, origin and UV flag as compiled) verified in-circuit",
+        "deadline moved from 1795655090 to 1795655212; nonce 0 → 1"
+      ],
+      "txId": "00a52687c6f3de9a7fadfeb86a423892fe1ec882eb398569d7f8ddc61fd7877b61",
+      "txHash": "3ca41743e21e60b149e76925657f6a089b099c6ecda9bf15c7bad182ffdfec78",
+      "blockHeight": 3580120,
+      "blockHash": "c970f9badb2fcec93d8325bcdd895a34368b8ddb32a4a8ea95b6e845812dabbf",
+      "blockTimestamp": 1795654104,
+      "status": "SucceedEntirely",
+      "feePaid": "252877942857143",
+      "feeEstimated": "252877942857143",
+      "proveMs": 26608,
+      "balanceMs": 1098,
+      "confirmMs": 1375,
+      "circuits": [
+        "checkInPasskey"
+      ]
+    },
+    {
+      "step": "checkInEd25519",
+      "startedAt": "2026-11-26T00:48:38.745Z",
+      "finishedAt": "2026-11-26T00:49:15.132Z",
+      "totalMs": 36387,
+      "notes": [
+        "CIP-30-format signature (software Ed25519 key over the 119-byte Sig_structure) verified in-circuit",
+        "deadline moved from 1795655212 to 1795654419 (5 min after it was built); nonce 1 → 2"
+      ],
+      "txId": "000f905ff867bb50443c57bd8e10b35ab3f70c921e05d202b2664cf028162a6416",
+      "txHash": "e4086dacece91adffbcfbedd7c7ed99cb9128d9ccde4014db50f7861e5c349e5",
+      "blockHeight": 3580126,
+      "blockHash": "4a3bb7bff566bac46346ede9693ad44e94750942b9899e6b884686c1e606053c",
+      "blockTimestamp": 1795654140,
+      "status": "SucceedEntirely",
+      "feePaid": "261769371428572",
+      "feeEstimated": "261769371428572",
+      "proveMs": 13642,
+      "balanceMs": 1012,
+      "confirmMs": 1157,
+      "circuits": [
+        "checkInEd25519"
+      ]
+    },
+    {
+      "step": "triggerTimeout",
+      "startedAt": "2026-11-26T00:49:15.137Z",
+      "finishedAt": "2026-11-26T00:54:21.647Z",
+      "totalMs": 306510,
+      "notes": [
+        "deadline 1795654419 passed; vault is pending until 1795654539"
+      ],
+      "txId": "00fceb828c5d47c04cef2e117695e8ab11b25c9c357e58c91b5706acb802813c62",
+      "txHash": "aaf34649ca7551e4917f284daa32250d3bc8bbe087a78fd4995cfbf332a179ac",
+      "blockHeight": 3580177,
+      "blockHash": "cc4a246f0b8e812c576f6ca9698e1b16e92fc41744d0f2c00ed1f9414ccde74a",
+      "blockTimestamp": 1795654446,
+      "status": "SucceedEntirely",
+      "feePaid": "240691337704186",
+      "feeEstimated": "240691337704186",
+      "proveMs": 355,
+      "balanceMs": 795,
+      "confirmMs": 1594,
+      "circuits": [
+        "triggerTimeout"
+      ]
+    },
+    {
+      "step": "finalizeRelease",
+      "startedAt": "2026-11-26T00:54:21.652Z",
+      "finishedAt": "2026-11-26T00:56:21.257Z",
+      "totalMs": 119605,
+      "notes": [
+        "released at 1795654539; estate snapshot 10.000000 tNIGHT",
+        "1 event(s) emitted while executing the circuit"
+      ],
+      "txId": "00aa4f06542db62d36c431b5e728c44f3a953215b94f704d7a9bd6266e1c0b2b25",
+      "txHash": "634a49c0bb08d98beaf81a8d7fc41709e81781fe7e42db79a490d66dfeeea1d1",
+      "blockHeight": 3580197,
+      "blockHash": "1cc31a9da89d91b45b3bb22757d5627f4ca2dad0e9897bedf568801b6a05bb6c",
+      "blockTimestamp": 1795654566,
+      "status": "SucceedEntirely",
+      "feePaid": "254604196021957",
+      "feeEstimated": "254604196021957",
+      "proveMs": 380,
+      "balanceMs": 1121,
+      "confirmMs": 1274,
+      "circuits": [
+        "finalizeRelease"
+      ]
+    },
+    {
+      "step": "claim",
+      "startedAt": "2026-11-26T00:56:21.264Z",
+      "finishedAt": "2026-11-26T00:56:51.382Z",
+      "totalMs": 30118,
+      "notes": [
+        "heir 0 (6000 bps of 10.000000) claimed 6.000000 tNIGHT to mn_addr_preprod1ucfa5n7sadm7xtfhdukmqt30fd2a375q8lmtmhyl8dp7wv4eep5s2tpl6u",
+        "estatePaid 0.000000 → 6.000000",
+        "the indexer's record of this transaction lists 1 created UTXO(s), none matching the payout exactly: check by hand"
+      ],
+      "txId": "00f5e2c46c3034ab2a7e2c7a33a7450ef86db539a088cafa86a8289a22a07f5ada",
+      "txHash": "cb355c10aea63d3b07bd27200869863630e19b83fa8ac88c0a8b83d6dac9f93b",
+      "blockHeight": 3580202,
+      "blockHash": "3b827a650743fda86c2eaa1afbd9f093a47105591eb19ace041c523e00298aa5",
+      "blockTimestamp": 1795654596,
+      "status": "SucceedEntirely",
+      "feePaid": "530821257142858",
+      "feeEstimated": "530821257142858",
+      "proveMs": 6425,
+      "balanceMs": 1059,
+      "confirmMs": 1710,
+      "circuits": [
+        "claim"
+      ]
+    },
+    {
+      "step": "readEvents",
+      "startedAt": "2026-11-26T00:56:51.384Z",
+      "finishedAt": "2026-11-26T00:56:51.565Z",
+      "totalMs": 181,
+      "notes": [
+        "indexer returned the \"codicil:released:v1\" event (id 2104553) for the vault",
+        "found by the finalizeRelease transaction hash 634a49c0bb08d98beaf81a8d7fc41709e81781fe7e42db79a490d66dfeeea1d1"
+      ]
+    },
+    {
+      "step": "escrowDeploy",
+      "startedAt": "2026-11-26T00:56:51.572Z",
+      "finishedAt": "2026-11-26T00:57:16.129Z",
+      "totalMs": 24557,
+      "notes": [
+        "escrow address c937e24b6ae8f391713652b321e04b82901b77ff12edc58f114a1dd51a54a933, vault 4f3b21e1c8117afd7f874885139d18bd19bede372be425b0536dcb848cc2c853"
+      ],
+      "txId": "000e55e998d33f01c3e1fe2915d5cb08d52359c2195ba956fab38b87b544575f2b",
+      "txHash": "150ca65400c0411a037e87b35de367fc6c5df18b00aac679d7ca1fa902147eed",
+      "blockHeight": 3580206,
+      "blockHash": "067a3ba4e6df9b8add1f09a0120119d52df311e694cc99aadaf212849f720d27",
+      "blockTimestamp": 1795654620,
+      "status": "SucceedEntirely",
+      "feePaid": "2876580342857143",
+      "feeEstimated": "2876580342857143",
+      "proveMs": 2,
+      "balanceMs": 841,
+      "confirmMs": 1713
+    },
+    {
+      "step": "escrowDeposit",
+      "startedAt": "2026-11-26T00:57:17.131Z",
+      "finishedAt": "2026-11-26T00:57:38.417Z",
+      "totalMs": 21286,
+      "notes": [
+        "deposited 5.000000 tNIGHT into the escrow"
+      ],
+      "txId": "004d679583d4206289123ab5a7bc0647184ce17d0e5f29343a369cbe2912c15a3d",
+      "txHash": "9d3059674f395fe67f4d189fcbcdea352f6aae5ef6dbb5f597ab7c332c9f5f31",
+      "blockHeight": 3580210,
+      "blockHash": "09cd9012092ab0a0c0c8278010bd5b6cd9fd9ba55c6f5d6a25bab730885e0f8b",
+      "blockTimestamp": 1795654644,
+      "status": "SucceedEntirely",
+      "feePaid": "473562285714286",
+      "feeEstimated": "473562285714286",
+      "proveMs": 353,
+      "balanceMs": 1270,
+      "confirmMs": 1132,
+      "circuits": [
+        "deposit"
+      ]
+    },
+    {
+      "step": "escrowWithdraw",
+      "startedAt": "2026-11-26T00:57:38.421Z",
+      "finishedAt": "2026-11-26T00:58:03.614Z",
+      "totalMs": 25193,
+      "notes": [
+        "2 proofs in one transaction, callee first: 4f3b21e1…:isReleasedForContract, c937e24b…:withdrawToBeneficiary",
+        "withdrew 5.000000 tNIGHT to the test wallet once the vault answered \"released\"",
+        "the indexer lists the matching unshielded UTXO in this transaction"
+      ],
+      "txId": "004170967c4842473f754cc6acddd6ae2de46153cef8c65f1a697ed456a2815e97",
+      "txHash": "e5638da379896070cbb16f5ea770818b90ef45a9c9e114f4dffe7d5facd8128a",
+      "blockHeight": 3580214,
+      "blockHash": "c1f432d7f365656f6516e4a0bcad11ed51ca9188bd6a8ca115421c30c04d482b",
+      "blockTimestamp": 1795654668,
+      "status": "SucceedEntirely",
+      "feePaid": "582322514285715",
+      "feeEstimated": "582322514285715",
+      "proveMs": 1172,
+      "balanceMs": 1655,
+      "confirmMs": 1075,
+      "circuits": [
+        "4f3b21e1…:isReleasedForContract",
+        "c937e24b…:withdrawToBeneficiary"
+      ]
+    }
+  ],
+  "releaseEvent": {
+    "id": 2104553,
+    "eventType": "Misc",
+    "name": "codicil:released:v1",
+    "txHash": "634a49c0bb08d98beaf81a8d7fc41709e81781fe7e42db79a490d66dfeeea1d1",
+    "payloadVersion": 1,
+    "protocolVersion": 2001100
+  },
+  "totals": {
+    "transactions": 10,
+    "feePaidSpeck": "18728436938176260",
+    "proveMs": 49242,
+    "wallMs": 789918
+  }
+}

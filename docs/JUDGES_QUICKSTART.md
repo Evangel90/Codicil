@@ -95,6 +95,7 @@ FC_RUNS=500 npm test -w @codicil/contracts   # longer property tests
 
 ## Known limits
 
-The Preprod deployment (gate V14) is not done yet, so the demo runs the contract in the browser rather
-than on a network. Payout amounts are public today. Both are stated in [PRIVACY.md](PRIVACY.md) and
+The web demo runs the contract in the browser, not on a network. The same contract ran end to end
+on Preprod from a script on 26 November 2026 ([results](../preprod/results/v14-preprod.md)); the
+app's own network mode is next. Payout amounts are public today. Both are stated in [PRIVACY.md](PRIVACY.md) and
 [ROADMAP.md](ROADMAP.md).

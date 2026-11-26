@@ -12,6 +12,8 @@
 import { describe, expect, it } from 'vitest';
 import { checkArtifacts, ESCROW_RUN_CIRCUITS, VAULT_ESCROW_CIRCUITS, VAULT_RUN_CIRCUITS } from '../src/artifacts.js';
 import { buildAll } from '../src/dryrun.js';
+import { VAULT_DEFER_ORDER } from '../src/run.js';
+import { WRITE_BUDGET } from '../src/staged-deploy.js';
 import { ESCROW_DIR, VAULT_DIR } from '../src/paths.js';
 
 const STEPS = ['deploy', 'deposit', 'checkInPasskey', 'checkInEd25519', 'triggerTimeout', 'finalizeRelease', 'claim'];
@@ -54,8 +56,25 @@ describe('dry run through Midnight.js', () => {
     const report = await buildAll({ escrow: true, prove: false });
     expect(report.artifacts).toBe('real');
     expect(report.steps.filter((s) => !s.ok)).toEqual([]);
-    // The deploy carries all twelve real verifier keys.
+    // The deploy carries all sixteen real verifier keys.
     expect(report.steps[0].txBytes).toBeGreaterThan(20_000);
+    // With them it is too big for one block: the node refused it on Preview
+    // and Preprod (docs/VALIDATION.md V14). Seven circuits go in afterwards.
+    expect(report.deployPlan?.writeShareAllAtOnce).toBeGreaterThan(0.9);
+    expect(report.deployPlan?.deferred).toEqual(VAULT_DEFER_ORDER.slice(0, 7));
+  });
+
+  it('plans a deployment that fits a block, deferring the least needed circuits first', async () => {
+    const report = await buildAll({ escrow: false, prove: false, artifacts: 'stub' });
+    const plan = report.deployPlan!;
+    expect(plan.writeShare).toBeLessThanOrEqual(WRITE_BUDGET);
+    expect(plan.writeShareAllAtOnce).toBeGreaterThan(plan.writeShare);
+    expect(plan.deferred.length).toBeGreaterThan(0);
+    expect(plan.deferred).toEqual(VAULT_DEFER_ORDER.slice(0, plan.deferred.length));
+    // What the run needs first is never deferred.
+    for (const needed of ['deposit', 'checkInPasskey', 'checkInEd25519', 'triggerTimeout', 'finalizeRelease', 'claim', 'isReleasedForContract']) {
+      expect(plan.deferred).not.toContain(needed);
+    }
   });
 
   it('refuses to prove without the proving keys', async () => {

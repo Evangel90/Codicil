@@ -366,3 +366,35 @@ delay, because from then on a lost key cannot be recovered.
    watcher), which does not exist yet.
 6. *A hardware-held recovery key* (a signature instead of a secret), if paper secrets prove too
    easy to copy. It would cost one more signature circuit.
+
+## D19: The vault deploys in stages, because it does not fit one block (2026-11-26)
+
+**Problem.** The first deployments to a real network were refused: a block may write 50,000 bytes of
+state, and the sixteen-circuit vault writes 48,637 before fees ([VALIDATION.md](VALIDATION.md) V14).
+The simulator has no block limits, so no test could have shown this.
+
+**Decision.** Deploy the contract with the circuits a vault needs first, and add the rest
+afterwards, one maintenance transaction each. The deploy transaction carries the complete initial
+state (every ledger field, the will root, the owner commitments) and nine circuits; the verifier
+keys of the other seven are inserted with `VerifierKeyInsert`, signed by the contract's maintenance
+key. The order puts the least urgent first to be deferred: settings updates, recovery, will updates,
+the attestation trigger. Nothing about the contract's code or state changes, and a circuit that is
+not in yet simply cannot be called.
+
+**Why not shrink the contract.** Merging circuits (one `claim` with a flag, one owner circuit that
+dispatches on an action) would make each circuit larger and the wallet check-in is already 29 rows
+from doubling its prover key ([VALIDATION.md](VALIDATION.md), "Circuit headroom"). Dropping features
+to fit a deployment limit is the wrong trade when the ledger offers a way to add them.
+
+**What this costs.** Eight transactions instead of one, about two and a half minutes, and about
+30 DUST in all. A crash part-way leaves a vault missing features until the inserts are finished;
+the script records the pending circuits and resumes.
+
+**What it exposes: the maintenance key.** Every contract deployed through Midnight.js has a
+maintenance authority, a key that can insert and remove verifier keys. Staged deployment needs it
+for a few minutes. After that it is a standing risk: whoever holds it can replace a circuit's
+verifier key, which means changing the vault's rules. Today the deployer's device keeps it. The
+intended end state is to give it up after the last insert, by replacing the authority with one that
+nobody can satisfy, so the vault is immutable. That step is not built or tested yet
+([THREAT_MODEL.md](THREAT_MODEL.md)); until it is, the maintenance key deserves the same care as the
+owner's own keys.

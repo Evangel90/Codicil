@@ -7,20 +7,23 @@ results are written down ([VALIDATION.md](VALIDATION.md), [DECISIONS.md](DECISIO
 
 | Phase | Deliverable | Done when | Status |
 |---|---|---|---|
-| 0 | Validation gates V1–V15: every Midnight primitive Codicil relies on | Each gate passes or has a recorded fallback | ✅ 14 of 15. V14 (end-to-end on Preprod) is next |
+| 0 | Validation gates V1–V15: every Midnight primitive Codicil relies on | Each gate passes or has a recorded fallback | ✅ 15 of 15. V14 (end-to-end on Preprod) passed on 26 Nov 2026 |
 | 1 | Vault core: check-ins by passkey and wallet, timeout, release, claim, events | Full compile with proving keys; tests; CI green | ✅ |
 | 2 | Multi-heir will: shares, tranches, backup heirs, will updates, payout maths | Simulator and property tests | ✅ Property tests found and fixed a design flaw (D9) |
 | 3 | Hidden k-of-n guardians, veto, attestation trigger | Tests; threat model | ✅ 12 circuits full-compiled; [THREAT_MODEL.md](THREAT_MODEL.md) |
-| 4 | Web app with an end-to-end demo | Full lifecycle in the UI; browser tests | ✅ In-browser demo of the real contract. Live network mode follows V14 |
-| 5 | Cross-contract `isReleased` hook and the inheritable escrow | Multi-contract test; a Preprod transaction | 🟡 Simulator done; Preprod transaction with V14 |
+| 4 | Web app with an end-to-end demo | Full lifecycle in the UI; browser tests | ✅ In-browser demo of the real contract. Live network mode is next |
+| 5 | Cross-contract `isReleased` hook and the inheritable escrow | Multi-contract test; a Preprod transaction | ✅ Simulator, and a Preprod transaction with two proofs ([VALIDATION.md](VALIDATION.md) V14) |
 | 6 | Docs, pitch, blog post | README and docs complete; deck and video | 🟡 Docs done; deck, video and blog in progress |
 | 7 | Stretch (below) | Each with tests and docs | ⚪ |
 
 ## Next
 
-1. **Preprod (V14).** Deploy the vault with Midnight.js, check in with a real passkey through the
-   proof server, run the lifecycle, claim, and record transaction hashes and proving times.
-2. **Live mode in the app.** Swap the in-browser chain for Midnight.js providers (Lace wallet, proof
+1. **Done: Preprod (V14).** The vault ran end to end on Preprod and Preview on 26 November 2026,
+   with software keys in the passkey and wallet formats. It deploys in stages, because it does not
+   fit one block ([D19](DECISIONS.md)).
+2. **Give up the maintenance key after deployment**, so nobody can change a deployed vault's
+   circuits ([D19](DECISIONS.md), [THREAT_MODEL.md](THREAT_MODEL.md)).
+3. **Live mode in the app.** Swap the in-browser chain for Midnight.js providers (Lace wallet, proof
    server, indexer). The SDK, witnesses and screens stay the same.
 3. **Hosting.** Recompile the passkey module for the production origin (its lengths are module
    parameters, [D12](DECISIONS.md)) and deploy the static app.

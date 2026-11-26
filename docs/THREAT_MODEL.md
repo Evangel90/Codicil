@@ -53,6 +53,12 @@ or death-registry service), **any third party** (every trigger is permissionless
   loss discovered later than that cannot be recovered and the vault releases to the heirs (D18).
   Without a recovery key the vault always releases. Mitigations: register both a passkey (synced
   via iCloud/Google) and a wallet, and keep a recovery key.
+- **The maintenance key can change the vault's rules.** Like every contract deployed through
+  Midnight.js, the vault has a maintenance authority: a key that can insert and remove circuits'
+  verifier keys. The staged deployment uses it for a few minutes (D19). Afterwards it is a standing
+  risk: whoever holds it could swap a circuit for one with different rules. Today the deploying
+  device keeps it. Giving it up after deployment, so the vault is immutable, is planned and not yet
+  built. Until then it needs the same care as the owner's keys.
 - **A recovery key is a second secret to protect.** If it is stolen and the owner signs nothing for
   `recoveryDelay` (because they are not watching, or because they have died with more than that left
   before the deadline), the thief becomes the owner and can rewrite the will. The delay, the event

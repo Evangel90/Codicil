@@ -11,8 +11,8 @@ depends on in a throwaway spike ([`codicil-spike/`](../codicil-spike), [VALIDATI
   randomly lengthens the signed browser data and made the verifier accept both forms.
 - Real Cardano wallet (CIP-30) signatures verify inside a circuit.
 - Merkle membership, payouts without integer division, shielded payouts, cross-contract calls,
-  events and Curve25519 key conversion all work. 14 of 15 gates pass; the Preprod end-to-end gate
-  is next.
+  events and Curve25519 key conversion all work. All 15 gates pass, the last one (end to end on
+  Preprod) on 26 November 2026.
 - We found a Compact compiler crash and worked around it.
 
 **Contracts (24 Nov).** The vault: passkey and wallet check-ins, will updates, timeout, hidden k-of-n
@@ -39,7 +39,8 @@ an error catalogue with plain-language messages for every contract error.
 [ERRORS](ERRORS.md), [ROADMAP](ROADMAP.md), [BUSINESS](BUSINESS.md),
 [JUDGES_QUICKSTART](JUDGES_QUICKSTART.md).
 
-**Not done yet, stated plainly:** the Preprod deployment (V14) and the app's live network mode,
+**Not done yet, stated plainly:** the app's live network mode (the Preprod run was made from a
+script, with software keys),
 hosting, and the deck, video and blog post. Payout amounts are not hidden yet ([PRIVACY.md](PRIVACY.md)).
 
 **What changed since the last Wave:** Codicil started in Wave 3 (first commit 23 Nov 2026), so there is no earlier version to compare against.

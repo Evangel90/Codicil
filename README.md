@@ -16,9 +16,11 @@ owner has had a chance to veto.
 
 > **Status (Wave 3, in progress):** the vault contract, SDK and web app are built and tested. That
 > covers passkey and wallet check-ins, multi-heir wills with tranches and backup heirs, hidden k-of-n
-> guardians, the attestation trigger and the cross-contract hook: 373 tests, every contract call
-> checked against its ZK circuit, plus browser tests that check in with Chrome's real WebAuthn. The
-> Preprod deployment is next. See [What changed this Wave](#what-changed-this-wave).
+> guardians, the attestation trigger and the cross-contract hook: 374 tests, every contract call
+> checked against its ZK circuit, plus browser tests that check in with Chrome's real WebAuthn. On
+> 26 November 2026 the vault ran end to end on **Preprod**: deploy, both kinds of check-in, release,
+> a claim and the cross-contract withdrawal ([results](preprod/results/v14-preprod.md), vault
+> `4f3b21e1c811…`). See [What changed this Wave](#what-changed-this-wave).
 > Demo video and deck: *coming*.
 
 ## Judge quickstart
@@ -217,8 +219,15 @@ level, and the bugs the tests caught: [docs/TESTING.md](docs/TESTING.md).
 
 ## Validation results
 
-Before building, we validated every Midnight primitive Codicil depends on (15 gates; 14 pass,
-end-to-end on Preprod is pending). Highlights:
+Before building, we validated every Midnight primitive Codicil depends on (15 gates, all passing).
+Highlights:
+
+- The vault ran **end to end on Preprod and Preview**: ten transactions each, including a 27-second
+  passkey proof and a cross-contract withdrawal with two proofs in one transaction
+  ([results](preprod/results/v14-preprod.md)).
+- The first real deployment was refused: the 16-circuit vault is too big for one block. It now
+  **deploys in stages**, nine circuits first and seven added after
+  ([D19](docs/DECISIONS.md)).
 
 - Real **Touch ID** signatures verify in-circuit. Chrome randomly lengthens the signed browser
   data (in 2 of 5 captures), so the verifier accepts both forms.
@@ -231,7 +240,8 @@ Design decisions: [docs/DECISIONS.md](docs/DECISIONS.md). Error catalogue: [docs
 
 ## Roadmap
 
-1. End-to-end deployment on Preprod, with the app talking to Lace and the proof server.
+1. Live mode in the app: the same flow as the Preprod run, with Lace and a real passkey.
+   Then giving up the contract's maintenance key after deployment ([D19](docs/DECISIONS.md)).
 2. In the app: writing a will from scratch, and heirs creating their own keys on their own devices.
 3. A recovery that can outlast a deadline, and owner-signed rotation of a single lost key
    ([D18](docs/DECISIONS.md)).
@@ -256,7 +266,7 @@ Milestones and status: [docs/ROADMAP.md](docs/ROADMAP.md). Customers, go-to-mark
   miss, a notice to heirs when the will changes, and a privacy
   lens, in the Obsidian design, with a landing page whose 3D point field changes shape as you scroll. Dark and light themes,
   works on phones.
-- 373 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
+- 374 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
   CI on every push.
 - Docs: architecture, privacy (every field and transaction), a threat model mapping each threat to
   the test that covers it, testing, roadmap, business and a judges' quickstart. Details: [docs/WAVES.md](docs/WAVES.md).

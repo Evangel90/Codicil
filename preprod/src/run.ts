@@ -22,6 +22,7 @@ import {
 } from '@midnight-ntwrk/compact-runtime';
 import { unshieldedToken } from '@midnight-ntwrk/midnight-js-protocol/v9';
 import { deployContract, findDeployedContract, getUnshieldedBalances } from '@midnight-ntwrk/midnight-js/contracts';
+import { deployInStages, insertVerifierKeys } from './staged-deploy.js';
 import type { PublicDataProvider } from '@midnight-ntwrk/midnight-js/types';
 import * as Rx from 'rxjs';
 import { ledger as vaultLedger, Phase, pureCircuits as vaultPure, type Ledger as VaultLedger, type VaultConfig } from '@codicil/contracts/vault';
@@ -200,6 +201,16 @@ interface TxPublic {
   fees: { paidFees: string; estimatedFees: string };
 }
 
+/**
+ * If the vault's deployment is too big for one block, the verifier keys of
+ * these circuits are left out of it and inserted afterwards, in this order:
+ * the ones a first check-in, release and claim do not need come first.
+ */
+export const VAULT_DEFER_ORDER = [
+  'updateSettingsEd25519', 'updateSettingsPasskey', 'startRecovery', 'finishRecovery',
+  'updateWillEd25519', 'updateWillPasskey', 'triggerAttestation', 'guardianAttest', 'claimAsBackup',
+] as const;
+
 type StepOutcome =
   | { kind: 'tx'; tx: TxPublic; circuits?: string[]; notes?: string[] }
   | { kind: 'recovered'; notes: string[] }
@@ -244,7 +255,7 @@ export async function runAll(opts: RunOptions): Promise<RunState> {
   const publicDataProvider: PublicDataProvider = makePublicDataProvider(cfg);
   const parts: ProviderParts = {
     config: cfg,
-    ...midnightWalletProviders(session, timings),
+    ...midnightWalletProviders(session, timings, log),
     publicDataProvider,
     proofTimings: timings,
     proofTimeoutMs: opts.proofTimeoutMs,
@@ -316,26 +327,42 @@ export async function runAll(opts: RunOptions): Promise<RunState> {
     const deployedAt = nowS();
     const config = vaultConfigFor(cast, runTimers, deployedAt);
     log(`deploying the vault: first deadline in ${formatDuration(runTimers.firstDeadlineS)}, max period ${formatDuration(runTimers.maxPeriodS)}, challenge window ${formatDuration(runTimers.challengeWindowS)}`);
-    const deployed = await deployContract(vProviders, {
-      compiledContract: vaultContract,
-      privateStateId: VAULT_PRIVATE_STATE_ID,
-      initialPrivateState: cast.base,
-      args: [config],
-    });
-    const pub = deployed.deployTxData.public;
-    state = {
-      ...state!,
-      vault: {
-        address: pub.contractAddress,
-        deployedAt,
-        firstDeadline: config.firstDeadline,
-        maxPeriod: config.maxPeriod,
-        challengeWindow: config.challengeWindow,
-        claimWindow: config.claimWindow,
-        depositAmount: opts.depositAmount,
-      },
+    // A crash after the deploy transaction but before every verifier key was
+    // inserted: the vault exists, so finish it instead of deploying another.
+    const half = state!.vault;
+    if (half?.maintenanceKey && half.pendingKeys && half.pendingKeys.length > 0) {
+      log(`resuming a staged deployment at ${half.address}: ${half.pendingKeys.length} verifier key(s) still to insert`);
+      await vaultPrivate.setSigningKey(half.address, half.maintenanceKey as never);
+      await insertVerifierKeys({
+        providers: vProviders, compiledContract: vaultContract, address: half.address, circuits: half.pendingKeys, log,
+        onInserted: (_c, remaining) => persist({ ...state!, vault: { ...state!.vault!, pendingKeys: remaining } }),
+      });
+      return { kind: 'recovered', notes: [`vault address ${half.address}`, 'the deploy transaction was recorded by an earlier run; its verifier keys are now complete'] };
+    }
+    const info = {
+      deployedAt,
+      firstDeadline: config.firstDeadline,
+      maxPeriod: config.maxPeriod,
+      challengeWindow: config.challengeWindow,
+      claimWindow: config.claimWindow,
+      depositAmount: opts.depositAmount,
     };
-    return { kind: 'tx', tx: pub, notes: [`vault address ${pub.contractAddress}`, `first deadline ${new Date(Number(config.firstDeadline) * 1000).toISOString()}`] };
+    const deployed = await deployInStages({
+      providers: vProviders,
+      compiledContract: vaultContract,
+      args: [config],
+      initialPrivateState: cast.base,
+      deferOrder: VAULT_DEFER_ORDER,
+      log,
+      onDeployed: ({ address: at, signingKey, pending }) => persist({ ...state!, vault: { address: at, ...info, maintenanceKey: signingKey, pendingKeys: pending } }),
+      onInserted: (_c, remaining) => persist({ ...state!, vault: { ...state!.vault!, pendingKeys: remaining } }),
+    });
+    const pub = deployed.deployTx as TxPublic;
+    state = { ...state!, vault: { address: deployed.address, ...info, maintenanceKey: deployed.signingKey, pendingKeys: [] } };
+    const stages = deployed.plan.deferred.length === 0
+      ? `one transaction (${(deployed.plan.writeShare * 100).toFixed(0)}% of a block's write limit)`
+      : `${1 + deployed.inserts.length} transactions: all at once it would use ${(deployed.plan.writeShareAllAtOnce * 100).toFixed(0)}% of a block's write limit, so ${deployed.inserts.length} verifier keys were inserted afterwards (${deployed.inserts.map((i) => `${i.circuit} ${i.txHash}`).join('; ')})`;
+    return { kind: 'tx', tx: pub, notes: [`vault address ${deployed.address}`, `first deadline ${new Date(Number(config.firstDeadline) * 1000).toISOString()}`, `deployed in ${stages}`] };
   });
   const vault = state.vault;
   if (!vault) throw new Error('no vault address after deploy');
@@ -479,7 +506,9 @@ export async function runAll(opts: RunOptions): Promise<RunState> {
     const expected = payoutFor(l.estateSnapshot, leaf.shareBps);
     const r = await handle.callTx.claim(recipient);
     const after = await readVault();
-    const paid = r.public.unshielded.created.filter((u) => u.owner.toLowerCase() === session.identity.addressHex.toLowerCase() && u.value === expected);
+    // The indexer reports an owner as a bech32 address (mn_addr_…); accept the hex form too.
+    const mine = new Set([address.toLowerCase(), session.identity.addressHex.toLowerCase()]);
+    const paid = r.public.unshielded.created.filter((u) => mine.has(u.owner.toLowerCase()) && u.value === expected);
     return {
       kind: 'tx',
       tx: r.public,

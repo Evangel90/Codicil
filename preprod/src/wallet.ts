@@ -30,7 +30,7 @@ import {
   type FacadeState,
   type UnshieldedKeystore,
 } from '@midnightntwrk/wallet-sdk';
-import { DustSecretKey, unshieldedToken, ZswapSecretKeys } from '@midnight-ntwrk/midnight-js-protocol/v9';
+import { DustSecretKey, LedgerParameters, Transaction, unshieldedToken, ZswapSecretKeys } from '@midnight-ntwrk/midnight-js-protocol/v9';
 import {
   createLedger9MidnightProvider,
   createLedger9WalletProvider,
@@ -395,6 +395,10 @@ export async function waitForDust(session: WalletSession, minSpeck: bigint, opts
 
 export interface TxTimings {
   balanceMs?: number;
+  /** What the wallet estimated this transaction would cost, in SPECK. */
+  feeEstimate?: bigint;
+  /** Bytes of ledger state the finalized transaction writes; a block allows 50,000. */
+  bytesWritten?: number;
   submittedAt?: number;
 }
 
@@ -403,25 +407,92 @@ export interface TxTimings {
  * bytes: `adoptTransaction` reads them with the wallet SDK's own ledger copy,
  * at the protocol version the wallet is acting at.
  */
-export function midnightWalletProviders(session: WalletSession, timings: TxTimings): { walletProvider: WalletProvider; midnightProvider: MidnightProvider } {
+export function midnightWalletProviders(session: WalletSession, timings: TxTimings, log: Log = () => {}): { walletProvider: WalletProvider; midnightProvider: MidnightProvider } {
   const { facade, identity } = session;
+  const dust = (speck: bigint) => `${(Number(speck) / 1e15).toFixed(3)} DUST`;
+  const dustNow = async () => {
+    const s = await Rx.firstValueFrom(facade.state());
+    return isSynced(s) ? s.dust.balance(new Date()) : 0n;
+  };
+  const shortOfDust = (e: unknown): boolean => {
+    for (let x: unknown = e, depth = 0; x && depth < 6; x = (x as { cause?: unknown }).cause, depth++) {
+      if (/could not balance dust|InsufficientFunds/i.test(x instanceof Error ? `${x.name} ${x.message}` : String(x))) return true;
+    }
+    return false;
+  };
   const walletProvider = createLedger9WalletProvider({
     async balanceTx(tx, ttl) {
       const started = Date.now();
-      const unbound = facade.adoptTransaction(tx.serialize(), 'Unbound');
-      const recipe = await facade.balanceUnboundTransaction(unbound, { ttl: ttl ?? new Date(Date.now() + 3600_000) });
-      const signed = await facade.signRecipe(recipe, (payload) => identity.keystore.signDataAsync(payload));
-      const finalized = await facade.finalizeRecipe(signed);
-      timings.balanceMs = Date.now() - started;
-      return finalized.serialize();
+      const bytes = tx.serialize();
+      // Fees are paid in DUST, which a wallet generates over time and cannot
+      // buy. A transaction that costs more than the wallet holds is not a
+      // failure, only early: say what it needs and wait for it. A deployment
+      // carries every verifier key, so it costs far more than a call.
+      const estimate = await facade.estimateTransactionFee(facade.adoptTransaction(bytes, 'Unbound'))
+        .catch(() => facade.calculateTransactionFee(facade.adoptTransaction(bytes, 'Unbound')))
+        .catch(() => undefined);
+      if (estimate !== undefined) {
+        timings.feeEstimate = estimate;
+        const have = await dustNow();
+        log(`  fee estimate ${dust(estimate)}; the wallet holds ${dust(have)}`);
+        if (have < estimate) {
+          await waitForDust(session, estimate + estimate / 20n, { timeoutMs: 6 * 3600_000, log: (l) => log(`  ${l}`), format: dust });
+        }
+      }
+      for (let attempt = 1; ; attempt++) {
+        try {
+          const unbound = facade.adoptTransaction(bytes, 'Unbound');
+          const recipe = await facade.balanceUnboundTransaction(unbound, { ttl: ttl ?? new Date(Date.now() + 3600_000) });
+          const signed = await facade.signRecipe(recipe, (payload) => identity.keystore.signDataAsync(payload));
+          const finalized = await facade.finalizeRecipe(signed);
+          timings.balanceMs = Date.now() - started;
+          return finalized.serialize();
+        } catch (e) {
+          // The estimate can fall short of what balancing needs. DUST keeps
+          // arriving, so try again every minute for up to three hours.
+          if (!shortOfDust(e) || attempt >= 180) throw e;
+          if (attempt % 5 === 1) log(`  not enough DUST yet (${dust(await dustNow())}); it is still generating, trying again every minute`);
+          await new Promise((r) => setTimeout(r, 60_000));
+        }
+      }
     },
     getCoinPublicKey: () => identity.coinPublicKey,
     getEncryptionPublicKey: () => identity.encryptionPublicKey,
   });
   const midnightProvider = createLedger9MidnightProvider(async (tx) => {
-    const id = await facade.submitTransaction(facade.adoptTransaction(tx.serialize(), 'Finalized'));
-    timings.submittedAt = Date.now();
-    return id;
+    // How much of a block this transaction takes. The node refuses one that is
+    // too big ("would exhaust the block limits"), and the size that matters is
+    // the bytes of state it writes, not the bytes of the transaction.
+    try {
+      const params = LedgerParameters.initialParameters();
+      const cost = Transaction.deserialize('signature', 'proof', 'binding', tx.serialize()).cost(params);
+      timings.bytesWritten = Number(cost.bytesWritten);
+      log(`  writes ${cost.bytesWritten} bytes of state (a block allows ${/block_limits[\s\S]*?bytes_written:\s*(\d+)/.exec(params.toString())?.[1] ?? '50000'}), ${tx.serialize().length} bytes on the wire`);
+    } catch { /* a diagnostic only */ }
+    try {
+      const id = await facade.submitTransaction(facade.adoptTransaction(tx.serialize(), 'Finalized'));
+      timings.submittedAt = Date.now();
+      return id;
+    } catch (e) {
+      // Midnight.js replaces a submission failure with a generic message. The
+      // node's own reason (which rule the transaction broke) is what a person
+      // needs, and it holds no key material, so show the whole chain here.
+      for (let x: unknown = e, depth = 0; x && depth < 6; x = (x as { cause?: unknown }).cause, depth++) {
+        const err = x as { name?: string; message?: string; _tag?: string };
+        let extra = '';
+        try {
+          // Leave out the transaction bytes; keep every message and code.
+          extra = JSON.stringify(x, (k, v) => (
+            k === 'txData' || v instanceof Uint8Array ? undefined
+              : typeof v === 'bigint' ? v.toString()
+              : v instanceof Error ? { ...v, name: v.name, message: v.message, cause: (v as { cause?: unknown }).cause }
+              : v))?.slice(0, 3000) ?? '';
+        } catch { /* not serializable */ }
+        log(`  submit failed [${depth}] ${err._tag ?? err.name ?? typeof x}: ${err.message ?? String(x)} ${extra}`);
+      }
+      log(`  transaction size ${tx.serialize().length} bytes`);
+      throw e;
+    }
   });
   return { walletProvider, midnightProvider };
 }

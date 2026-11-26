@@ -98,6 +98,14 @@ export interface VaultInfo {
   challengeWindow: bigint;
   claimWindow: bigint;
   depositAmount: bigint;
+  /**
+   * The contract's maintenance key, kept so a staged deployment can be
+   * resumed. Whoever holds it can replace the vault's verifier keys, so it
+   * stays in this file (not in the results) and belongs to a test vault only.
+   */
+  maintenanceKey?: { tag: string; value: string };
+  /** Circuits whose verifier keys are still to be inserted. Empty or absent: the deployment is complete. */
+  pendingKeys?: string[];
 }
 
 export interface RunState {
