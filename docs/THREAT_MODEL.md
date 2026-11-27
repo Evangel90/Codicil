@@ -68,9 +68,11 @@ or death-registry service), **any third party** (every trigger is permissionless
   The register leaves a trace: anyone can see that a vault has sealed texts, how many, and how many
   pieces each needs, though not what they say or who they are for. Once a piece is handed over it
   is public for good. A seal taken back is removed from the register, but kept copies of old pieces
-  and old sealed text still fit together. The vault does not know its register: anyone can
-  deploy a register that points at a vault and seal their own text in it, so a reader must get the
-  register's address from the owner (D21). The register is unaudited. It has run on Preview through the network script; the app creates one
+  and old sealed text still fit together. The vault does not know its register, and anyone
+  can deploy one that points at a vault. A genuine register therefore proves whose it is: its
+  keeper shows in zero knowledge that it can open the vault's own owner commitment, and readers
+  compare the two ledgers (D21). A reader who skips that check can be shown a forged register. After
+  the owner's key changes, the proof has to be made again. The register is unaudited. It has run on Preview through the network script; the app creates one
   only in the guided demo.
 - **The maintenance key can change the vault's rules.** Like every contract deployed through
   Midnight.js, the vault has a maintenance authority: a key that can insert and remove circuits'

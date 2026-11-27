@@ -120,6 +120,7 @@ The register's public ledger, field by field:
 | `pieceChecks` | A commitment to each piece of each key | How many pieces there are in all. Not the pieces |
 | `handedOver` | Pieces handed over after the release | The pieces themselves. A private message still needs the half only its recipient holds. A public disclosure opens for anyone once enough are here |
 | `statement` | The fingerprint of a public statement, or zeros | That the owner stands behind some statement. The words are on the owner's page, not on the chain |
+| `ownerCommit` | The vault's owner commitment, once the keeper has proved it can open it; zeros before | That this register was made by the vault's owner. It is the same value the vault already shows, so it reveals nothing new about who the owner is |
 
 A guardian who hands over through the register sends a transaction from any wallet. The contract
 records the piece and its number, and nothing about who sent it. What a transaction's fee payment

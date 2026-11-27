@@ -550,6 +550,8 @@ test('a public disclosure: the register refuses every piece until the release, t
   await actAs.getByRole('button', { name: 'Anyone' }).click();
   await messages();
   await expect(main.getByRole('heading', { name: 'A sealed disclosure is waiting.' })).toBeVisible();
+  // The register proves whose it is: it holds the vault's own owner commitment.
+  await expect(main).toContainText("This register is Amara's, and it proves it.");
   await expect(main).not.toContainText('payment ledger');
   await main.getByRole('button', { name: 'Open the disclosure' }).click();
   await expect(main.getByRole('alert')).toHaveText('It is still locked. It needs 2 guardian pieces and none is on the register.');

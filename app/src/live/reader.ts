@@ -35,6 +35,9 @@ export interface VaultReading {
   switchOpensAt: number;
   pendingUntil: number;
   releasedAt: number;
+  /** The vault's commitments to its owner's keys, as hex; all zeros for a kind of key it does not use. */
+  ownerPasskeyCommit: string;
+  ownerEdCommit: string;
 }
 
 export interface RegisterReading {
@@ -44,6 +47,8 @@ export interface RegisterReading {
   seals: { fingerprint: string; needed: number; pieces: number; sealedBefore: number }[];
   handedOver: { seal: string; piece: KeyPiece }[];
   statementFingerprint: string;
+  /** The owner commitment the register's keeper proved it can open; all zeros until it has. */
+  ownerCommit: string;
 }
 
 export type FetchState = (address: string) => Promise<ContractState | undefined>;
@@ -74,11 +79,21 @@ export async function readVault(fetchState: FetchState, address: string): Promis
     const reading = {
       address: id, phase: l.phase, deadline: Number(l.deadline), switchOpensAt: Number(timeoutOpensAt(l)),
       pendingUntil: Number(l.pendingUntil), releasedAt: Number(l.releasedAt),
+      ownerPasskeyCommit: hex(l.ownerPasskeyCommit), ownerEdCommit: hex(l.ownerEdCommit),
     };
     if (![reading.deadline, reading.switchOpensAt, reading.pendingUntil, reading.releasedAt].every(Number.isFinite) || typeof l.willRoot !== 'bigint') throw new Error('not a vault');
     return reading;
   } catch {
     throw new WrongContractError('vault');
+  }
+}
+
+/** A register deployed before the owner proof existed has no such field: read it as "not proven". */
+function ownerCommitOf(l: { ownerCommit: Uint8Array }): string {
+  try {
+    return hex(l.ownerCommit);
+  } catch {
+    return '0'.repeat(64);
   }
 }
 
@@ -95,10 +110,20 @@ export async function readRegister(fetchState: FetchState, address: string): Pro
       seals,
       handedOver: [...l.handedOver].map(([, p]) => ({ seal: hex(p.seal), piece: { x: Number(p.x), y: p.y } })),
       statementFingerprint: hex(l.statement),
+      ownerCommit: ownerCommitOf(l),
     };
   } catch {
     throw new WrongContractError('register');
   }
+}
+
+/**
+ * Whether a register was made by the owner of the vault that was read: it asks
+ * that vault, and its keeper proved it can open one of that vault's owner commitments.
+ */
+export function provesOwner(vault: VaultReading, register: RegisterReading): boolean {
+  if (register.vault !== vault.address || !/[1-9a-f]/.test(register.ownerCommit)) return false;
+  return register.ownerCommit === vault.ownerPasskeyCommit || register.ownerCommit === vault.ownerEdCommit;
 }
 
 export type CopyCheck =

@@ -508,3 +508,7 @@
 .reader-facts { max-width: none; }
 .reader .brand { text-decoration: none; }
 @media (max-width: 760px) { .reader { padding-top: 28px; } }
+
+.owner-proof { display: flex; gap: 8px; align-items: flex-start; line-height: 1.6; }
+.owner-proof > svg { flex: none; margin-top: 4px; color: var(--o-armed); }
+.owner-proof-missing { display: flex; flex-direction: column; gap: 12px; }

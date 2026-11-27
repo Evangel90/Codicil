@@ -30,7 +30,7 @@ Developers can build on two pieces: the release hook and the seal register.
 
 Wave 3, in progress. Test networks only, and unaudited.
 
-- **Built and tested:** the vault contract, the seal register, the SDK and the web app. 514 tests,
+- **Built and tested:** the vault contract, the seal register, the SDK and the web app. 523 tests,
   every contract call checked against its ZK circuit, plus browser tests that check in through
   Chrome's real WebAuthn.
 - **Run on real networks:** on 26 November 2026 the vault ran end to end on Preprod and Preview:
@@ -41,6 +41,10 @@ Wave 3, in progress. Test networks only, and unaudited.
   ([results](preprod/results/v14-preview.md)).
 - **Readable by anyone:** a [reader page](#read-a-real-vault-with-no-wallet) shows that vault's
   status and opens that text from Preview, with no wallet.
+- **A register proves whose it is:** its keeper shows in zero knowledge that it holds the key
+  behind the vault's owner commitment, so nobody can pass off their own register as the owner's.
+  This is tested and has real proofs made locally. It is newer than the Preview run, so the
+  register on Preview has not made the proof and the reader page says so.
 - **Live mode** (`#/app`): a person creates and uses their own vault on Preview or Preprod through
   the Lace wallet ([how to try it](#try-it-on-a-test-network)). Its store and chain code ran the
   whole story on Preview with a wallet built from a seed.
@@ -150,11 +154,13 @@ through its indexer. It asks for no key and sends no transaction.
 
 1. Press **Use the example vault**. The page reads vault `39cba0b4…864f` and its seal register
    `d709181d…0598`, both made by the network script, and says **Released**.
-2. The sealed text in the box is checked against the register: its fingerprint matches a seal
+2. The page says this register has not proved that it belongs to the vault's owner. That is
+   correct: it was deployed before registers could prove that.
+3. The sealed text in the box is checked against the register: its fingerprint matches a seal
    recorded before the vault released.
-3. Press **Open it in this browser**. The page rebuilds the key from the two pieces on the public
+4. Press **Open it in this browser**. The page rebuilds the key from the two pieces on the public
    ledger and shows the text.
-4. Change one character of the sealed text. It no longer matches.
+5. Change one character of the sealed text. It no longer matches.
 
 Paste any other vault address from Preview to read it as a signal: still checking in, gone silent,
 or released.
@@ -415,7 +421,7 @@ Milestones and status: [docs/ROADMAP.md](docs/ROADMAP.md). Customers, go-to-mark
   a new contract, the seal register (`codicil_seals`), which accepts a piece of a key only after
   the vault has released; a public disclosure anyone can open after the release; and the vault's
   public status read as a canary. The demo opens on four stories.
-- 514 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
+- 523 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
   CI on every push.
 - Docs: architecture, privacy (every field and transaction), a threat model mapping each threat to
   the test that covers it, testing, roadmap, business and a judges' quickstart. Details: [docs/WAVES.md](docs/WAVES.md).

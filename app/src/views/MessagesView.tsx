@@ -121,6 +121,7 @@ function LockPanel({ s, you }: { s: Snapshot; you: 'owner' | 'recipient' | 'guar
               <div><dt>Sealed texts, by fingerprint</dt><dd>{s.register.seals.length}</dd></div>
               <div><dt>Commitments to pieces</dt><dd>{s.register.pieceChecks}</dd></div>
               <div><dt>Pieces handed over</dt><dd>{s.register.handedOver.length}</dd></div>
+              <div><dt>Made by the vault's owner</dt><dd>{s.register.provesOwner ? 'Proven' : 'Not proven'}</dd></div>
             </dl>
             <p className="small">That is all the register holds: no message, no key, no name. A message delivered by hand is not here at all.</p>
           </>
@@ -133,13 +134,42 @@ function LockPanel({ s, you }: { s: Snapshot; you: 'owner' | 'recipient' | 'guar
           the register will not take a piece before it; keeping a piece to yourself until then is a promise. Opening a
           private message early would take {k === 1 ? 'one guardian' : `${k} guardians`} and the recipient, acting together.
           A public disclosure has no recipient to hold a half, so {k === 1 ? 'one guardian' : `${k} guardians`} could open it.
-          The vault does not know its register, so the register's address has to come from {you === 'owner' ? 'you' : OWNER_FIRST}.
+          The vault does not know its register, so the register proves whose it is: a reader checks that it holds the vault's own owner commitment.
         </p>
         {k === 1 && you === 'owner' && (
           <p className="small msg-warn">With 1 needed, any one guardian and the recipient could open a message early. Raise the number in Settings.</p>
         )}
       </div>
     </aside>
+  );
+}
+
+/** Whether the register has proved it was made by the vault's owner, in words anyone can act on. */
+function OwnerProof({ s }: { s: Snapshot }) {
+  const mine = s.actor.kind === 'owner';
+  const busy = s.tx?.status === 'running';
+  if (s.register.provesOwner) {
+    return (
+      <p className="small muted owner-proof">
+        <Icon d={ICONS.check} size={14} stroke={2} />
+        <span>
+          This register is {mine ? 'yours' : `${OWNER_FIRST}'s`}, and it proves it. It holds the same owner commitment as the vault,{' '}
+          <HashChip value={s.register.ownerCommit} />, put there by a zero-knowledge proof that only the vault's owner can make.
+        </span>
+      </p>
+    );
+  }
+  return (
+    <div className="savings-note owner-proof-missing" role="status">
+      <p>
+        {mine
+          ? 'Your vault has a new owner key, so the seal register no longer proves it is yours. Until you prove it again, a reader cannot tell it from a register somebody else pointed at your vault.'
+          : `This register has not proved that it belongs to the owner of this vault. Anyone can deploy a register that points at a vault, so treat what it holds with care until ${OWNER_FIRST} proves it.`}
+      </p>
+      {mine && (
+        <div><button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void demo.proveRegister()}>Prove the register is yours</button></div>
+      )}
+    </div>
   );
 }
 
@@ -327,6 +357,7 @@ function OwnerMessages({ s, focus, onFocused }: { s: Snapshot; focus?: Focus; on
         <div className="split-main msg-main">
           {released && <p className="savings-note">Your vault has released, so messages can no longer be sealed or changed.</p>}
           {problem && <p className="err-inline" role="alert">{problem}</p>}
+          {!s.register.provesOwner && <OwnerProof s={s} />}
           {focus === 'statement' && <StatementEditor s={s} />}
           <ul className="msg-list">
             {HEIRS.map((h) => (
@@ -394,6 +425,7 @@ function Disclosure({ s }: { s: Snapshot }) {
         <div><dt>Fingerprint on the register</dt><dd>{m.fingerprint && <HashChip value={m.fingerprint} />}</dd></div>
         <div><dt>Recorded before</dt><dd>{m.sealedBefore !== undefined ? fmtDate(m.sealedBefore) : 'unknown'}</dd></div>
       </dl>
+      <OwnerProof s={s} />
       <PieceCount m={m} />
       <button type="button" className="btn btn-primary btn-lg" disabled={busy} onClick={() => void open()}>Open the disclosure</button>
       {problem && <p className="err-inline" role="alert">{problem}</p>}

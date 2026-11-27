@@ -12,7 +12,7 @@ import { Brand, HashChip, ThemeToggle } from '../components/ui.js';
 import { signal } from '../demo/guide.js';
 import { EXAMPLE } from '../live/example.js';
 import {
-  checkCopy, cleanAddress, indexerReader, looksLikeAddress, openCopy, readRegister, readVault, WrongContractError, type RegisterReading, type VaultReading,
+  checkCopy, cleanAddress, indexerReader, looksLikeAddress, openCopy, provesOwner, readRegister, readVault, WrongContractError, type RegisterReading, type VaultReading,
 } from '../live/reader.js';
 
 /** Test networks run on short timers, so the time of day matters here. */
@@ -143,8 +143,8 @@ export function Reader() {
           {vault.trim() !== '' && !looksLikeAddress(vault) && <p className="small muted">A vault address is 64 hexadecimal characters.</p>}
           {register.trim() !== '' && !looksLikeAddress(register) && <p className="small muted">A register address is 64 hexadecimal characters. Clear the field to read the vault alone.</p>}
           <p className="small muted">
-            Take a register's address from the vault's owner. Anyone can deploy a register that points at a vault, and
-            this page only shows what a register says.
+            Anyone can deploy a register that points at a vault. A genuine one proves it was made by the vault's owner,
+            and this page checks that proof for you.
           </p>
         </form>
 
@@ -184,6 +184,17 @@ export function Reader() {
                 This register asks a different vault than the one above. Its seals follow that other vault's release.
               </p>
             )}
+            {done.vault && !mismatch && (provesOwner(done.vault, done.register) ? (
+              <p className="copy-ok" role="status">
+                Made by this vault's owner. The register holds the vault's own owner commitment, <HashChip value={done.register.ownerCommit} />,
+                which only a zero-knowledge proof by the owner can put there.
+              </p>
+            ) : (
+              <p className="err-inline" role="alert">
+                This register has not proved that it belongs to this vault's owner. Anyone could have deployed it, so
+                do not treat what it holds as the owner's.
+              </p>
+            ))}
             <dl className="msg-facts reader-facts">
               <div><dt>Sealed texts, by fingerprint</dt><dd>{done.register.seals.length}</dd></div>
               <div><dt>Pieces of keys handed over</dt><dd>{done.register.handedOver.length}</dd></div>

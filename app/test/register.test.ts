@@ -7,7 +7,7 @@
 // every piece until the vault has released, and then only takes genuine ones.
 
 import { beforeEach, describe, expect, it } from 'vitest';
-import { CHALLENGE, demo } from '../src/demo/store.js';
+import { CHALLENGE, DAY, defaultSetup, demo } from '../src/demo/store.js';
 import { createDemoPasskey } from '../src/demo/passkey.js';
 import { messagesNext, messageStage, signal } from '../src/demo/guide.js';
 import { commands, filterCommands } from '../src/demo/commands.js';
@@ -64,6 +64,35 @@ describe('the register beside the vault', () => {
     expect(r.vault).toBe(s().chain.address);
     expect(r).toMatchObject({ seals: [], pieceChecks: 0, handedOver: [], statementFingerprint: '0'.repeat(64) });
     expect(r.keeperCommit).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe('proving whose register it is', () => {
+  it('holds the vault\'s own owner commitment from the start, put there by the owner\'s proof', () => {
+    const r = s().register;
+    expect(r.provesOwner).toBe(true);
+    expect(r.ownerCommit).toBe(s().chain.ownerPasskeyCommit);
+  });
+
+  it('stops proving it when the owner\'s key changes, until the owner proves it again', async () => {
+    demo.reset();
+    const key = demo.draftRecoveryKey();
+    await demo.setUp(createDemoPasskey(), { ...defaultSetup(), recoveryDelay: 3 * DAY });
+    expect(s().register.provesOwner).toBe(true);
+    const before = s().chain.ownerPasskeyCommit;
+
+    await ok(demo.startRecovery(key));
+    demo.advanceTo(s().recovery.readyAt);
+    await ok(demo.finishRecovery('Someone'));
+    // The vault has a new owner commitment; the register still holds the old one.
+    expect(s().chain.ownerPasskeyCommit).not.toBe(before);
+    expect(s().register.ownerCommit).toBe(before);
+    expect(s().register.provesOwner).toBe(false);
+
+    expect(await ok(demo.proveRegister())).toMatch(/^The register now holds the same owner commitment as your vault\./);
+    expect(s().register.ownerCommit).toBe(s().chain.ownerPasskeyCommit);
+    expect(s().register.provesOwner).toBe(true);
+    expect(s().activity[0].published).toEqual(['The same owner commitment the vault holds, now on the register too']);
   });
 });
 

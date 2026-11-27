@@ -26,7 +26,7 @@ found, add `~/.local/bin` to your `PATH`.
 npm test
 ```
 
-Expected on a fresh checkout: four suites, **199 + 50 + 163 + 99 = 511 passed and 3 skipped**, in
+Expected on a fresh checkout: four suites, **204 + 50 + 166 + 100 = 520 passed and 3 skipped**, in
 about a minute. The skipped ones need files a fresh checkout does not have: one SDK test needs a
 local wallet capture, and two network-script tests need the proving keys from the full compile. The contract suite
 checks every successful call against the compiled ZK circuit, so these are calls a proof can be made

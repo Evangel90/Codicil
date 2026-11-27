@@ -53,6 +53,7 @@ import {
   recoveryCommitment,
   recoveryConfig,
   recoveryStatus,
+  registerProvesOwner,
   rpIdHash,
   sealArgs,
   sealedFingerprint,
@@ -361,6 +362,10 @@ export interface RegisterView {
   handedOver: { seal: string; x: number; y: string }[];
   /** All zeros until the owner stands behind a statement. */
   statementFingerprint: string;
+  /** The owner commitment the register's keeper proved it can open; all zeros until it has. */
+  ownerCommit: string;
+  /** Whether that commitment is the one on the vault's own ledger: the register was made by the vault's owner. */
+  provesOwner: boolean;
   // Off-chain.
   /** The statement on the owner's public page, and whether it matches the fingerprint on the ledger. */
   statement?: { text: string; at: number; genuine: boolean };
@@ -751,6 +756,11 @@ class DemoStore {
     const register = await chain.deployContract(
       'codicil_seals', sealsModule, sealsWitnesses(), { bytes: encodeContractAddress(chain.address) }, keeperCommitment(k.keeperSecret),
     );
+    // The register proves whose it is: its keeper shows, in zero knowledge,
+    // that it holds the key and salt behind the vault's owner commitment.
+    await chain.callContract(register, 'provePasskeyOwner', {
+      witnesses: sealsWitnesses(k.keeperSecret, { passkey: { pk: passkey.pk, salt: k.ownerSalt } }),
+    });
     this.world = {
       ...k, chain, passkey, setup: { ...setup, attestor: false }, will, guardianSet, deployedAt: now, lastCheckIn: now,
       register: { address: register },
@@ -1556,6 +1566,29 @@ class DemoStore {
     return w.chain.getContractState('', address);
   }
 
+  /**
+   * The owner proves again that the seal register is theirs. Needed after the
+   * owner's key changes, because the vault's commitment to it changes too.
+   */
+  proveRegister(): Promise<boolean> {
+    return this.run('Proving the seal register is yours', ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
+      const w = this.world!;
+      await stage('circuit');
+      await w.chain.callContract(w.register.address, 'provePasskeyOwner', {
+        witnesses: sealsWitnesses(w.keeperSecret, { passkey: { pk: w.passkey.pk, salt: w.ownerSalt } }),
+      });
+      this.log(OWNER_NAME, 'Seal register proven to be the owner\'s', 'plain', [
+        'The same owner commitment the vault holds, now on the register too',
+      ], ['Your passkey and the salt behind the commitment', 'Who you are']);
+      return 'The register now holds the same owner commitment as your vault. Only someone with your key could have put it there, and anyone can compare the two.';
+    }, {
+      stages: {
+        circuit: { label: 'Running the seal register on this device', detail: 'The circuit takes your passkey\'s public key and its salt, which never leave this device, and works out the commitment your vault already holds.' },
+        proof: { label: 'Generating zero-knowledge proof', detail: 'On Midnight this proves you know the key behind the commitment without revealing it.' },
+      },
+    });
+  }
+
   private registerView(w: World): RegisterView {
     const l = this.sealsLedger(w);
     const st = w.register.statement;
@@ -1567,6 +1600,8 @@ class DemoStore {
       pieceChecks: Number(l.pieceChecks.size()),
       handedOver: [...l.handedOver].map(([, p]) => ({ seal: hex(p.seal), x: Number(p.x), y: hex(p.y) })).sort((a, b) => a.seal.localeCompare(b.seal) || a.x - b.x),
       statementFingerprint: hex(l.statement),
+      ownerCommit: hex(l.ownerCommit),
+      provesOwner: registerProvesOwner(w.chain.ledger, l),
       statement: st && { ...st, genuine: hex(sha256(utf8ToBytes(st.text))) === hex(l.statement) },
       lastAttempt: w.register.lastAttempt,
     };
@@ -1821,7 +1856,7 @@ class DemoStore {
         guardians: [], events: [],
         recovery: { state: 'off', readyAt: 0, delay: 0, lastStart: 0, nextKeyToSave: false, formerPasskey: false },
         heirs: [], messages: [], leafHashes: [], votedThisRound: [], activity: [], tx: this.tx, toast: this.toast,
-        register: { address: '', vault: '', keeperCommit: '', seals: [], pieceChecks: 0, handedOver: [], statementFingerprint: '0'.repeat(64) },
+        register: { address: '', vault: '', keeperCommit: '', seals: [], pieceChecks: 0, handedOver: [], statementFingerprint: '0'.repeat(64), ownerCommit: '0'.repeat(64), provesOwner: false },
         position: { name: POSITION.name, address: '', vault: '', beneficiaryCommit: '', held: 0n, withdrawn: false, beneficiary: POSITION.beneficiary },
       };
     }

@@ -243,7 +243,7 @@ paid after it. [BUILD_ON_CODICIL.md](BUILD_ON_CODICIL.md) shows the lines to cop
 
 `codicil_seals` uses the same hook for words instead of money. A sealed message is encrypted off
 the chain, and the guardians hold the pieces of half of its key ([D20](DECISIONS.md)). The register
-is one of two routes for those pieces ([D21](DECISIONS.md)). It has four circuits:
+is one of two routes for those pieces ([D21](DECISIONS.md)). It has six circuits:
 
 | Circuit | Who | What it does |
 |---|---|---|
@@ -251,6 +251,7 @@ is one of two routes for those pieces ([D21](DECISIONS.md)). It has four circuit
 | `unseal` | The keeper | Removes a seal. Refused once the vault has released |
 | `handOver` | Anyone holding a piece | Asks the vault whether it has released, checks the piece against its commitment, and writes it to the public ledger |
 | `state` | The keeper | Records the fingerprint of a public statement, such as a canary |
+| `provePasskeyOwner`, `proveWalletOwner` | The keeper, holding the owner's key and salt | Records the vault's own owner commitment, computed from private inputs. A reader who finds the same value on both ledgers knows the vault's owner made this register |
 
 The register never receives a message or a key. A reader collects the pieces from its ledger and
 opens the text on their own device. Tests: [`seals.test.ts`](../contracts/test/seals.test.ts). The

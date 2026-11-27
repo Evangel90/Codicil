@@ -5,6 +5,8 @@
 // `npm run preprod:run -- --seals` (preprod/results). The vault was released
 // and two guardians' pieces were handed over, so the reader page can open the
 // sealed text below from the public ledger. Empty strings hide the example.
+// This register was deployed before registers could prove whose they are, so
+// the reader says, correctly, that it has not proved it belongs to the owner.
 // The sealed text is public by design: it is a test disclosure, and it carries
 // no secret that the register's ledger does not already complete.
 

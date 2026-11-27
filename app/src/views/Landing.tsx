@@ -305,7 +305,7 @@ const BUILD: { title: string; body: string; code: string; file: string; link: st
   },
   {
     title: 'Hand a key over only after a release',
-    body: 'The seal register sits beside a vault. It records a fingerprint of each sealed text and a commitment to every piece of its key. It refuses a piece until the vault has released, checks that the piece is genuine, then publishes it. Use it for anything that should unlock on a release: files, credentials, a decryption key.',
+    body: 'The seal register sits beside a vault. It records a fingerprint of each sealed text and a commitment to every piece of its key. It refuses a piece until the vault has released, checks that the piece is genuine, then publishes it. It also proves whose it is: its keeper shows, without revealing the key, that it is the vault’s owner, so nobody can pass off a register of their own as yours. Use it for anything that should unlock on a release: files, credentials, a decryption key.',
     code: 'assert(vault.isReleasedForContract(), "vault not released");\nassert(pieceChecks.member(check), "not a genuine piece");',
     file: 'codicil_seals.compact',
     link: 'The seal register',

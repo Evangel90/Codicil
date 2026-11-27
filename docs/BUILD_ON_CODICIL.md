@@ -125,8 +125,19 @@ the block time, only compare it, so the ledger holds an upper bound: the block t
 seal was earlier than that, by less than an hour. `seal` also asks the vault and refuses once it
 has released, so every seal on a register predates the release.
 
-A vault does not know its register. Anyone can deploy one that points at any vault, so tell your
-readers which register is yours.
+A vault does not know its register, and anyone can deploy one that points at any vault. So a
+register proves whose it is. Call `provePasskeyOwner` (or `proveWalletOwner`) once after deploying,
+with the owner's key and salt as private inputs:
+
+```ts
+await call(register, 'provePasskeyOwner', sealsWitnesses(keeperSecret, { passkey: { pk, salt } }));
+// Anyone, from the two public ledgers:
+registerProvesOwner(vaultLedger, sealsLedger); // true only for the vault owner's register
+```
+
+The circuit records the same owner commitment the vault's ledger holds. Producing it takes the
+salt, which only the owner has, and the proof reveals neither the key nor the salt. Make the proof
+again after the owner's key changes.
 
 ### A message for one person, or for everyone
 
@@ -160,11 +171,13 @@ both compiled contracts beside the compiled vault in the browser
 - **The release hook** ran on Preprod and Preview: a withdrawal from the example escrow with two
   proofs in one transaction ([VALIDATION.md](VALIDATION.md), V14).
 - **The seal register** runs in the contract tests and in the guided demo. The full compiler
-  generates proving keys for its four circuits. It has also run on Preview through the network
+  generates proving keys for its six circuits. It has also run on Preview through the network
   script (`npm run preprod:run -- --seals`): register `d709181d7c271477f322b159474a6491b21cb1381054703636e1ef8aa11f0598`
   beside vault `39cba0b46d2a8baadf6e765005392f0edadc7259928a59eec78dbbce02e9864f`
   ([results](../preprod/results/v14-preview.md)). The app's reader page (`#/read`) reads both with
-  no wallet.
+  no wallet. That register was deployed before the owner proof existed, so the reader reports it
+  as not proven. The owner proof has real proofs made locally (`preprod:dryrun -- --seals --prove`)
+  and has not yet run on a network.
 
 ## Limits to design around
 

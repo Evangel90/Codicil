@@ -512,13 +512,32 @@ the contract found this gap; a test now covers it.
   acting together, can open it early without anyone else.
 - Taking a seal back removes it from the register, so the register accepts no piece for it. Copies
   of the old sealed text and old pieces that people kept still fit together.
-- The vault does not know its register. Anyone can deploy a register that points at any vault and
-  seal a text of their own in it, and that vault's release would open it. A reader has to get the
-  register's address from the vault's owner, for example from the owner's own page. Recording the
-  register in the vault, through a circuit only the owner can call, would close this; it needs a
-  new vault circuit and is on the roadmap.
+
+**How a register proves whose it is.** The vault does not know its register. Anyone can deploy a
+register that points at any vault and seal a text of their own in it, and that vault's release
+would open it. An independent review found this. The fix needs no change to the vault. The vault's
+ledger already holds a commitment to its owner's key: a hash of the key and a secret salt, which
+hides both. The register has two circuits, `provePasskeyOwner` and `proveWalletOwner`, that take
+the owner's key and salt as private inputs, compute the same commitment, and record it. A
+zero-knowledge proof shows the keeper knew a key and salt that produce it, and reveals neither.
+A reader compares the two public ledgers: if the register holds the vault's own owner commitment,
+the vault's owner made it. Someone else's register cannot hold it, because producing it takes the
+salt, which never leaves the owner's device. The commitment functions are repeated in the register
+byte for byte, and a test fails if they differ from the vault's.
+
+Two limits. When the owner's key changes (a recovery), the vault's commitment changes and the old
+proof no longer matches, so the owner proves it again; until then readers are told the register
+is unproven. And the proof shows who made the register, not that every seal in it is wise to
+trust: the keeper's secret still guards `seal`.
 
 **Where it runs.** In the contract tests, in the guided demo, and on Preview through the network
 script, where it refused a piece before the release and accepted two after it, with two proofs in
 each transaction ([results](../preprod/results/v14-preview.md)). The reader page reads that
 register with no wallet and opens its sealed text. Live mode does not create a register yet.
+
+The owner proof is newer than that run. Its two circuits have real proofs made locally with the
+full keys (`npm run preprod:dryrun -- --seals --prove`), and the network script runs
+`provePasskeyOwner` as its own step. A second run on Preview on 27 November 2026 stopped during
+deployment, when the network's wallet sync returned server errors, so the proof has not yet been
+recorded on a network. The register from the first run predates it, and the reader page says so:
+it reports that register as not proven.

@@ -11,7 +11,7 @@ import { Phase } from '@codicil/contracts/vault';
 import { CHALLENGE, demo } from '../src/demo/store.js';
 import { createDemoPasskey } from '../src/demo/passkey.js';
 import { signal } from '../src/demo/guide.js';
-import { checkCopy, cleanAddress, looksLikeAddress, openCopy, readRegister, readVault, WrongContractError, type FetchState } from '../src/live/reader.js';
+import { checkCopy, cleanAddress, looksLikeAddress, openCopy, provesOwner, readRegister, readVault, WrongContractError, type FetchState } from '../src/live/reader.js';
 
 const s = () => demo.getSnapshot();
 const fetchState: FetchState = (address) => demo.contractState(address);
@@ -44,6 +44,7 @@ describe('reading a vault with no wallet', () => {
     const v = (await readVault(fetchState, `0x${s().chain.address.toUpperCase()}`))!;
     expect(v).toEqual({
       address: s().chain.address, phase: Phase.armed, deadline: s().deadline, switchOpensAt: s().switchOpensAt, pendingUntil: 0, releasedAt: 0,
+      ownerPasskeyCommit: s().chain.ownerPasskeyCommit, ownerEdCommit: '0'.repeat(64),
     });
     expect(signal({ ...v, now: s().now }).title).toBe('Still checking in');
     expect(await readVault(fetchState, 'ab'.repeat(32))).toBeUndefined();
@@ -81,6 +82,18 @@ describe('reading a seal register with no wallet', () => {
     expect(r.seals).toEqual(s().register.seals);
     expect(r.handedOver).toEqual([]);
     expect(JSON.stringify(r)).not.toMatch(/publish it myself/);
+  });
+
+  it('checks that the register was made by the vault\'s owner, from the two ledgers alone', async () => {
+    const v = (await readVault(fetchState, s().chain.address))!;
+    const r = await register();
+    expect(r.ownerCommit).toBe(v.ownerPasskeyCommit);
+    expect(provesOwner(v, r)).toBe(true);
+    // A register that asks another vault, or that never made the proof, does not pass.
+    expect(provesOwner({ ...v, address: 'ab'.repeat(32) }, r)).toBe(false);
+    expect(provesOwner(v, { ...r, ownerCommit: '0'.repeat(64) })).toBe(false);
+    expect(provesOwner({ ...v, ownerPasskeyCommit: '0'.repeat(64), ownerEdCommit: '0'.repeat(64) }, { ...r, ownerCommit: '0'.repeat(64) })).toBe(false);
+    expect(provesOwner(v, { ...r, ownerCommit: 'cd'.repeat(32) })).toBe(false);
   });
 
   it('a true copy matches and stays shut until enough pieces are on the ledger', async () => {

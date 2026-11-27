@@ -31,7 +31,7 @@ const NOTES: Record<string, [string, string]> = {
   nulls: ['Nullifiers: one-time stamps', 'Each claim leaves a random-looking stamp so it can’t be repeated. The stamps can’t be linked to heirs.'],
   bal: ['The total is public, the split is not', 'Anyone can see what the vault holds. Only you know how it divides.'],
   msg: ['A message by hand leaves no trace', 'It is sealed, handed over and opened between people’s devices. None of that is a transaction, so the ledger has no field for it. The one thing it takes from the chain is the vault’s state: released, or not.'],
-  reg: ['The seal register: fingerprints, never words', 'A message sent through the register leaves a fingerprint of its sealed text and a commitment to each piece of its key. After the release, the pieces themselves appear. A private message still needs the half only its recipient holds, and nothing here says who that is.'],
+  reg: ['The seal register: fingerprints, never words', 'A message sent through the register leaves a fingerprint of its sealed text and a commitment to each piece of its key. After the release, the pieces themselves appear. A private message still needs the half only its recipient holds, and nothing here says who that is. The register also holds the vault’s owner commitment, placed by a zero-knowledge proof, which shows it was made by the vault’s owner and by nobody else.'],
   pos: ['A second contract, the same privacy', 'The savings contract stores the vault it asks, the amount and a commitment to its beneficiary. It asks the vault one question, released or not, and never learns who is in the will.'],
 };
 const IDLE: [string, string] = ['Point at, or tap, any row', 'Its counterpart on the other ledger lights up. Warm ink is private and stays on your device. Cool slate is public, on the chain.'];
@@ -75,7 +75,7 @@ export function LensView({ s }: { s: Snapshot }) {
     ['bal', 'estate', `${s.estate.toLocaleString()} ${TOKEN}`, 'balance'],
     ['pos', `escrow ${short(s.position.address)}`, `${s.position.held.toLocaleString()} · ${short(s.position.beneficiaryCommit)} · ${s.position.withdrawn ? 'withdrawn' : 'not withdrawn'}`, 'linked contract: amount held, beneficiary commitment, withdrawn or not'],
     ['msg', 'messages by hand', 'nothing · no field', 'not on the ledger'],
-    ['reg', `register ${short(s.register.address)}`, `${s.register.seals.length} sealed · ${s.register.pieceChecks} commitments · ${s.register.handedOver.length} pieces`, 'linked contract: fingerprints of sealed texts, commitments to key pieces, pieces handed over'],
+    ['reg', `register ${short(s.register.address)}`, `${s.register.seals.length} sealed · ${s.register.pieceChecks} commitments · ${s.register.handedOver.length} pieces · ${s.register.provesOwner ? 'owner proven' : 'owner not proven'}`, 'linked contract: fingerprints of sealed texts, commitments to key pieces, pieces handed over, and proof of whose it is'],
   ];
   const byHand = s.messages.filter((m) => m.via === 'hand');
   const viaRegister = s.messages.filter((m) => m.via === 'register');
