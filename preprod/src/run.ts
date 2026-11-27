@@ -28,7 +28,7 @@ import {
 } from '@midnight-ntwrk/compact-runtime';
 import { unshieldedToken } from '@midnight-ntwrk/midnight-js-protocol/v9';
 import { deployContract, findDeployedContract, getUnshieldedBalances } from '@midnight-ntwrk/midnight-js/contracts';
-import { deployInStages, insertVerifierKeys, VAULT_DEFER_ORDER } from './staged-deploy.js';
+import { deployInStages, insertVerifierKeys, missingCircuits, VAULT_DEFER_ORDER } from './staged-deploy.js';
 import type { PublicDataProvider } from '@midnight-ntwrk/midnight-js/types';
 import * as Rx from 'rxjs';
 import { ledger as vaultLedger, Phase, pureCircuits as vaultPure, type Ledger as VaultLedger, type VaultConfig } from '@codicil/contracts/vault';
@@ -346,10 +346,15 @@ export async function runAll(opts: RunOptions): Promise<RunState> {
     // inserted: the vault exists, so finish it instead of deploying another.
     const half = state!.vault;
     if (half?.maintenanceKey && half.pendingKeys && half.pendingKeys.length > 0) {
-      log(`resuming a staged deployment at ${half.address}: ${half.pendingKeys.length} verifier key(s) still to insert`);
+      // The chain is the record, not the file: a key whose transaction landed
+      // after the last run was interrupted is already there, and inserting it
+      // again is refused.
+      const onChain = await publicDataProvider.queryContractState(half.address);
+      const pending = onChain ? missingCircuits(onChain.contractState.deserialize({ v9: ContractState }), half.pendingKeys) : half.pendingKeys;
+      log(`resuming a staged deployment at ${half.address}: ${pending.length} verifier key(s) still to insert`);
       await vaultPrivate.setSigningKey(half.address, half.maintenanceKey as never);
       await insertVerifierKeys({
-        providers: vProviders, compiledContract: vaultContract, address: half.address, circuits: half.pendingKeys, log,
+        providers: vProviders, compiledContract: vaultContract, address: half.address, circuits: pending, log,
         onInserted: (_c, remaining) => persist({ ...state!, vault: { ...state!.vault!, pendingKeys: remaining } }),
       });
       return { kind: 'recovered', notes: [`vault address ${half.address}`, 'the deploy transaction was recorded by an earlier run; its verifier keys are now complete'] };
