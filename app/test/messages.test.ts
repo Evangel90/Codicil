@@ -66,7 +66,7 @@ describe('sealing a message', () => {
     expect({ nonce: s().nonce, chain: s().chain }).toEqual(before);
     expect(s().tx).toBeUndefined();
     expect(s().activity[0]).toMatchObject({ what: 'Message sealed for Ada', published: [] });
-    expect(chainText()).not.toMatch(/Ada|message|notebook/i);
+    expect(chainText()).not.toMatch(/Ada|message|notebook/);
   });
 
   it('refuses an empty message and one that is too long, in words', async () => {
@@ -174,7 +174,8 @@ describe('after the vault releases', () => {
     demo.handOverPieces(1);
     await demo.openMessage('ada');
     expect({ nonce: s().nonce, chain: s().chain }).toEqual(before);
-    expect(chainText()).not.toMatch(/Ada|message|notebook|piece/i);
+    // Case matters: the chain is full of lower-case hex, where "ada" turns up by chance.
+    expect(chainText()).not.toMatch(/Ada|message|notebook|piece/);
     expect(s().activity.slice(0, 3).map((a) => a.published)).toEqual([[], [], []]);
   });
 
