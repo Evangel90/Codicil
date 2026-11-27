@@ -122,7 +122,11 @@ piece commitments.
 
 `sealArgs` sets a "sealed before" time ten minutes ahead of `now`. A Compact circuit cannot read
 the block time, only compare it, so the ledger holds an upper bound: the block that accepted the
-seal was earlier than that.
+seal was earlier than that, by less than an hour. `seal` also asks the vault and refuses once it
+has released, so every seal on a register predates the release.
+
+A vault does not know its register. Anyone can deploy one that points at any vault, so tell your
+readers which register is yours.
 
 ### A message for one person, or for everyone
 

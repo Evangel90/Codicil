@@ -499,3 +499,6 @@
   .story { padding: 20px; }
   .story-title { font-size: 26px; }
 }
+
+.ox textarea.msg-copy { font-size: 12px; line-height: 1.5; min-height: 96px; overflow-wrap: anywhere; }
+.copy-ok { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; font-size: 15px; line-height: 1.55; color: var(--o-armed); }

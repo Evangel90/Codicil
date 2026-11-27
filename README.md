@@ -23,7 +23,7 @@ canary run in the guided demo today. The live app on a test network creates will
 
 > **Status (Wave 3, in progress):** the vault contract, SDK and web app are built and tested. That
 > covers passkey and wallet check-ins, multi-heir wills with tranches and backup heirs, hidden k-of-n
-> guardians, the attestation trigger and the cross-contract hook: 485 tests, every contract call
+> guardians, the attestation trigger and the cross-contract hook: 503 tests, every contract call
 > checked against its ZK circuit, plus browser tests that check in with Chrome's real WebAuthn. On
 > 26 November 2026 the vault ran end to end on **Preprod**: deploy, both kinds of check-in, release,
 > a claim and the cross-contract withdrawal ([results](preprod/results/v14-preprod.md), vault
@@ -266,7 +266,7 @@ Repository layout:
 | **Ed25519** `ed25519Verify` (Ledger 9) | Cardano wallet (CIP-30) check-ins | [`lib/Cip30.compact:38`](contracts/src/lib/Cip30.compact#L38) |
 | **Curve25519** `ecMulGenerator` (Ledger 9) | Heirs prove they hold their key | [`codicil_vault.compact:370`](contracts/src/codicil_vault.compact#L370) |
 | **`kernel.caller()`** (Ledger 9) | The integrator hook answers only contracts | [`codicil_vault.compact:350`](contracts/src/codicil_vault.compact#L350) |
-| **Cross-contract calls** (Ledger 9) | `inheritable_escrow` asks the vault before paying out; `codicil_seals` asks it before accepting a piece of a key | [`inheritable_escrow.compact:49`](contracts/src/inheritable_escrow.compact#L49), [`codicil_seals.compact:113`](contracts/src/codicil_seals.compact#L113) |
+| **Cross-contract calls** (Ledger 9) | `inheritable_escrow` asks the vault before paying out; `codicil_seals` asks it before accepting a piece of a key | [`inheritable_escrow.compact:49`](contracts/src/inheritable_escrow.compact#L49), [`codicil_seals.compact:122`](contracts/src/codicil_seals.compact#L122) |
 | **Events** `emit` (Ledger 9) | Heir apps and indexers learn of a release | [`codicil_vault.compact:344`](contracts/src/codicil_vault.compact#L344) |
 | Block time (`blockTimeGte` / `blockTimeLt`) | Deadlines, challenge window, tranches | [`codicil_vault.compact:218`](contracts/src/codicil_vault.compact#L218) |
 | Unshielded tokens (`receiveUnshielded` / `sendUnshielded`) | Hold the estate, pay heirs | [`codicil_vault.compact:277`](contracts/src/codicil_vault.compact#L277), [`:388`](contracts/src/codicil_vault.compact#L388) |
@@ -382,7 +382,7 @@ Milestones and status: [docs/ROADMAP.md](docs/ROADMAP.md). Customers, go-to-mark
   a new contract, the seal register (`codicil_seals`), which accepts a piece of a key only after
   the vault has released; a public disclosure anyone can open after the release; and the vault's
   public status read as a canary. The demo opens on four stories.
-- 485 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
+- 503 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
   CI on every push.
 - Docs: architecture, privacy (every field and transaction), a threat model mapping each threat to
   the test that covers it, testing, roadmap, business and a judges' quickstart. Details: [docs/WAVES.md](docs/WAVES.md).

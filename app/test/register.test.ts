@@ -166,6 +166,24 @@ describe('a public disclosure', () => {
   });
 });
 
+describe('checking a copy of a sealed text against the chain', () => {
+  it('a true copy matches its seal, and one changed character does not', async () => {
+    await seal('everyone', DISCLOSURE);
+    const copy = msg().sealedText;
+    expect(copy).not.toMatch(/publish it myself/);
+    expect(demo.checkSealedCopy(`  ${copy}\n`)).toEqual({ ok: true, fingerprint: msg().fingerprint, sealedBefore: msg().sealedBefore, needed: 2, pieces: 3 });
+    const at = copy.indexOf('"ciphertext":"') + 14;
+    const changed = copy.slice(0, at) + (copy[at] === '0' ? '1' : '0') + copy.slice(at + 1);
+    expect(demo.checkSealedCopy(changed)).toMatchObject({ ok: false, why: expect.stringMatching(/the register holds no seal with that fingerprint/) });
+    expect(demo.checkSealedCopy('hello')).toMatchObject({ ok: false, why: expect.stringMatching(/^This is not a sealed text\. Paste the whole sealed text/) });
+  });
+
+  it('a message sealed by hand is not on the register, so its copy matches nothing', async () => {
+    await demo.sealMessage('ada', 'By hand.');
+    expect(demo.checkSealedCopy(msg('ada').sealedText)).toMatchObject({ ok: false });
+  });
+});
+
 describe('a private message through the register', () => {
   it('leaves a fingerprint on the chain and nothing about who it is for', async () => {
     expect(await seal('ben', LETTER, 'register')).toMatch(/^Sealed for Ben\. The register holds a fingerprint and nothing that says who it is for\./);

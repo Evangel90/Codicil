@@ -56,6 +56,8 @@ import {
   rpIdHash,
   sealArgs,
   sealedFingerprint,
+  sealedFromText,
+  sealedToText,
   sealMessage as sealForRecipient,
   SealedError,
   sealsWitnesses,
@@ -385,6 +387,8 @@ export interface MessageView {
   bytes: number;
   /** The start of the sealed text, hex: what it looks like without its key. */
   sealedStart: string;
+  /** The whole sealed text as one line, the way it would be sent or posted. Useless without the key. */
+  sealedText: string;
   /** How many guardian pieces open it, together with the recipient's own half of the key. */
   needed: number;
   /** Guardians who hold a piece. */
@@ -1343,7 +1347,8 @@ class DemoStore {
     }, {
       stages: {
         prepare: { label: 'Sealing it on this device', detail: 'The message is encrypted here, and the guardians\' half of its key is cut into pieces. The plain text goes nowhere.' },
-        circuit: { label: 'Running the seal register on this device', detail: 'The compiled circuit records a fingerprint of the sealed text and a commitment to each piece of its key.' },
+        circuit: { label: 'Running the seal register, which calls the vault', detail: 'The register asks the vault that it has not released, then records a fingerprint of the sealed text and a commitment to each piece of its key.' },
+        proof: REGISTER_STAGES!.proof,
       },
     });
     return undefined;
@@ -1513,6 +1518,28 @@ class DemoStore {
     }, {
       stages: { circuit: { label: 'Running the seal register on this device', detail: 'The compiled circuit checks that this device is the keeper, then records the fingerprint.' } },
     });
+  }
+
+  /**
+   * Check a copy of a sealed text against the register, as anyone can: work
+   * out its fingerprint on this device and look it up on the public ledger.
+   * Nothing is sent anywhere.
+   */
+  checkSealedCopy(text: string): { ok: true; fingerprint: string; sealedBefore: number; needed: number; pieces: number } | { ok: false; why: string } {
+    const w = this.world;
+    if (!w) return { ok: false, why: 'There is no vault yet.' };
+    let fingerprint: Uint8Array;
+    try {
+      fingerprint = sealedFingerprint(sealedFromText(text.trim()));
+    } catch (e) {
+      return { ok: false, why: `${describeFailure(new InputError(e instanceof Error ? e.message : String(e)))} Paste the whole sealed text, from the first brace to the last.` };
+    }
+    const l = this.sealsLedger(w);
+    if (!l.seals.member(fingerprint)) {
+      return { ok: false, why: `Its fingerprint is 0x${hex(fingerprint).slice(0, 8)}…, and the register holds no seal with that fingerprint. Either this copy was changed, or it was never sealed here.` };
+    }
+    const seal = l.seals.lookup(fingerprint);
+    return { ok: true, fingerprint: hex(fingerprint), sealedBefore: Number(seal.sealedBefore), needed: Number(seal.needed), pieces: Number(seal.pieces) };
   }
 
   private registerView(w: World): RegisterView {
@@ -1862,6 +1889,7 @@ class DemoStore {
         const onLedger = m.fingerprint ? piecesHandedOver(seals, m.fingerprint).map((p) => p.x) : [];
         return [{
           to, via: m.via, sealedAt: m.sealedAt, text: m.text, bytes: m.sealed.ciphertext.length, sealedStart: hex(m.sealed.ciphertext.slice(0, 24)),
+          sealedText: sealedToText(m.sealed),
           fingerprint: m.fingerprint && hex(m.fingerprint),
           sealedBefore: m.fingerprint && seals.seals.member(m.fingerprint) ? Number(seals.seals.lookup(m.fingerprint).sealedBefore) : undefined,
           needed: m.sealed.needed, holders: [...m.pieces.keys()],

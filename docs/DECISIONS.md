@@ -493,7 +493,14 @@ a recipient keeps off the chain (D20) are separate and unchanged.
 **Why "sealed before" and not "sealed at".** A Compact circuit cannot read the block time. It can
 only compare it. The owner's device proposes a time a few minutes ahead, and `seal` asserts
 `blockTimeLt(sealedBefore)`. The ledger therefore holds an upper bound: the block that accepted the
-seal was earlier than that time.
+seal was earlier than that time. `seal` also asserts that the time is less than an hour ahead of the
+block, so a keeper cannot record a date far in the future.
+
+**Why nothing is sealed after the release.** `seal` asks the vault too, and refuses once it has
+released. Without that, whoever held the keeper's secret after a release could seal a new text and
+hand its pieces over at once, and it would look like something the owner left behind. With it,
+every seal on a register was made while the owner could still check in. An independent review of
+the contract found this gap; a test now covers it.
 
 **What it costs.**
 
@@ -505,6 +512,11 @@ seal was earlier than that time.
   acting together, can open it early without anyone else.
 - Taking a seal back removes it from the register, so the register accepts no piece for it. Copies
   of the old sealed text and old pieces that people kept still fit together.
+- The vault does not know its register. Anyone can deploy a register that points at any vault and
+  seal a text of their own in it, and that vault's release would open it. A reader has to get the
+  register's address from the vault's owner, for example from the owner's own page. Recording the
+  register in the vault, through a circuit only the owner can call, would close this; it needs a
+  new vault circuit and is on the roadmap.
 
 **Not built yet.** The register runs in the guided demo and in the contract tests. Key generation
 for its four circuits succeeds with the full compiler. It has not been deployed to a network, and

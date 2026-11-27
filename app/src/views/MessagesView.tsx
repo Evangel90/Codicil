@@ -133,6 +133,7 @@ function LockPanel({ s, you }: { s: Snapshot; you: 'owner' | 'recipient' | 'guar
           the register will not take a piece before it; keeping a piece to yourself until then is a promise. Opening a
           private message early would take {k === 1 ? 'one guardian' : `${k} guardians`} and the recipient, acting together.
           A public disclosure has no recipient to hold a half, so {k === 1 ? 'one guardian' : `${k} guardians`} could open it.
+          The vault does not know its register, so the register's address has to come from {you === 'owner' ? 'you' : OWNER_FIRST}.
         </p>
         {k === 1 && you === 'owner' && (
           <p className="small msg-warn">With 1 needed, any one guardian and the recipient could open a message early. Raise the number in Settings.</p>
@@ -411,6 +412,54 @@ function Disclosure({ s }: { s: Snapshot }) {
   );
 }
 
+/** Anyone can check a copy of a sealed text against the register: proof it existed, unchanged, before a date. */
+function CheckCopy({ s }: { s: Snapshot }) {
+  const m = everyone(s);
+  const [text, setText] = useState('');
+  const [copied, setCopied] = useState(false);
+  const result = text.trim() ? demo.checkSealedCopy(text) : undefined;
+  if (s.register.seals.length === 0) return null;
+  const copy = async () => {
+    if (!m) return;
+    try {
+      await navigator.clipboard.writeText(m.sealedText);
+      setCopied(true);
+    } catch {
+      setText(m.sealedText);
+    }
+  };
+  return (
+    <section className="card pad-24 stack-16" aria-labelledby="copy-h">
+      <div className="stack-6">
+        <h2 id="copy-h" className="disp h-card">Check a copy against the chain</h2>
+        <p className="small muted">
+          A sealed text can be posted anywhere, by anyone. Paste a copy here and this device works out its fingerprint
+          and looks it up on the register. A match means this exact text was sealed before the date shown. Change one
+          character and it no longer matches.
+        </p>
+      </div>
+      <label className="field-label">
+        A sealed text
+        <textarea className="field mono msg-copy" rows={4} spellCheck={false} value={text} onChange={(e) => { setText(e.target.value); setCopied(false); }} />
+      </label>
+      {m && (
+        <div className="btn-row">
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setText(m.sealedText)}>Paste the public disclosure</button>
+          <button type="button" className="linkish" onClick={() => void copy()}>{copied ? 'Copied' : 'Copy it to the clipboard'}</button>
+        </div>
+      )}
+      {result && (result.ok ? (
+        <p className="copy-ok" role="status">
+          It matches. The register recorded fingerprint <HashChip value={result.fingerprint} /> before {fmtDate(result.sealedBefore)},
+          with {result.needed} of {pieces(result.pieces)} needed to open it.
+        </p>
+      ) : (
+        <p className="err-inline" role="alert">{result.why}</p>
+      ))}
+    </section>
+  );
+}
+
 // ─── The recipient ──────────────────────────────────────────────────────────
 function RecipientMessage({ s, id }: { s: Snapshot; id: HeirProfile['id'] }) {
   const [problem, setProblem] = useState<string>();
@@ -637,6 +686,7 @@ function StrangerMessages({ s }: { s: Snapshot }) {
           <SignalCard s={s} />
           <Disclosure s={s} />
           {s.register.lastAttempt && <LastAttempt a={s.register.lastAttempt} />}
+          <CheckCopy s={s} />
           {!disclosure && (
             <div className="btn-row">
               <button type="button" className="btn btn-primary" onClick={() => demo.setActor({ kind: 'owner' })}>Act as {OWNER_FIRST}</button>
