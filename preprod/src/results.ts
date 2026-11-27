@@ -55,6 +55,16 @@ export interface Results {
   sealsAddress?: string;
   /** Fingerprint of the sealed text the register recorded. */
   sealsFingerprint?: string;
+  /**
+   * The owner commitment the register's keeper proved it can open. It equals
+   * the owner commitment on the vault's ledger: the register is the owner's.
+   */
+  sealsOwnerCommit?: string;
+  /**
+   * The sealed text itself, as one line. It is public by design, since this is
+   * a disclosure for everyone, and it is useless without the pieces of its key.
+   */
+  sealsSealedText?: string;
   walletAddress?: string;
   timers: Timers;
   versions: Record<string, string>;
@@ -88,6 +98,9 @@ export function buildResults(
     escrowAddress: state.escrow?.address,
     sealsAddress: state.seals?.address,
     sealsFingerprint: state.seals?.fingerprint,
+    sealsOwnerCommit: state.seals?.ownerCommit,
+    // Only the sealed text: never the keeper secret, the pieces or an owner key.
+    sealsSealedText: state.seals ? state.actors.seals?.sealedText : undefined,
     walletAddress: extra.walletAddress,
     timers: state.timers,
     versions: extra.versions ?? {},
@@ -139,6 +152,9 @@ export function resultsMarkdown(r: Results): string {
   if (r.escrowAddress) out.push(`- Escrow contract: \`${r.escrowAddress}\``);
   if (r.sealsAddress) out.push(`- Seal register: \`${r.sealsAddress}\``);
   if (r.sealsFingerprint) out.push(`- Sealed text fingerprint on the register: \`${r.sealsFingerprint}\``);
+  if (r.sealsOwnerCommit) {
+    out.push(`- The register proved it belongs to the vault's owner: its keeper opened, in zero knowledge, the vault's owner commitment \`${r.sealsOwnerCommit}\``);
+  }
   if (r.walletAddress) out.push(`- Test wallet: \`${r.walletAddress}\``);
   out.push(
     `- Timers: first deadline ${r.timers.firstDeadlineS} s, max period ${r.timers.maxPeriodS} s, `
@@ -151,6 +167,17 @@ export function resultsMarkdown(r: Results): string {
     out.push(
       `Totals: ${r.totals.transactions} transactions, ${formatDust(BigInt(r.totals.feePaidSpeck))} DUST in fees, `
       + `${seconds(r.totals.proveMs)} s proving contract circuits, ${seconds(r.totals.wallMs)} s in steps (waits excluded).`,
+      '',
+    );
+  }
+  if (r.sealsSealedText) {
+    out.push(
+      'The sealed text, exactly as it was sealed. It is public and useless without the pieces of its key; '
+      + 'with the pieces on the register\'s ledger, anyone can open it:',
+      '',
+      '```json',
+      r.sealsSealedText,
+      '```',
       '',
     );
   }

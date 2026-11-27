@@ -65,6 +65,7 @@ import {
   checkInDigest,
   handOverArgs,
   keeperCommitment,
+  registerProvesOwner,
   newSalt,
   openMessageText,
   piecesHandedOver,
@@ -79,7 +80,7 @@ import {
   withWalletApproval,
   type CodicilPrivateState,
 } from '@codicil/sdk';
-import { checkArtifacts, circuitK, ESCROW_RUN_CIRCUITS, SEALS_RUN_CIRCUITS, vaultCircuitsFor } from './artifacts.js';
+import { checkArtifacts, circuitK, ESCROW_RUN_CIRCUITS, SEALS_DRYRUN_CIRCUITS, vaultCircuitsFor } from './artifacts.js';
 import { ESCROW_DIR, REPO_ROOT, SEALS_DIR, VAULT_DIR } from './paths.js';
 import {
   escrowContract, makeProofProvider, sealsContract, TTL_SECONDS, vaultContract, WASM_MAX_K,
@@ -181,7 +182,7 @@ export async function buildAll(opts: DryRunOptions): Promise<DryRunReport> {
   const real = opts.artifacts !== 'stub'
     && checkArtifacts('codicil_vault', VAULT_DIR, vaultCircuits).ok
     && (!opts.escrow || checkArtifacts('inheritable_escrow', ESCROW_DIR, ESCROW_RUN_CIRCUITS).ok)
-    && (!opts.seals || checkArtifacts('codicil_seals', SEALS_DIR, SEALS_RUN_CIRCUITS).ok);
+    && (!opts.seals || checkArtifacts('codicil_seals', SEALS_DIR, SEALS_DRYRUN_CIRCUITS).ok);
   if (opts.prove && !real) throw new Error('--prove needs the proving keys: run `npm run compile:full` first');
   if (!existsSync(join(VAULT_DIR, 'contract', 'index.js'))) throw new Error('contracts are not compiled: run `npm run compile`');
 
@@ -297,6 +298,12 @@ export async function buildAll(opts: DryRunOptions): Promise<DryRunReport> {
   // ── The seal register, for --seals ──
   const keeper: SealsPrivateState = { keeperSecret: newSalt() };
   const guardian: SealsPrivateState = {};
+  // The owner's device: the keeper secret together with the owner keys the vaults were deployed with.
+  const owner = (): SealsPrivateState => ({
+    ...keeper,
+    passkey: { pk: cast.base.passkey!.pk, salt: cast.base.passkey!.salt },
+    wallet: { pk: cast.base.wallet!.pk, salt: cast.base.wallet!.salt },
+  });
 
   /** Deploy a register bound to one vault and seal the run's text into it. */
   const makeRegister = async (vaultAddress: string, vaultState: () => SerializedContractState) => {
@@ -343,7 +350,10 @@ export async function buildAll(opts: DryRunOptions): Promise<DryRunReport> {
       return call('seal', sealArgs(late.sealed, late.pieces, nowS()), keeper, true);
     };
     const handOver = (piece: { x: number; y: Uint8Array }) => call('handOver', handOverArgs(fingerprint, piece), guardian, true);
-    return { address, deployTx: deployed.private.unprovenTx, sealed, pieces: made.pieces, fingerprint, ledger, seal, sealAnother, handOver };
+    /** The keeper proves it can open the vault's commitment to its owner's key. No call into the vault. */
+    const proveOwner = (key: 'passkey' | 'wallet', who: SealsPrivateState = owner()) =>
+      call(key === 'passkey' ? 'provePasskeyOwner' : 'proveWalletOwner', [], who, false);
+    return { address, deployTx: deployed.private.unprovenTx, sealed, pieces: made.pieces, fingerprint, ledger, seal, sealAnother, handOver, proveOwner };
   };
   const fp = (b: Uint8Array): string => `${Buffer.from(b).toString('hex').slice(0, 12)}…`;
 
@@ -488,6 +498,23 @@ export async function buildAll(opts: DryRunOptions): Promise<DryRunReport> {
     const ra = await makeRegister(a.address, () => sA);
     await record('sealsDeploy', ra.deployTx, `register ${ra.address.slice(0, 12)}… → vault ${a.address.slice(0, 12)}…`, true);
     {
+      // Whose register is it? Before the proof, nobody can tell. A stranger's proof does not help them.
+      const unproven = !registerProvesOwner(lA, ra.ledger());
+      const stranger: SealsPrivateState = { ...keeper, passkey: { pk: cast.base.passkey!.pk, salt: newSalt() } };
+      await ra.proveOwner('passkey', stranger);
+      const strangerFails = !registerProvesOwner(lA, ra.ledger());
+      const built = await ra.proveOwner('passkey');
+      const proven = registerProvesOwner(lA, ra.ledger());
+      await record(
+        'sealsProveOwner',
+        built.private.unprovenTx,
+        `the keeper proved it can open vault A's owner commitment ${fp(ra.ledger().ownerCommit)} with the passkey and its salt; `
+          + `unproven before: ${unproven ? 'yes' : 'NO'}; the owner's public key with another salt does not match: ${strangerFails ? 'yes' : 'NO'}`,
+        unproven && strangerFails && proven && Buffer.from(ra.ledger().ownerCommit).equals(Buffer.from(lA.ownerPasskeyCommit)),
+        [[SEALS_DIR, 'provePasskeyOwner']],
+      );
+    }
+    {
       const built = await ra.seal();
       const circuits = built.calls.map((c) => String(c.circuitId));
       const l = ra.ledger();
@@ -510,6 +537,17 @@ export async function buildAll(opts: DryRunOptions): Promise<DryRunReport> {
 
     // Register on vault B, sealed into while B was armed; B is released now.
     if (!rb) throw new Error('the register on vault B was not set up');
+    {
+      // The same proof with the owner's wallet key, on the other register. A network run needs only one of the two.
+      const built = await rb.proveOwner('wallet');
+      await record(
+        'sealsProveOwnerWallet',
+        built.private.unprovenTx,
+        `the keeper proved it can open vault B's owner commitment ${fp(rb.ledger().ownerCommit)} with the wallet key and its salt (dry run only)`,
+        registerProvesOwner(lB, rb.ledger()) && Buffer.from(rb.ledger().ownerCommit).equals(Buffer.from(lB.ownerEdCommit)),
+        [[SEALS_DIR, 'proveWalletOwner']],
+      );
+    }
     for (const [name, index] of [['sealsHandOver1', SEALS_PIECES - 1], ['sealsHandOver2', 0]] as const) {
       const built = await rb.handOver(rb.pieces[index]);
       const circuits = built.calls.map((c) => String(c.circuitId));

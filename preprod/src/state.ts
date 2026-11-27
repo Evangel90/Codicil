@@ -37,12 +37,16 @@ export const ESCROW_STEPS = ['escrowDeploy', 'escrowDeposit', 'escrowWithdraw'] 
  * pushed the deadline as far out as it goes, so there is room. The second
  * part runs once the vault is released.
  *
+ * `sealsProveOwner` comes straight after the deploy: the keeper proves, in zero
+ * knowledge, that it can open the vault's commitment to its owner's key, so
+ * anyone can tell this register from one somebody else pointed at the vault.
+ *
  * `sealsSeal` and both hand-overs are cross-contract calls: the register asks
  * the vault whether it has released. `sealsRefused` and `sealsOpen` send
  * nothing: a call the register refuses fails on this machine, against the
  * chain's state, before anything is proven.
  */
-export const SEALS_BEFORE_STEPS = ['sealsDeploy', 'sealsSeal', 'sealsRefused'] as const;
+export const SEALS_BEFORE_STEPS = ['sealsDeploy', 'sealsProveOwner', 'sealsSeal', 'sealsRefused'] as const;
 export const SEALS_AFTER_STEPS = ['sealsHandOver1', 'sealsHandOver2', 'sealsOpen'] as const;
 export const SEALS_STEPS = [...SEALS_BEFORE_STEPS, ...SEALS_AFTER_STEPS] as const;
 
@@ -151,8 +155,11 @@ export interface RunState {
   actors: Actors;
   vault?: VaultInfo;
   escrow?: { address: string; amount: bigint };
-  /** The seal register and the fingerprint of the text sealed in it. Both are public. */
-  seals?: { address: string; fingerprint: string };
+  /**
+   * The seal register, the fingerprint of the text sealed in it, and the owner
+   * commitment its keeper proved it can open. All three are public.
+   */
+  seals?: { address: string; fingerprint: string; ownerCommit?: string };
   releaseEvent?: ReleaseEvent;
   steps: Partial<Record<Step, StepRecord>>;
 }

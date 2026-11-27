@@ -41,6 +41,7 @@ import {
   handOverArgs,
   heirKeyFromScalar,
   keeperCommitment,
+  registerProvesOwner,
   MerkleTree,
   newEdKey,
   newHeirKey,
@@ -462,7 +463,9 @@ export async function runAll(opts: RunOptions): Promise<RunState> {
   });
 
   // ── the seal register, while the vault is armed and the deadline is far off ──
-  const seals = plan.seals ? await setupSeals(opts, parts, vaultAddress, readVault, step, () => state!, (s) => { state = s; }) : undefined;
+  const seals = plan.seals
+    ? await setupSeals(opts, parts, vaultAddress, readVault, step, () => state!, (s) => { state = s; }, { pk: cast.base.passkey!.pk, salt: cast.base.passkey!.salt })
+    : undefined;
   await seals?.beforeRelease();
 
   // ── check in with the wallet key; this sets the deadline the run waits out ──
@@ -718,6 +721,8 @@ async function setupSeals(
   step: (name: Step, needsWallet: boolean, body: () => Promise<StepOutcome>) => Promise<void>,
   getState: () => RunState,
   setState: (s: RunState) => void,
+  /** The vault owner's passkey and its salt, exactly as the vault was deployed with them. */
+  ownerPasskey: NonNullable<SealsPrivateState['passkey']>,
 ): Promise<SealsRun> {
   const { log } = opts;
   if (!getState().actors.seals) {
@@ -735,7 +740,8 @@ async function setupSeals(
   const sealed = sealedFromText(kit.sealedText);
   const fingerprint = sealedFingerprint(sealed);
   const fingerprintHex = hex(fingerprint);
-  const keeper: SealsPrivateState = { keeperSecret: kit.keeper };
+  // The owner's device: it holds the keeper secret and the owner's passkey.
+  const keeper: SealsPrivateState = { keeperSecret: kit.keeper, passkey: ownerPasskey };
   const sealsPrivate = inMemoryPrivateStateProvider<SealsPrivateState>();
   const sProviders = await sealsProviders(parts, sealsPrivate, vaultAddress);
 
@@ -796,6 +802,35 @@ async function setupSeals(
         const pub = deployed.deployTxData.public;
         setState({ ...getState(), seals: { address: pub.contractAddress, fingerprint: fingerprintHex } });
         return { kind: 'tx', tx: pub, notes: [`seal register address ${pub.contractAddress}, vault ${vaultAddress}`] };
+      });
+
+      await step('sealsProveOwner', true, async () => {
+        const r = await register();
+        const vaultBefore = await readVault();
+        const before = await r.read();
+        if (registerProvesOwner(vaultBefore, before)) {
+          const s = getState();
+          setState({ ...s, seals: { ...s.seals!, ownerCommit: hex(before.ownerCommit) } });
+          return { kind: 'recovered', notes: [`the register already holds the vault's owner commitment ${hex(before.ownerCommit)}; transaction hash not recorded`] };
+        }
+        await r.actAs('keeper');
+        const tx = await r.handle.callTx.provePasskeyOwner();
+        const after = await r.read();
+        const vault = await readVault();
+        if (!registerProvesOwner(vault, after)) throw new Error('the owner proof is final but the register does not hold the vault\'s owner commitment');
+        const commit = hex(after.ownerCommit);
+        const s = getState();
+        setState({ ...s, seals: { ...s.seals!, ownerCommit: commit } });
+        return {
+          kind: 'tx',
+          tx: tx.public,
+          circuits: tx.calls.map((c) => `${String(c.contractAddress).slice(0, 8)}…:${String(c.circuitId)}`),
+          notes: [
+            'before the proof the register held no owner commitment, so nothing told it apart from a register somebody else pointed at this vault',
+            `the keeper proved, in zero knowledge, that it knows the passkey and the salt behind the vault's owner commitment; the register now holds ${commit}`,
+            `that equals ownerPasskeyCommit on the vault's own ledger: comparing the two public ledgers shows the register is the owner's`,
+          ],
+        };
       });
 
       await step('sealsSeal', true, async () => {

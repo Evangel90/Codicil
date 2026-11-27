@@ -10,7 +10,7 @@
 // the real ones.
 
 import { describe, expect, it } from 'vitest';
-import { checkArtifacts, ESCROW_RUN_CIRCUITS, SEALS_RUN_CIRCUITS, VAULT_ESCROW_CIRCUITS, VAULT_RUN_CIRCUITS, vaultCircuitsFor } from '../src/artifacts.js';
+import { checkArtifacts, ESCROW_RUN_CIRCUITS, SEALS_DRYRUN_CIRCUITS, VAULT_ESCROW_CIRCUITS, VAULT_RUN_CIRCUITS, vaultCircuitsFor } from '../src/artifacts.js';
 import { buildAll } from '../src/dryrun.js';
 import { VAULT_DEFER_ORDER } from '../src/run.js';
 import { WRITE_BUDGET } from '../src/staged-deploy.js';
@@ -18,12 +18,13 @@ import { ESCROW_DIR, SEALS_DIR, VAULT_DIR } from '../src/paths.js';
 
 const STEPS = ['deploy', 'deposit', 'checkInPasskey', 'checkInEd25519', 'triggerTimeout', 'finalizeRelease', 'claim'];
 const ESCROW = ['escrowDeploy', 'escrowDeposit', 'escrowWithdraw'];
-const SEALS = ['sealsDeploy', 'sealsSeal', 'sealsRefused', 'sealsHandOver1', 'sealsHandOver2', 'sealsOpen'];
+// `sealsProveOwnerWallet` is the dry run's own: a network run proves ownership once, with the passkey.
+const SEALS = ['sealsDeploy', 'sealsProveOwner', 'sealsSeal', 'sealsRefused', 'sealsProveOwnerWallet', 'sealsHandOver1', 'sealsHandOver2', 'sealsOpen'];
 
 const haveKeys = checkArtifacts('codicil_vault', VAULT_DIR, [...VAULT_RUN_CIRCUITS, ...VAULT_ESCROW_CIRCUITS]).ok
   && checkArtifacts('inheritable_escrow', ESCROW_DIR, ESCROW_RUN_CIRCUITS).ok;
 const haveSealsKeys = checkArtifacts('codicil_vault', VAULT_DIR, vaultCircuitsFor({ seals: true })).ok
-  && checkArtifacts('codicil_seals', SEALS_DIR, SEALS_RUN_CIRCUITS).ok;
+  && checkArtifacts('codicil_seals', SEALS_DIR, SEALS_DRYRUN_CIRCUITS).ok;
 
 describe('dry run through Midnight.js', () => {
   it('builds every vault transaction with stand-in keys', async () => {
@@ -48,6 +49,9 @@ describe('dry run through Midnight.js', () => {
     expect(report.steps.map((s) => s.name)).toEqual([...STEPS, ...SEALS]);
     expect(report.steps.filter((s) => !s.ok)).toEqual([]);
     const detail = (name: string): string => report.steps.find((s) => s.name === name)?.detail ?? '';
+    // The register proves whose it is, with each of the owner's keys, and a stranger's attempt does not match.
+    expect(detail('sealsProveOwner')).toMatch(/^the keeper proved it can open vault A's owner commitment [0-9a-f]{12}… with the passkey and its salt; unproven before: yes; the owner's public key with another salt does not match: yes$/);
+    expect(detail('sealsProveOwnerWallet')).toMatch(/^the keeper proved it can open vault B's owner commitment [0-9a-f]{12}… with the wallet key and its salt \(dry run only\)$/);
     // Sealing and handing over each ask the vault, in the same transaction.
     expect(detail('sealsSeal')).toMatch(/^2 calls in one transaction: isReleasedForContract then seal; fingerprint [0-9a-f]{12}…, 2 of 3 pieces needed, 3 commitments, 0 pieces on the ledger$/);
     expect(detail('sealsRefused')).toBe('a genuine piece was refused while vault A is armed: "vault not released"; nothing to prove or send');
@@ -57,9 +61,9 @@ describe('dry run through Midnight.js', () => {
       'opened the sealed text from pieces 1 and 3 on the ledger: it is the text that was sealed; '
       + 'a made-up piece was refused: "not a genuine piece"; sealing another text after the release was refused: "vault released"',
     );
-    // The refused calls and the read send nothing; the other four are transactions.
+    // The refused calls and the read send nothing; the others are transactions.
     const sent = report.steps.filter((s) => SEALS.includes(s.name) && s.txBytes !== undefined).map((s) => s.name);
-    expect(sent).toEqual(['sealsDeploy', 'sealsSeal', 'sealsHandOver1', 'sealsHandOver2']);
+    expect(sent).toEqual(['sealsDeploy', 'sealsProveOwner', 'sealsSeal', 'sealsProveOwnerWallet', 'sealsHandOver1', 'sealsHandOver2']);
   });
 
   it('builds the escrow and the seal register against the same released vault', async () => {
@@ -72,7 +76,7 @@ describe('dry run through Midnight.js', () => {
     const report = await buildAll({ escrow: false, seals: true, prove: false });
     expect(report.artifacts).toBe('real');
     expect(report.steps.filter((s) => !s.ok)).toEqual([]);
-    // The register is small: its deploy carries four verifier keys and fits a block as it is.
+    // The register is small: its deploy carries six verifier keys and fits a block as it is.
     expect(report.steps.find((s) => s.name === 'sealsDeploy')?.txBytes).toBeGreaterThan(8_000);
   });
 

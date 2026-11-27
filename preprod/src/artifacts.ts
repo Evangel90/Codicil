@@ -26,8 +26,13 @@ export const VAULT_RUN_CIRCUITS = ['deposit', 'checkInPasskey', 'checkInEd25519'
 /** The vault circuit other contracts call into; proven inside the escrow's withdrawal and the register's hand-over. */
 export const VAULT_ESCROW_CIRCUITS = ['isReleasedForContract'] as const;
 export const ESCROW_RUN_CIRCUITS = ['deposit', 'withdrawToBeneficiary'] as const;
-/** Seal register circuits the run proves; each carries a second proof, of the vault's hook. */
-export const SEALS_RUN_CIRCUITS = ['seal', 'handOver'] as const;
+/**
+ * Seal register circuits the run proves. `seal` and `handOver` each carry a
+ * second proof, of the vault's hook; `provePasskeyOwner` stands alone.
+ */
+export const SEALS_RUN_CIRCUITS = ['provePasskeyOwner', 'seal', 'handOver'] as const;
+/** What the dry run proves beside those: the owner proof with the wallet key, which a network run does not need twice. */
+export const SEALS_DRYRUN_CIRCUITS = [...SEALS_RUN_CIRCUITS, 'proveWalletOwner'] as const;
 
 /** Vault circuits a run proves, given which contracts beside the vault it exercises. */
 export function vaultCircuitsFor(plan: { escrow?: boolean; seals?: boolean }): string[] {

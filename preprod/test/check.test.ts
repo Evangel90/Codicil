@@ -111,17 +111,17 @@ describe('preflight', () => {
   it('checks the seal register only when asked, and with it the vault circuit it calls', async () => {
     const net = fakeNetwork();
     const base = { env: { BLOCKFROST_PROJECT_ID: TOKEN, WALLET_SEED: SEED }, escrowDir: fakeContract([]), escrow: false, fetch: net.fetch };
-    const ready = await preflight({ ...base, vaultDir: fakeContract(VAULT_CIRCUITS), sealsDir: fakeContract(['seal', 'unseal', 'handOver', 'state']), seals: true });
+    const ready = await preflight({ ...base, vaultDir: fakeContract(VAULT_CIRCUITS), sealsDir: fakeContract(['seal', 'unseal', 'handOver', 'state', 'provePasskeyOwner', 'proveWalletOwner']), seals: true });
     expect(ready.missing).toEqual([]);
     expect(ready.artifacts.map((a) => a.contract)).toEqual(['codicil_vault', 'codicil_seals']);
-    expect(ready.lines.map(formatLine).join('\n')).toMatch(/codicil_seals: 4 verifier keys, 2 prover keys/);
+    expect(ready.lines.map(formatLine).join('\n')).toMatch(/codicil_seals: 6 verifier keys, 3 prover keys/);
 
     // The register's keys are missing: said once, by name.
-    const noKeys = await preflight({ ...base, vaultDir: fakeContract(VAULT_CIRCUITS), sealsDir: fakeContract(['seal', 'unseal', 'handOver', 'state'], { keys: false }), seals: true });
+    const noKeys = await preflight({ ...base, vaultDir: fakeContract(VAULT_CIRCUITS), sealsDir: fakeContract(['seal', 'unseal', 'handOver', 'state', 'provePasskeyOwner', 'proveWalletOwner'], { keys: false }), seals: true });
     expect(noKeys.missing.join(' ')).toMatch(/codicil_seals has no proving keys/);
 
     // A vault built without the hook the register calls is not enough.
-    const noHook = await preflight({ ...base, vaultDir: fakeContract(VAULT_CIRCUITS.filter((c) => c !== 'isReleasedForContract')), sealsDir: fakeContract(['seal', 'handOver']), seals: true });
+    const noHook = await preflight({ ...base, vaultDir: fakeContract(VAULT_CIRCUITS.filter((c) => c !== 'isReleasedForContract')), sealsDir: fakeContract(['seal', 'handOver', 'provePasskeyOwner']), seals: true });
     expect(noHook.missing.join(' ')).toMatch(/codicil_vault has no circuit "isReleasedForContract"/);
 
     // Not asked for: the register is not looked at, even when its directory is given.

@@ -34,7 +34,7 @@ import { provingProvider } from '@midnightntwrk/zkir-v3';
 import { Contract as VaultContract } from '@codicil/contracts/vault';
 import { Contract as EscrowContract, type Witnesses as EscrowWitnesses } from '@codicil/contracts/escrow';
 import { Contract as SealsContract, type Witnesses as SealsWitnesses } from '@codicil/contracts/seals';
-import { createWitnesses, type CodicilPrivateState } from '@codicil/sdk';
+import { createWitnesses, type CodicilPrivateState, type PasskeyOwner, type WalletOwner } from '@codicil/sdk';
 import type { NetworkConfig } from './env.js';
 import { ESCROW_DIR, PARAMS_CACHE_DIR, SEALS_DIR, VAULT_DIR } from './paths.js';
 
@@ -77,12 +77,37 @@ export const escrowContract = CompiledContract.make('inheritable-escrow', Escrow
  * Only the owner's device holds the keeper secret. A guardian handing over a
  * piece has none, and needs none: `handOver` asks for no witness.
  */
-export interface SealsPrivateState { keeperSecret?: Uint8Array }
+export interface SealsPrivateState {
+  keeperSecret?: Uint8Array;
+  /**
+   * The vault owner's key and its salt: what the vault's ledger commits to.
+   * With one of them the keeper proves, in zero knowledge, that this register
+   * belongs to the vault's owner. Neither leaves this machine.
+   */
+  passkey?: Pick<PasskeyOwner, 'pk' | 'salt'>;
+  wallet?: Pick<WalletOwner, 'pk' | 'salt'>;
+}
 
 const sealsRegisterWitnesses: SealsWitnesses<SealsPrivateState> = {
   keeperSecret: ({ privateState }) => {
     if (!privateState.keeperSecret) throw new Error('this device has no keeper secret for this seal register');
     return [privateState, privateState.keeperSecret];
+  },
+  ownerPasskey: ({ privateState }) => {
+    if (!privateState.passkey) throw new Error('this device has no owner passkey for this seal register');
+    return [privateState, privateState.passkey.pk];
+  },
+  ownerPasskeySalt: ({ privateState }) => {
+    if (!privateState.passkey) throw new Error('this device has no owner passkey for this seal register');
+    return [privateState, privateState.passkey.salt];
+  },
+  ownerEdKey: ({ privateState }) => {
+    if (!privateState.wallet) throw new Error('this device has no owner wallet key for this seal register');
+    return [privateState, privateState.wallet.pk];
+  },
+  ownerEdSalt: ({ privateState }) => {
+    if (!privateState.wallet) throw new Error('this device has no owner wallet key for this seal register');
+    return [privateState, privateState.wallet.salt];
   },
 };
 

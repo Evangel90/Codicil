@@ -43,6 +43,9 @@ const checkIn: StepRecord = {
 };
 const recovered: StepRecord = { step: 'deposit', startedAt: '2026-11-25T10:01:00.000Z', finishedAt: '2026-11-25T10:01:01.000Z', totalMs: 1000, status: 'recovered', notes: ['already on chain'] };
 
+/** What a reader is given: the sealed text as one line. Nothing in it is one of the run's secrets. */
+const SEALED_TEXT = `{"codicil":"sealed","version":1,"recipientHalf":"${'b7'.repeat(32)}","ciphertext":"${'d2'.repeat(40)}"}`;
+
 function state(): RunState {
   return {
     version: STATE_VERSION,
@@ -55,10 +58,11 @@ function state(): RunState {
       heirs: [{ sk: 99n, keySalt: SECRET_SK, shareBps: 6000n }],
       leaves: [],
       escrowSecret: SECRET_SK,
-      seals: { keeper: SECRET_SK, sealedText: `{"recipientHalf":"${SECRET_HEX}"}`, pieces: [{ x: 1, y: SECRET_SK }], text: 'the words that were sealed' },
+      // The sealed text is public by design; the keeper secret, the pieces and the plain words are not.
+      seals: { keeper: SECRET_SK, sealedText: SEALED_TEXT, pieces: [{ x: 1, y: SECRET_SK }], text: 'the words that were sealed' },
     },
     vault: { address: 'cc'.repeat(32), deployedAt: 1_800_000_000, firstDeadline: 1n, maxPeriod: 1n, challengeWindow: 1n, claimWindow: 1n, depositAmount: 10_000_000n },
-    seals: { address: 'ee'.repeat(32), fingerprint: 'f0'.repeat(32) },
+    seals: { address: 'ee'.repeat(32), fingerprint: 'f0'.repeat(32), ownerCommit: 'c3'.repeat(32) },
     steps: { deploy, deposit: recovered, checkInPasskey: checkIn },
     releaseEvent: { id: 42, eventType: 'Misc', name: 'codicil:released:v1', payloadVersion: 1, protocolVersion: 2_001_100 },
   };
@@ -107,6 +111,22 @@ describe('results', () => {
     expect(md).toContain(`- Sealed text fingerprint on the register: \`${'f0'.repeat(32)}\``);
     const plain = buildResults({ ...state(), seals: undefined }, { remaining: [] });
     expect(resultsMarkdown(plain)).not.toContain('Seal register');
+    // Without a register nothing of the sealed text is written, even if the run had prepared one.
+    expect(plain.sealsSealedText).toBeUndefined();
+    expect(resultsMarkdown(plain)).not.toContain(SEALED_TEXT);
+  });
+
+  it('says the register proved whose it is, and carries the public sealed text for a reader', () => {
+    expect(results.sealsOwnerCommit).toBe('c3'.repeat(32));
+    expect(results.sealsSealedText).toBe(SEALED_TEXT);
+    const md = resultsMarkdown(results);
+    expect(md).toContain(`its keeper opened, in zero knowledge, the vault's owner commitment \`${'c3'.repeat(32)}\``);
+    expect(md).toContain('It is public and useless without the pieces of its key');
+    expect(md).toContain(`\`\`\`json\n${SEALED_TEXT}\n\`\`\``);
+    // A run that has not made the proof yet says nothing about it.
+    const s = state();
+    s.seals = { address: s.seals!.address, fingerprint: s.seals!.fingerprint };
+    expect(resultsMarkdown(buildResults(s, { remaining: [] }))).not.toContain('proved it belongs');
   });
 
   it('lists register steps where the run performs them: between the check-ins, and after the release', () => {
