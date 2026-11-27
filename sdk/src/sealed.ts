@@ -20,7 +20,7 @@
 
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { concatBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
+import { bytesToHex, concatBytes, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 
 const DOMAIN = 'codicil:sealed:v1';
 const HALF_BYTES = 32;
@@ -200,4 +200,66 @@ export async function openMessage(sealed: SealedMessage, pieces: readonly KeyPie
 /** The message as text. */
 export async function openMessageText(sealed: SealedMessage, pieces: readonly KeyPiece[]): Promise<string> {
   return new TextDecoder('utf-8', { fatal: true }).decode(await openMessage(sealed, pieces));
+}
+
+// ─── The sealed text as something to keep, post or anchor ───────────────────
+
+const u32 = (n: number): Uint8Array => Uint8Array.of(n >>> 24, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff);
+
+/**
+ * A fingerprint of everything the recipient holds. A seal register records it,
+ * so anyone handed a sealed text can check it is the one that was sealed, and
+ * that it existed when the register says.
+ */
+export function sealedFingerprint(sealed: SealedMessage): Uint8Array {
+  return sha256(concatBytes(
+    utf8ToBytes(`${DOMAIN}:fingerprint:${sealed.vault}:`),
+    Uint8Array.of(sealed.needed, sealed.pieceChecks.length),
+    sealed.recipientHalf, sealed.nonce, u32(sealed.ciphertext.length), sealed.ciphertext, ...sealed.pieceChecks,
+  ));
+}
+
+/** The sealed text as one line of JSON: safe to store, send or post. It is useless without the pieces. */
+export function sealedToText(sealed: SealedMessage): string {
+  return JSON.stringify({
+    codicil: 'sealed',
+    version: sealed.version,
+    vault: sealed.vault,
+    needed: sealed.needed,
+    recipientHalf: bytesToHex(sealed.recipientHalf),
+    nonce: bytesToHex(sealed.nonce),
+    ciphertext: bytesToHex(sealed.ciphertext),
+    pieceChecks: sealed.pieceChecks.map(bytesToHex),
+  });
+}
+
+/** Read a sealed text back. Throws a plain Error that says what is wrong with it. */
+export function sealedFromText(text: string): SealedMessage {
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    throw new Error('this is not a sealed text');
+  }
+  if (!raw || raw.codicil !== 'sealed') throw new Error('this is not a sealed text');
+  if (raw.version !== 1) throw new Error('this sealed text was made by a newer version');
+  const bytes = (v: unknown, name: string, size?: number): Uint8Array => {
+    if (typeof v !== 'string' || !/^([0-9a-f]{2})*$/.test(v)) throw new Error(`the sealed text has a damaged ${name}`);
+    const out = hexToBytes(v);
+    if (size !== undefined && out.length !== size) throw new Error(`the sealed text has a damaged ${name}`);
+    return out;
+  };
+  const checks = raw.pieceChecks;
+  if (typeof raw.vault !== 'string' || !Array.isArray(checks) || checks.length < 1 || checks.length > MAX_PIECES) throw new Error('the sealed text is incomplete');
+  const needed = raw.needed;
+  if (typeof needed !== 'number' || !Number.isInteger(needed) || needed < 1 || needed > checks.length) throw new Error('the sealed text is incomplete');
+  return {
+    version: 1,
+    vault: raw.vault,
+    needed,
+    recipientHalf: bytes(raw.recipientHalf, 'key half', HALF_BYTES),
+    nonce: bytes(raw.nonce, 'nonce', NONCE_BYTES),
+    ciphertext: bytes(raw.ciphertext, 'body'),
+    pieceChecks: checks.map((c) => bytes(c, 'piece check', 32)),
+  };
 }

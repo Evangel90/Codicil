@@ -64,6 +64,13 @@ from the catalogue or from this page, or if the catalogue has a stale entry.
 | `escrow closed` | anyone | This escrow has already been paid out. |
 | `already withdrawn` | heir | This escrow has already been paid out. |
 | `not the beneficiary` | heir | This secret does not match the escrow beneficiary. |
+| `not the keeper` | owner | Only the device that created this register can seal or change messages in it. |
+| `already sealed` | owner | This exact sealed text is already in the register. |
+| `bad piece count` | owner | A key needs between 1 and 8 pieces, and cannot need more pieces than it has. |
+| `seal time has passed` | owner | This took too long to arrive. Seal the message again. |
+| `no such seal` | anyone | The register holds no sealed message with this fingerprint. Its owner may have taken it back. |
+| `vault released` | owner | The vault has released, so this message can no longer be taken back. |
+| `not a genuine piece` | anyone | This is not a piece of that message’s key. Nothing was recorded. |
 
 Errors raised by the SDK before any proof is attempted (no transaction is sent):
 

@@ -15,3 +15,4 @@ export * from './errors.js';
 export * from './events.js';
 export * from './letter.js';
 export * from './sealed.js';
+export * from './seals.js';

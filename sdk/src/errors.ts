@@ -78,6 +78,14 @@ export const CONTRACT_ERRORS = {
   'escrow closed': { audience: 'anyone', message: 'This escrow has already been paid out.' },
   'already withdrawn': { audience: 'heir', message: 'This escrow has already been paid out.' },
   'not the beneficiary': { audience: 'heir', message: 'This secret does not match the escrow beneficiary.' },
+  // Seal register (contracts/src/codicil_seals.compact)
+  'not the keeper': { audience: 'owner', message: 'Only the device that created this register can seal or change messages in it.' },
+  'already sealed': { audience: 'owner', message: 'This exact sealed text is already in the register.' },
+  'bad piece count': { audience: 'owner', message: 'A key needs between 1 and 8 pieces, and cannot need more pieces than it has.' },
+  'seal time has passed': { audience: 'owner', message: 'This took too long to arrive. Seal the message again.' },
+  'no such seal': { audience: 'anyone', message: 'The register holds no sealed message with this fingerprint. Its owner may have taken it back.' },
+  'vault released': { audience: 'owner', message: 'The vault has released, so this message can no longer be taken back.' },
+  'not a genuine piece': { audience: 'anyone', message: 'This is not a piece of that message’s key. Nothing was recorded.' },
 } as const satisfies Record<string, ErrorInfo>;
 
 export type ContractErrorCode = keyof typeof CONTRACT_ERRORS;

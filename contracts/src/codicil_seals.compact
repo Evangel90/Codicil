@@ -1,0 +1,123 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Codicil Authors
+//
+// The seal register: a vault can release words as well as money.
+//
+// A message is encrypted off the chain. Its key has a guardians' half, cut
+// into pieces. This contract is where those pieces are handed over:
+//
+//   - when a message is sealed, the register records a fingerprint of the
+//     sealed text and a commitment to every genuine piece of its key;
+//   - a piece is accepted only once the linked vault reports that it has been
+//     released, and only if it matches one of those commitments;
+//   - an accepted piece is written to the public ledger, where the recipient
+//     (or, for a public disclosure, anyone) reads it.
+//
+// So a guardian never has to know who a message is for, a wrong piece cannot
+// be planted, and the fingerprint shows that the sealed text existed before
+// its owner went silent. The register never sees a message or a key.
+//
+// What it cannot do: stop guardians from sharing pieces somewhere else. It
+// rules the public route, not the people.
+
+pragma language_version >= 0.28.0;
+
+import CompactStandardLibrary;
+
+// Structural interface: the one circuit of the vault this contract calls.
+contract CodicilVault {
+  circuit isReleasedForContract(): Boolean;
+}
+
+export struct Seal {
+  needed: Uint<8>;         // how many pieces rebuild the guardians' half
+  pieces: Uint<8>;         // how many pieces exist
+  sealedBefore: Uint<64>;  // the block that accepted this seal was earlier than this time
+}
+
+export struct Piece {
+  seal: Bytes<32>;
+  x: Uint<8>;
+  y: Bytes<32>;
+}
+
+export ledger vault: CodicilVault;
+export ledger keeperCommit: Bytes<32>;
+// Fingerprint of a sealed text -> its seal.
+export ledger seals: Map<Bytes<32>, Seal>;
+// Commitments to every genuine piece of every sealed key.
+export ledger pieceChecks: Set<Bytes<32>>;
+// Pieces handed over after the release, by their commitment.
+export ledger handedOver: Map<Bytes<32>, Piece>;
+// Fingerprint of a statement the keeper stands behind in public (a canary).
+export ledger statement: Bytes<32>;
+
+witness keeperSecret(): Bytes<32>;
+
+export pure circuit keeperCommitment(secret: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "codicil:seals:keeper:v1"), secret]);
+}
+
+struct PieceInput {
+  domain: Bytes<32>;
+  piece: Piece;
+}
+
+export pure circuit pieceCommitment(seal: Bytes<32>, x: Uint<8>, y: Bytes<32>): Bytes<32> {
+  return persistentHash<PieceInput>(PieceInput { domain: pad(32, "codicil:seals:piece:v1"), piece: Piece { seal: seal, x: x, y: y } });
+}
+
+constructor(v: CodicilVault, keeper: Bytes<32>) {
+  vault = disclose(v);
+  keeperCommit = disclose(keeper);
+}
+
+circuit onlyKeeper(): [] {
+  assert(keeperCommitment(keeperSecret()) == keeperCommit, "not the keeper");
+}
+
+// Record a sealed text and the commitments to the pieces of its key: eight at
+// most, with unused slots left as zeros.
+export circuit seal(fingerprint: Bytes<32>, needed: Uint<8>, pieces: Uint<8>, checks: Vector<8, Bytes<32>>, sealedBefore: Uint<64>): [] {
+  onlyKeeper();
+  const id = disclose(fingerprint);
+  const k = disclose(needed);
+  const n = disclose(pieces);
+  const before = disclose(sealedBefore);
+  assert(!seals.member(id), "already sealed");
+  assert(k >= 1 && k <= n && n <= 8, "bad piece count");
+  assert(blockTimeLt(before), "seal time has passed");
+  for (const c of checks) {
+    const check = disclose(c);
+    if (check != default<Bytes<32>>) {
+      pieceChecks.insert(check);
+    }
+  }
+  seals.insert(id, Seal { needed: k, pieces: n, sealedBefore: before });
+}
+
+// Take a seal back. Not after the release: by then it is owed.
+export circuit unseal(fingerprint: Bytes<32>): [] {
+  onlyKeeper();
+  const id = disclose(fingerprint);
+  assert(seals.member(id), "no such seal");
+  assert(!vault.isReleasedForContract(), "vault released");
+  seals.remove(id);
+}
+
+// Hand over one piece of a key. Anyone holding a genuine piece can do it, from
+// any wallet, and only after the vault has released.
+export circuit handOver(fingerprint: Bytes<32>, x: Uint<8>, y: Bytes<32>): [] {
+  const id = disclose(fingerprint);
+  assert(seals.member(id), "no such seal");
+  assert(vault.isReleasedForContract(), "vault not released");
+  const check = pieceCommitment(id, disclose(x), disclose(y));
+  assert(pieceChecks.member(check), "not a genuine piece");
+  handedOver.insert(check, Piece { seal: id, x: disclose(x), y: disclose(y) });
+}
+
+// Stand behind a public statement: only its fingerprint is recorded.
+export circuit state(fingerprint: Bytes<32>): [] {
+  onlyKeeper();
+  statement = disclose(fingerprint);
+}

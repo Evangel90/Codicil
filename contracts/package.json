@@ -8,11 +8,12 @@
   "exports": {
     "./vault": "./managed/codicil_vault/contract/index.js",
     "./escrow": "./managed/inheritable_escrow/contract/index.js",
+    "./seals": "./managed/codicil_seals/contract/index.js",
     "./test/webauthn-harness": "./managed/webauthn_harness/contract/index.js"
   },
   "scripts": {
-    "compile": "compact compile --skip-zk src/codicil_vault.compact managed/codicil_vault && compact compile --skip-zk src/inheritable_escrow.compact managed/inheritable_escrow && compact compile --skip-zk test/contracts/webauthn_harness.compact managed/webauthn_harness",
-    "compile:full": "compact compile src/codicil_vault.compact managed/codicil_vault && compact compile src/inheritable_escrow.compact managed/inheritable_escrow",
+    "compile": "compact compile --skip-zk src/codicil_vault.compact managed/codicil_vault && compact compile --skip-zk src/inheritable_escrow.compact managed/inheritable_escrow && compact compile --skip-zk src/codicil_seals.compact managed/codicil_seals && compact compile --skip-zk test/contracts/webauthn_harness.compact managed/webauthn_harness",
+    "compile:full": "compact compile src/codicil_vault.compact managed/codicil_vault && compact compile src/inheritable_escrow.compact managed/inheritable_escrow && compact compile src/codicil_seals.compact managed/codicil_seals",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
