@@ -117,6 +117,18 @@ describe('sealed messages', () => {
     await expect(openMessage(sealed, [pieces[0], forged])).rejects.toThrow(/piece 2/);
   });
 
+  it('one bad piece does not block an opening that has enough good ones', async () => {
+    const { sealed, pieces } = await sealMessage({ vault: VAULT, message: text, pieces: 3, needed: 2 });
+    const forged: KeyPiece = { x: 2, y: randomBytes(32) };
+    expect(await openMessageText(sealed, [forged, pieces[0], pieces[2]])).toBe(text);
+  });
+
+  it('a vault is named by exactly 64 hexadecimal characters', async () => {
+    await expect(sealMessage({ vault: 'abc', message: text, pieces: 3, needed: 2 })).rejects.toThrow(/64 hexadecimal/);
+    const { sealed } = await sealMessage({ vault: VAULT.toUpperCase(), message: text, pieces: 3, needed: 2 });
+    expect(sealed.vault).toBe(VAULT);
+  });
+
   it('pieces of one message do not open another', async () => {
     const a = await sealMessage({ vault: VAULT, message: text, pieces: 3, needed: 2 });
     const b = await sealMessage({ vault: VAULT, message: text, pieces: 3, needed: 2 });

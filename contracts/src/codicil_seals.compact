@@ -15,10 +15,13 @@
 //
 // So a guardian never has to know who a message is for, a wrong piece cannot
 // be planted, and the fingerprint shows that the sealed text existed before
-// its owner went silent. The register never sees a message or a key.
+// the vault released: the register refuses a new seal after that. The register
+// never sees a message or a key.
 //
 // What it cannot do: stop guardians from sharing pieces somewhere else. It
-// rules the public route, not the people.
+// rules the public route, not the people. Nor does the vault know its
+// register: anyone can deploy one that points at any vault, so a register's
+// address has to come from the vault's owner.
 
 pragma language_version >= 0.28.0;
 
@@ -86,7 +89,13 @@ export circuit seal(fingerprint: Bytes<32>, needed: Uint<8>, pieces: Uint<8>, ch
   const before = disclose(sealedBefore);
   assert(!seals.member(id), "already sealed");
   assert(k >= 1 && k <= n && n <= 8, "bad piece count");
+  // The recorded time is an upper bound the chain checked: the block that
+  // accepted this seal was earlier than `before`, and by less than an hour.
   assert(blockTimeLt(before), "seal time has passed");
+  assert(before > 3600 && blockTimeGte((before - 3600) as Uint<64>), "seal time too far ahead");
+  // Nothing new is sealed once the vault has released: every seal here was
+  // made while its owner could still check in.
+  assert(!vault.isReleasedForContract(), "vault released");
   for (const c of checks) {
     const check = disclose(c);
     if (check != default<Bytes<32>>) {

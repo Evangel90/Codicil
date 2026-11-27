@@ -68,8 +68,9 @@ from the catalogue or from this page, or if the catalogue has a stale entry.
 | `already sealed` | owner | This exact sealed text is already in the register. |
 | `bad piece count` | owner | A key needs between 1 and 8 pieces, and cannot need more pieces than it has. |
 | `seal time has passed` | owner | This took too long to arrive. Seal the message again. |
+| `seal time too far ahead` | owner | The time on this seal is more than an hour ahead of the chain. Check your device clock and seal the message again. |
 | `no such seal` | anyone | The register holds no sealed message with this fingerprint. Its owner may have taken it back. |
-| `vault released` | owner | The vault has released, so this message can no longer be taken back. |
+| `vault released` | owner | The vault has released, so nothing can be sealed or taken back any more. |
 | `not a genuine piece` | anyone | This is not a piece of that message’s key. Nothing was recorded. |
 
 Errors raised by the SDK before any proof is attempted (no transaction is sent):

@@ -83,8 +83,9 @@ export const CONTRACT_ERRORS = {
   'already sealed': { audience: 'owner', message: 'This exact sealed text is already in the register.' },
   'bad piece count': { audience: 'owner', message: 'A key needs between 1 and 8 pieces, and cannot need more pieces than it has.' },
   'seal time has passed': { audience: 'owner', message: 'This took too long to arrive. Seal the message again.' },
+  'seal time too far ahead': { audience: 'owner', message: 'The time on this seal is more than an hour ahead of the chain. Check your device clock and seal the message again.' },
   'no such seal': { audience: 'anyone', message: 'The register holds no sealed message with this fingerprint. Its owner may have taken it back.' },
-  'vault released': { audience: 'owner', message: 'The vault has released, so this message can no longer be taken back.' },
+  'vault released': { audience: 'owner', message: 'The vault has released, so nothing can be sealed or taken back any more.' },
   'not a genuine piece': { audience: 'anyone', message: 'This is not a piece of that message’s key. Nothing was recorded.' },
 } as const satisfies Record<string, ErrorInfo>;
 

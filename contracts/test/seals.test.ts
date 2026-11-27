@@ -151,6 +151,39 @@ describe('seal register (release-gated key pieces)', () => {
     expect(ledger().handedOver.isEmpty()).toBe(true);
   });
 
+  it('a genuine piece of one sealed key cannot be planted under another', async () => {
+    const other = await sealMessage({ vault: w.vault.address, message: 'another', pieces: 3, needed: 2 });
+    await seal();
+    await seal({ sealed: other.sealed, pieces: other.pieces });
+    await releaseVault();
+    // Both seals are on the register; each commitment is bound to its own fingerprint.
+    await expect(handOver(other.pieces[0])).rejects.toThrow('not a genuine piece');
+    await expect(handOver(w.pieces[0], RELEASED_AT + DAY, sealedFingerprint(other.sealed))).rejects.toThrow('not a genuine piece');
+    await handOver(other.pieces[0], RELEASED_AT + DAY, sealedFingerprint(other.sealed));
+    expect(piecesHandedOver(ledger(), w.fingerprint)).toEqual([]);
+    expect(piecesHandedOver(ledger(), sealedFingerprint(other.sealed)).map((p) => p.x)).toEqual([1]);
+  });
+
+  it('nothing is sealed once the vault has released, so every seal predates the release', async () => {
+    await releaseVault();
+    const late = RELEASED_AT + DAY;
+    await expect(w.chain.call(w.register, 'seal', { time: late, witnesses: sealsWitnesses(w.keeper) }, ...sealArgs(w.sealed, w.pieces, late)))
+      .rejects.toThrow('vault released');
+    expect(ledger().seals.isEmpty()).toBe(true);
+  });
+
+  it('the recorded time is within an hour of the block that accepted the seal', async () => {
+    const call = (before: number, time = T0) => {
+      const [fingerprint, needed, pieces, checks] = sealArgs(w.sealed, w.pieces, T0);
+      return w.chain.call(w.register, 'seal', { time, witnesses: sealsWitnesses(w.keeper) }, fingerprint, needed, pieces, checks, BigInt(before));
+    };
+    await expect(call(T0 + 3601)).rejects.toThrow('seal time too far ahead');
+    await expect(call(T0 + 365 * DAY)).rejects.toThrow('seal time too far ahead');
+    await expect(call(1000)).rejects.toThrow('seal time has passed');
+    await call(T0 + 3600);
+    expect(sealOn(ledger(), w.fingerprint)!.sealedBefore).toBe(BigInt(T0 + 3600));
+  });
+
   it('only the keeper seals, and the same sealed text only once', async () => {
     await expect(seal({ keeper: randomBytes(32) })).rejects.toThrow('not the keeper');
     await seal();
@@ -200,5 +233,18 @@ describe('seal register (release-gated key pieces)', () => {
     expect(Buffer.from(sealedFingerprint(changed)).toString('hex')).not.toBe(Buffer.from(w.fingerprint).toString('hex'));
     expect(() => sealedFromText('{"codicil":"sealed","version":2}')).toThrow(/newer version/);
     expect(() => sealedFromText('hello')).toThrow(/not a sealed text/);
+    // Through text and back, the fingerprint is the same.
+    expect(Buffer.from(sealedFingerprint(sealedFromText(sealedToText(w.sealed)))).toString('hex')).toBe(Buffer.from(w.fingerprint).toString('hex'));
+    // A copy with a field that is not what it claims to be is refused, not guessed at.
+    const raw = JSON.parse(sealedToText(w.sealed)) as Record<string, unknown>;
+    const bad = (change: Record<string, unknown>) => () => sealedFromText(JSON.stringify({ ...raw, ...change }));
+    expect(bad({ vault: `${String(raw.vault)}:\u0001` })).toThrow(/incomplete/);
+    expect(bad({ needed: 4 })).toThrow(/incomplete/);
+    expect(bad({ needed: 1.5 })).toThrow(/incomplete/);
+    expect(bad({ pieceChecks: [] })).toThrow(/incomplete/);
+    expect(bad({ nonce: 'zz' })).toThrow(/damaged nonce/);
+    expect(bad({ recipientHalf: 'abcd' })).toThrow(/damaged key half/);
+    expect(bad({ ciphertext: 'ABCD' })).toThrow(/damaged body/);
+    expect(() => sealedFingerprint({ ...w.sealed, vault: 'not-a-vault' })).toThrow(/64 hexadecimal/);
   });
 });

@@ -49,6 +49,14 @@ export interface SealedMessage {
   pieceChecks: Uint8Array[];
 }
 
+const VAULT_ID = /^[0-9a-f]{64}$/;
+/** A vault is named by 32 bytes as lower-case hex. A fixed size keeps every hash over it unambiguous. */
+function vaultId(vault: string): string {
+  const id = vault.toLowerCase();
+  if (!VAULT_ID.test(id)) throw new Error('a vault is named by 64 hexadecimal characters');
+  return id;
+}
+
 export type SealedProblem = 'not enough pieces' | 'not a genuine piece' | 'cannot open';
 
 /** Why a sealed message could not be opened. */
@@ -158,7 +166,7 @@ export async function sealMessage(opts: {
   /** How many pieces open the message, together with the recipient's half. */
   needed: number;
 }): Promise<{ sealed: SealedMessage; pieces: KeyPiece[] }> {
-  const vault = opts.vault.toLowerCase();
+  const vault = vaultId(opts.vault);
   const plain = typeof opts.message === 'string' ? utf8ToBytes(opts.message) : opts.message;
   const recipientHalf = randomBytes(HALF_BYTES);
   const guardianHalf = randomBytes(HALF_BYTES);
@@ -180,12 +188,16 @@ export async function sealMessage(opts: {
  * pieces guardians handed over. Throws a SealedError when it cannot.
  */
 export async function openMessage(sealed: SealedMessage, pieces: readonly KeyPiece[]): Promise<Uint8Array> {
+  // A piece that is not genuine is set aside, so one bad piece cannot block
+  // an opening that has enough good ones. It is only named when it leaves too few.
   const genuine = new Map<number, KeyPiece>();
+  let wrong: KeyPiece | undefined;
   for (const p of pieces) {
-    if (!isGenuinePiece(sealed, p)) throw new SealedError('not a genuine piece', `piece ${p.x} is not a piece of this message's key`);
-    genuine.set(p.x, p);
+    if (isGenuinePiece(sealed, p)) genuine.set(p.x, p);
+    else wrong ??= p;
   }
   if (genuine.size < sealed.needed) {
+    if (wrong) throw new SealedError('not a genuine piece', `piece ${wrong.x} is not a piece of this message's key`);
     throw new SealedError('not enough pieces', `this message needs ${sealed.needed} pieces and ${genuine.size} ${genuine.size === 1 ? 'was' : 'were'} given`);
   }
   const guardianHalf = joinPieces([...genuine.values()].slice(0, sealed.needed));
@@ -213,7 +225,7 @@ const u32 = (n: number): Uint8Array => Uint8Array.of(n >>> 24, (n >>> 16) & 0xff
  */
 export function sealedFingerprint(sealed: SealedMessage): Uint8Array {
   return sha256(concatBytes(
-    utf8ToBytes(`${DOMAIN}:fingerprint:${sealed.vault}:`),
+    utf8ToBytes(`${DOMAIN}:fingerprint:${vaultId(sealed.vault)}:`),
     Uint8Array.of(sealed.needed, sealed.pieceChecks.length),
     sealed.recipientHalf, sealed.nonce, u32(sealed.ciphertext.length), sealed.ciphertext, ...sealed.pieceChecks,
   ));
@@ -250,7 +262,7 @@ export function sealedFromText(text: string): SealedMessage {
     return out;
   };
   const checks = raw.pieceChecks;
-  if (typeof raw.vault !== 'string' || !Array.isArray(checks) || checks.length < 1 || checks.length > MAX_PIECES) throw new Error('the sealed text is incomplete');
+  if (typeof raw.vault !== 'string' || !VAULT_ID.test(raw.vault) || !Array.isArray(checks) || checks.length < 1 || checks.length > MAX_PIECES) throw new Error('the sealed text is incomplete');
   const needed = raw.needed;
   if (typeof needed !== 'number' || !Number.isInteger(needed) || needed < 1 || needed > checks.length) throw new Error('the sealed text is incomplete');
   return {
