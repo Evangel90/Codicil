@@ -518,6 +518,7 @@ the contract found this gap; a test now covers it.
   register in the vault, through a circuit only the owner can call, would close this; it needs a
   new vault circuit and is on the roadmap.
 
-**Not built yet.** The register runs in the guided demo and in the contract tests. Key generation
-for its four circuits succeeds with the full compiler. It has not been deployed to a network, and
-live mode does not use it.
+**Where it runs.** In the contract tests, in the guided demo, and on Preview through the network
+script, where it refused a piece before the release and accepted two after it, with two proofs in
+each transaction ([results](../preprod/results/v14-preview.md)). The reader page reads that
+register with no wallet and opens its sealed text. Live mode does not create a register yet.

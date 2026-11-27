@@ -23,7 +23,7 @@ canary run in the guided demo today. The live app on a test network creates will
 
 > **Status (Wave 3, in progress):** the vault contract, SDK and web app are built and tested. That
 > covers passkey and wallet check-ins, multi-heir wills with tranches and backup heirs, hidden k-of-n
-> guardians, the attestation trigger and the cross-contract hook: 503 tests, every contract call
+> guardians, the attestation trigger and the cross-contract hook: 510 tests, every contract call
 > checked against its ZK circuit, plus browser tests that check in with Chrome's real WebAuthn. On
 > 26 November 2026 the vault ran end to end on **Preprod**: deploy, both kinds of check-in, release,
 > a claim and the cross-contract withdrawal ([results](preprod/results/v14-preprod.md), vault
@@ -32,8 +32,11 @@ canary run in the guided demo today. The live app on a test network creates will
 > ([how to try it](#try-it-on-a-test-network)); its store and chain code ran that whole story on
 > Preview with a wallet built from a seed. It has not yet been run with the Lace extension itself,
 > and a check-in from a browser is not yet proven on a network. Sealed messages, public
-> disclosures, the canary and the seal register contract run in the guided demo only: the register
-> compiles with full proving keys and is not deployed to a network.
+> disclosures and the canary are in the guided demo, not in live mode. The seal register contract
+> has run on Preview through the network script: it refused a piece before the release, accepted
+> two after it with two proofs in each transaction, and the sealed text opened from the public
+> ledger ([results](preprod/results/v14-preview.md)). A [reader page](#read-a-real-vault-with-no-wallet)
+> shows that vault and opens that text with no wallet.
 > See [What changed this Wave](#what-changed-this-wave).
 > Demo video and deck: *coming*.
 
@@ -129,6 +132,22 @@ tab, so a piece "arrives" at once.
 
 `npm run compile:full` also generates the proving keys (several minutes; sizes in
 [docs/VALIDATION.md](docs/VALIDATION.md)).
+
+### Read a real vault, with no wallet
+
+**http://localhost:5173/#/read** reads a vault's public state from Midnight's Preview network
+through its indexer. It asks for no key and sends no transaction.
+
+1. Press **Use the example vault**. The page reads vault `39cba0b4…864f` and its seal register
+   `d709181d…0598`, both made by the network script, and says **Released**.
+2. The sealed text in the box is checked against the register: its fingerprint matches a seal
+   recorded before the vault released.
+3. Press **Open it in this browser**. The page rebuilds the key from the two pieces on the public
+   ledger and shows the text.
+4. Change one character of the sealed text. It no longer matches.
+
+Paste any other vault address from Preview to read it as a signal: still checking in, gone silent,
+or released.
 
 ### Try it on a test network
 
@@ -327,7 +346,11 @@ Highlights:
 
 - The vault ran **end to end on Preprod and Preview**: ten transactions each, including a 27-second
   passkey proof and a cross-contract withdrawal with two proofs in one transaction
-  ([results](preprod/results/v14-preprod.md)).
+  ([Preprod](preprod/results/v14-preprod.md), [Preview](preprod/results/v14-preview-escrow.md)).
+- The **seal register ran on Preview** beside a vault: deployed, a text sealed, a genuine piece
+  refused before the release, two pieces accepted after it (each transaction carries two proofs,
+  the vault's and the register's), the text opened from the ledger, and a made-up piece and a late
+  seal refused ([results](preprod/results/v14-preview.md)).
 - The first real deployment was refused: the 16-circuit vault is too big for one block. It now
   **deploys in stages**, nine circuits first and seven added after
   ([D19](docs/DECISIONS.md)).
@@ -382,7 +405,7 @@ Milestones and status: [docs/ROADMAP.md](docs/ROADMAP.md). Customers, go-to-mark
   a new contract, the seal register (`codicil_seals`), which accepts a piece of a key only after
   the vault has released; a public disclosure anyone can open after the release; and the vault's
   public status read as a canary. The demo opens on four stories.
-- 503 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
+- 510 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
   CI on every push.
 - Docs: architecture, privacy (every field and transaction), a threat model mapping each threat to
   the test that covers it, testing, roadmap, business and a judges' quickstart. Details: [docs/WAVES.md](docs/WAVES.md).

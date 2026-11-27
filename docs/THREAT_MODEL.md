@@ -70,7 +70,8 @@ or death-registry service), **any third party** (every trigger is permissionless
   is public for good. A seal taken back is removed from the register, but kept copies of old pieces
   and old sealed text still fit together. The vault does not know its register: anyone can
   deploy a register that points at a vault and seal their own text in it, so a reader must get the
-  register's address from the owner (D21). The register is unaudited and runs only in the demo.
+  register's address from the owner (D21). The register is unaudited. It has run on Preview through the network script; the app creates one
+  only in the guided demo.
 - **The maintenance key can change the vault's rules.** Like every contract deployed through
   Midnight.js, the vault has a maintenance authority: a key that can insert and remove circuits'
   verifier keys. The staged deployment uses it for a few minutes (D19). Afterwards it is a standing

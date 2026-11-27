@@ -160,7 +160,11 @@ both compiled contracts beside the compiled vault in the browser
 - **The release hook** ran on Preprod and Preview: a withdrawal from the example escrow with two
   proofs in one transaction ([VALIDATION.md](VALIDATION.md), V14).
 - **The seal register** runs in the contract tests and in the guided demo. The full compiler
-  generates proving keys for its four circuits. It has not been deployed to a network.
+  generates proving keys for its four circuits. It has also run on Preview through the network
+  script (`npm run preprod:run -- --seals`): register `d709181d7c271477f322b159474a6491b21cb1381054703636e1ef8aa11f0598`
+  beside vault `39cba0b46d2a8baadf6e765005392f0edadc7259928a59eec78dbbce02e9864f`
+  ([results](../preprod/results/v14-preview.md)). The app's reader page (`#/read`) reads both with
+  no wallet.
 
 ## Limits to design around
 

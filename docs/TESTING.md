@@ -17,9 +17,9 @@ npm run e2e          # builds the app and runs Playwright in Chrome
 |---|---|---|---|
 | Contract simulator + ZK constraint checks | `npm test -w @codicil/contracts` | 199 | ~6 s |
 | SDK | `npm test -w @codicil/sdk` | 51 | ~1 s |
-| App logic (the demo store, the live store and helpers) | `npm test -w @codicil/app` | 154 | ~40 s |
+| App logic (the demo store, the live store and helpers) | `npm test -w @codicil/app` | 161 | ~40 s |
 | Network script, offline parts | `npm test -w @codicil/preprod` | 99 (two more when the proving keys are present) | ~3 s |
-| Browser end-to-end | `npm run e2e` | 14 (one more, on a network, is opt-in) | ~2 min |
+| Browser end-to-end | `npm run e2e` | 16 (one more, on a network, is opt-in) | ~2 min |
 | Live mode on a real network | `npm run live:e2e` | 14 transactions | ~13 min |
 | Full compile with proving keys | `npm run compile:full` | 16 circuits | several minutes |
 
@@ -51,7 +51,7 @@ in the SDK and a row in [ERRORS.md](ERRORS.md).
 | [`settings.test.ts`](../contracts/test/settings.test.ts) | 28 | Owner-signed replacement of guardians, threshold and attestor, by passkey and by wallet: votes and attestations voided, replay, another vault, tampered values, approvals for other actions, wrong key, forged signature, when it is locked, and a byte search of the transcript |
 | [`webauthn-real.test.ts`](../contracts/test/webauthn-real.test.ts) | 6 | Real Touch ID assertions captured in Chrome on macOS, verified by the vault's own WebAuthn module, including Chrome's long `clientDataJSON` form |
 | [`escrow.test.ts`](../contracts/test/escrow.test.ts) | 5 | Cross-contract call: the escrow asks the vault, two proofs in one transaction |
-| [`seals.test.ts`](../contracts/test/seals.test.ts) | 10 | The seal register (D21): a seal records a fingerprint and piece commitments and no secret (a byte search of its whole public state); every piece is refused while the vault is armed or pending; after the release a genuine piece is published through a proven vault sub-call and the message opens from the ledger; a made-up piece, a piece under the wrong number and another message's piece are refused; only the keeper seals; bad piece counts and a late seal are refused; a seal taken back accepts no piece, and cannot be taken back after the release; the public statement |
+| [`seals.test.ts`](../contracts/test/seals.test.ts) | 13 | The seal register (D21): a seal records a fingerprint and piece commitments and no secret (a byte search of its whole public state); every piece is refused while the vault is armed or pending; after the release a genuine piece is published through a proven vault sub-call and the message opens from the ledger; a made-up piece, a piece under the wrong number and another message's piece are refused; only the keeper seals; bad piece counts and a late seal are refused; a seal taken back accepts no piece, and cannot be taken back after the release; the public statement |
 | [`errors.test.ts`](../contracts/test/errors.test.ts) | 5 | Every contract error is mapped and documented |
 | [`properties.test.ts`](../contracts/test/properties.test.ts) | 5 | fast-check: random wills, estates, fees and claim orders never overpay; a fully allocated will leaves only rounding dust, whatever the fee; the owner can always veto, with any grace period; during the grace period the owner can always check in; a recovery never completes early and an owner with a key can always cancel it |
 
@@ -111,6 +111,11 @@ fingerprint and text form are exercised by the contract suite's
   pieces open it and one does not; a check-in that cancels the switch keeps it shut; changing the
   guardians seals it again so the removed guardian holds nothing; and the guidance and palette
   commands for the screen. These are messages delivered by hand.
+- [`reader.test.ts`](../app/test/reader.test.ts): the reader page's logic, which needs no wallet
+  and no key. It reads a vault's times and a register's seals from contract state, follows a vault
+  from checking in to silent to released, matches a true copy of a sealed text and rejects a
+  changed one, keeps a disclosure shut until enough pieces are on the ledger and then opens it, and
+  shows that a private message does not match for someone without the recipient's half.
 - [`register.test.ts`](../app/test/register.test.ts): the seal register in the demo, with the real
   cross-contract call. It is deployed with the vault and fixed to it. A public disclosure is sealed
   in a transaction that publishes a fingerprint and commitments and none of the words; before the

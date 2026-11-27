@@ -262,7 +262,13 @@ is ready to report upstream.
   the release, a claim, then the example escrow's deploy, deposit and cross-contract withdrawal.
   The release event was read back from the indexer. Hashes, blocks, proving times and fees are in
   [`preprod/results/v14-preprod.md`](../preprod/results/v14-preprod.md) and
-  [`v14-preview.md`](../preprod/results/v14-preview.md), written by the run itself.
+  [`v14-preview-escrow.md`](../preprod/results/v14-preview-escrow.md), written by the run itself.
+- **The seal register on Preview, 2026-11-27:** a second run with `--seals` deployed the register
+  beside a new vault, sealed a text, had a genuine piece refused before the release ("vault not
+  released"), handed two pieces over after it (two proofs in each transaction: the vault's
+  `isReleasedForContract` and the register's `handOver`), opened the text from the public ledger,
+  and had a made-up piece and a late seal refused. Eleven transactions, all `SucceedEntirely`:
+  [`v14-preview.md`](../preprod/results/v14-preview.md).
 - **On Preprod:** vault `4f3b21e1c8117afd7f874885139d18bd19bede372be425b0536dcb848cc2c853`, escrow `c937e24b6ae8f391713652b321e04b82901b77ff12edc58f114a1dd51a54a933`.
   They can be looked up on a Preprod explorer (preprod.midnightexplorer.com, midnight-preprod.subscan.io).
 

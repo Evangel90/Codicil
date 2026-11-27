@@ -254,8 +254,9 @@ is one of two routes for those pieces ([D21](DECISIONS.md)). It has four circuit
 
 The register never receives a message or a key. A reader collects the pieces from its ledger and
 opens the text on their own device. Tests: [`seals.test.ts`](../contracts/test/seals.test.ts). The
-demo's **Messages** tab runs the compiled register next to the compiled vault. It is not deployed
-to a network and live mode does not use it.
+demo's **Messages** tab runs the compiled register next to the compiled vault. The network script
+has run it on Preview (`--seals`), and the reader page (`#/read`, `app/src/live/reader.ts`) reads a
+vault and a register from Preview's indexer with no wallet. Live mode does not create one yet.
 
 ## The SDK
 
