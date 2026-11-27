@@ -3,42 +3,52 @@
 [![CI](https://github.com/Evangel90/Codicil/actions/workflows/ci.yml/badge.svg)](https://github.com/Evangel90/Codicil/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-**On every other blockchain, your will is public. Codicil is an inheritance protocol where your
-heirs, their shares and your proof that you're alive all stay private, enforced by
-zero-knowledge proofs on [Midnight](https://midnight.network).**
+**Codicil is a private switch on [Midnight](https://midnight.network). You check in now and then.
+If you ever stop, your vault releases what you chose. Until that day nobody can tell what is
+inside, who it is for, or whose vault it is.**
 
-Self-custodied crypto is lost when its owner dies. Existing on-chain "dead man's switches" publish
-who the heirs are, what each gets and when the owner is active, which makes families targets.
-Codicil keeps the will private. The owner proves they are alive with **Face ID / Touch ID** (a
-passkey) or a **Cardano wallet**, verified inside a ZK circuit. If they stop, or if hidden
-guardians or a trusted attestor report their death, heirs can claim their share privately once the
-owner has had a chance to veto.
+Some things should happen only if you are gone: savings reach your family, a letter reaches one
+person, documents you could not publish come out. A switch that does this on a public blockchain
+publishes the plan in advance: who gets what, and how recently you were active. Codicil keeps the
+plan private with zero-knowledge proofs, which let the network check a rule without seeing the
+data behind it. You prove you are still here with **Face ID or Touch ID** (a passkey) or a
+**Cardano wallet**, and that proof is checked inside the circuit.
 
-The same switch releases more than money. A vault can also release **a sealed message** for one
-person (a letter, a recovery phrase), **a public disclosure** for everyone (a reporter's documents
-that must come out if she is stopped), and **a signal**: its public status works as a canary, and
-any Midnight contract can ask it "have you released?" with one line. Messages, disclosures and the
-canary run in the guided demo today. The live app on a test network creates wills.
-[Build on it](docs/BUILD_ON_CODICIL.md).
+## What a vault can release
 
-> **Status (Wave 3, in progress):** the vault contract, SDK and web app are built and tested. That
-> covers passkey and wallet check-ins, multi-heir wills with tranches and backup heirs, hidden k-of-n
-> guardians, the attestation trigger and the cross-contract hook: 512 tests, every contract call
-> checked against its ZK circuit, plus browser tests that check in with Chrome's real WebAuthn. On
-> 26 November 2026 the vault ran end to end on **Preprod**: deploy, both kinds of check-in, release,
-> a claim and the cross-contract withdrawal ([results](preprod/results/v14-preprod.md), vault
-> `4f3b21e1c811…`). The web app now has a **live mode** (`#/app`) in which a person creates and uses
-> their own vault on Preview or Preprod through the Lace wallet
-> ([how to try it](#try-it-on-a-test-network)); its store and chain code ran that whole story on
-> Preview with a wallet built from a seed. It has not yet been run with the Lace extension itself,
-> and a check-in from a browser is not yet proven on a network. Sealed messages, public
-> disclosures and the canary are in the guided demo, not in live mode. The seal register contract
-> has run on Preview through the network script: it refused a piece before the release, accepted
-> two after it with two proofs in each transaction, and the sealed text opened from the public
-> ledger ([results](preprod/results/v14-preview.md)). A [reader page](#read-a-real-vault-with-no-wallet)
-> shows that vault and opens that text with no wallet.
-> See [What changed this Wave](#what-changed-this-wave).
-> Demo video and deck: *coming*.
+| | For whom | How it stays private | Where it runs today |
+|---|---|---|---|
+| **A will** | Heirs, each with a share | The chain holds one fingerprint of the whole will. Not who, how many, or how much | Live app on Preview and Preprod; guided demo |
+| **A sealed message** | One person: a letter, a recovery phrase | Encrypted on your device. The recipient holds half the key; your guardians hold the other half in pieces | Guided demo |
+| **A public disclosure** | Everyone: a reporter's documents | Only a fingerprint is on the chain until the release. A contract refuses every piece of the key before it | Guided demo; the contract has run on Preview |
+| **A signal** | Anyone watching, and other contracts | The vault's status is public by design: checking in, gone silent, released. It says nothing else | Reader page on Preview; guided demo; one-line hook for contracts |
+
+Developers can build on two pieces: the release hook and the seal register.
+[Build on Codicil](docs/BUILD_ON_CODICIL.md).
+
+## Status
+
+Wave 3, in progress. Test networks only, and unaudited.
+
+- **Built and tested:** the vault contract, the seal register, the SDK and the web app. 512 tests,
+  every contract call checked against its ZK circuit, plus browser tests that check in through
+  Chrome's real WebAuthn.
+- **Run on real networks:** on 26 November 2026 the vault ran end to end on Preprod and Preview:
+  deploy, both kinds of check-in, release, a claim and a cross-contract withdrawal
+  ([results](preprod/results/v14-preprod.md), vault `4f3b21e1c811…`). On 27 November the seal
+  register ran on Preview: it refused a piece of a key before the release, accepted two after it
+  with two proofs in each transaction, and the sealed text opened from the public ledger
+  ([results](preprod/results/v14-preview.md)).
+- **Readable by anyone:** a [reader page](#read-a-real-vault-with-no-wallet) shows that vault's
+  status and opens that text from Preview, with no wallet.
+- **Live mode** (`#/app`): a person creates and uses their own vault on Preview or Preprod through
+  the Lace wallet ([how to try it](#try-it-on-a-test-network)). Its store and chain code ran the
+  whole story on Preview with a wallet built from a seed.
+- **Not done yet:** live mode has not been run with the Lace extension itself, and a check-in from
+  a browser is not yet proven on a network. Sealed messages, disclosures and the canary are created
+  in the guided demo only, not in live mode.
+
+See [What changed this Wave](#what-changed-this-wave). Demo video and deck: *coming*.
 
 ## Judge quickstart
 
