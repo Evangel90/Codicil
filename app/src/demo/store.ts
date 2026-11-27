@@ -1542,6 +1542,13 @@ class DemoStore {
     return { ok: true, fingerprint: hex(fingerprint), sealedBefore: Number(seal.sealedBefore), needed: Number(seal.needed), pieces: Number(seal.pieces) };
   }
 
+  /** A contract's public state on the demo chain, the way an indexer would serve it to a reader with no keys. */
+  async contractState(address: string) {
+    const w = this.world;
+    if (!w || (address !== w.chain.address && address !== w.register.address && address !== w.position.address)) return undefined;
+    return w.chain.getContractState('', address);
+  }
+
   private registerView(w: World): RegisterView {
     const l = this.sealsLedger(w);
     const st = w.register.statement;

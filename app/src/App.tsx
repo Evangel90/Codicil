@@ -9,10 +9,12 @@ import { useTheme } from './theme.js';
 const Demo = lazy(() => import('./views/Demo.js').then((m) => ({ default: m.Demo })));
 // The live app adds Midnight.js and the ledger on top of that.
 const LiveApp = lazy(() => import('./views/live/LiveApp.js').then((m) => ({ default: m.LiveApp })));
+// Reading a vault from the network needs the indexer client, and nothing else of the live app.
+const Reader = lazy(() => import('./views/Reader.js').then((m) => ({ default: m.Reader })));
 
 const route = () => {
   const hash = window.location.hash;
-  return hash.startsWith('#/demo') ? 'demo' : /^#\/app(\/|$)/.test(hash) ? 'app' : 'home';
+  return hash.startsWith('#/demo') ? 'demo' : /^#\/app(\/|$)/.test(hash) ? 'app' : /^#\/read(\/|$)/.test(hash) ? 'read' : 'home';
 };
 
 function Loading() {
@@ -41,6 +43,10 @@ export function App() {
       ) : page === 'app' ? (
         <Suspense fallback={<Loading />}>
           <LiveApp />
+        </Suspense>
+      ) : page === 'read' ? (
+        <Suspense fallback={<Loading />}>
+          <Reader />
         </Suspense>
       ) : <Landing />}
     </div>

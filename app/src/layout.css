@@ -502,3 +502,9 @@
 
 .ox textarea.msg-copy { font-size: 12px; line-height: 1.5; min-height: 96px; overflow-wrap: anywhere; }
 .copy-ok { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; font-size: 15px; line-height: 1.55; color: var(--o-armed); }
+
+/* ───────── reading a vault from the network ───────── */
+.reader { padding-top: 56px; padding-bottom: 72px; max-width: 860px; display: flex; flex-direction: column; gap: 24px; }
+.reader-facts { max-width: none; }
+.reader .brand { text-decoration: none; }
+@media (max-width: 760px) { .reader { padding-top: 28px; } }

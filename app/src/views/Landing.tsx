@@ -246,7 +246,7 @@ const USES: { who: string; kind: string; body: string; where: string }[] = [
     who: 'An organisation with a canary',
     kind: 'A signal',
     body: 'Some organisations promise to say so if they are ever served a secret order, and go quiet when they no longer can. A vault makes that silence visible. Its public status reads still checking in, gone silent or released, and other Midnight contracts can act on it.',
-    where: 'Every vault has a public status. The guided demo shows it, and a contract that acts on it.',
+    where: 'Every vault has a public status. The guided demo shows it, and the reader page shows it for real vaults on the Preview network.',
   },
 ];
 
@@ -451,7 +451,8 @@ export function Landing() {
             </div>
             <p className="lx-note fade-in" style={{ animationDelay: '450ms' }}>
               The guided demo plays every kind of release in a few minutes. The live app creates wills on Midnight’s
-              test networks, with free test tokens and nothing real at risk.
+              test networks, with free test tokens and nothing real at risk. You can also{' '}
+              <a href="#/read">read a real vault on the Preview network</a> with no wallet at all.
             </p>
           </div>
         </section>

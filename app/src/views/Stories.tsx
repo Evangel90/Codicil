@@ -75,7 +75,7 @@ export function Stories({ onPick }: { onPick: (story: Story, tab?: Tab) => void 
       {error && <p className="err-inline" role="alert">{error}</p>}
       <p className="small muted">
         Everything runs in this browser tab, on a simulated chain with a clock you control. The contracts are the real,
-        compiled ones.
+        compiled ones. To see a vault on a real network instead, <a href="#/read">read one from Midnight's Preview network</a>, with no wallet.
       </p>
     </main>
   );

@@ -196,20 +196,23 @@ export function positionNext(s: Snapshot): NextUp {
 export type SignalState = 'checkingIn' | 'silent' | 'released';
 
 /** A vault's public status, said the way a canary is read. Uses nothing but the public ledger. */
-export function signal(s: Snapshot): { state: SignalState; title: string; detail: string } {
+export function signal(
+  s: Pick<Snapshot, 'phase' | 'now' | 'deadline' | 'switchOpensAt' | 'pendingUntil' | 'releasedAt'>,
+  when: (t: number) => string = fmtDate,
+): { state: SignalState; title: string; detail: string } {
   if (s.phase === Phase.released) {
-    return { state: 'released', title: 'Released', detail: `The owner stayed silent through the whole challenge window. The vault released on ${fmtDate(s.releasedAt)}, and nothing can undo that.` };
+    return { state: 'released', title: 'Released', detail: `The owner stayed silent through the whole challenge window. The vault released on ${when(s.releasedAt)}, and nothing can undo that.` };
   }
   if (s.phase === Phase.pending) {
-    return { state: 'silent', title: 'Gone silent', detail: `A check-in was missed and the countdown is running. Unless the owner checks in by ${fmtDate(s.pendingUntil)}, the vault releases.` };
+    return { state: 'silent', title: 'Gone silent', detail: `A check-in was missed and the countdown is running. Unless the owner checks in by ${when(s.pendingUntil)}, the vault releases.` };
   }
   const due = checkInState(s);
-  if (due === 'onTime') return { state: 'checkingIn', title: 'Still checking in', detail: `The owner is checking in. The next check-in is due by ${fmtDate(s.deadline)}.` };
+  if (due === 'onTime') return { state: 'checkingIn', title: 'Still checking in', detail: `The owner is checking in. The next check-in is due by ${when(s.deadline)}.` };
   return {
     state: 'silent', title: 'Gone silent',
     detail: due === 'grace'
-      ? `The check-in due on ${fmtDate(s.deadline)} has not come. The owner has until ${fmtDate(s.switchOpensAt)} before anyone can start the countdown.`
-      : `The check-in due on ${fmtDate(s.deadline)} has not come. Anyone can start the countdown now.`,
+      ? `The check-in due on ${when(s.deadline)} has not come. The owner has until ${when(s.switchOpensAt)} before anyone can start the countdown.`
+      : `The check-in due on ${when(s.deadline)} has not come. Anyone can start the countdown now.`,
   };
 }
 
