@@ -8,7 +8,7 @@
 import { Phase } from '@codicil/contracts/vault';
 import { VAULT_EVENTS } from '@codicil/sdk';
 import {
-  ATTESTOR, CLAIM_WINDOW, DAY, fmtDate, guardianById, HEIRS, OWNER_FIRST, span, spanAdj,
+  ATTESTOR, CLAIM_WINDOW, DAY, fmtDate, guardianById, HEIRS, OWNER_FIRST, recipientName, span, spanAdj,
   type Actor, type MessageView, type RecoveryView, type Snapshot, type VaultSetup,
 } from './store.js';
 
@@ -192,6 +192,27 @@ export function positionNext(s: Snapshot): NextUp {
 }
 
 // ─── The will in plain words ────────────────────────────────────────────────
+// ─── The vault as a signal ──────────────────────────────────────────────────
+export type SignalState = 'checkingIn' | 'silent' | 'released';
+
+/** A vault's public status, said the way a canary is read. Uses nothing but the public ledger. */
+export function signal(s: Snapshot): { state: SignalState; title: string; detail: string } {
+  if (s.phase === Phase.released) {
+    return { state: 'released', title: 'Released', detail: `The owner stayed silent through the whole challenge window. The vault released on ${fmtDate(s.releasedAt)}, and nothing can undo that.` };
+  }
+  if (s.phase === Phase.pending) {
+    return { state: 'silent', title: 'Gone silent', detail: `A check-in was missed and the countdown is running. Unless the owner checks in by ${fmtDate(s.pendingUntil)}, the vault releases.` };
+  }
+  const due = checkInState(s);
+  if (due === 'onTime') return { state: 'checkingIn', title: 'Still checking in', detail: `The owner is checking in. The next check-in is due by ${fmtDate(s.deadline)}.` };
+  return {
+    state: 'silent', title: 'Gone silent',
+    detail: due === 'grace'
+      ? `The check-in due on ${fmtDate(s.deadline)} has not come. The owner has until ${fmtDate(s.switchOpensAt)} before anyone can start the countdown.`
+      : `The check-in due on ${fmtDate(s.deadline)} has not come. Anyone can start the countdown now.`,
+  };
+}
+
 // ─── The messages screen ────────────────────────────────────────────────────
 /** Where a sealed message is: shut, waiting for guardians' pieces, ready to open, or read. */
 export type MessageStage = 'sealed' | 'collecting' | 'ready' | 'opened';
@@ -201,16 +222,28 @@ export const messageStage = (s: Pick<Snapshot, 'phase'>, m: MessageView): Messag
 
 /** What to try on the messages screen: seal one, then follow it through the release to its reader. */
 export function messagesNext(s: Snapshot): NextUp {
-  const name = (m: MessageView) => HEIRS.find((h) => h.id === m.to)!.name;
+  const open = (m: MessageView) => m.to === 'everyone';
+  const name = (m: MessageView) => recipientName(m.to);
+  const reader = (m: MessageView): Actor => (m.to === 'everyone' ? { kind: 'public' } : { kind: 'heir', id: m.to });
+  if (s.messages.length === 0 && s.register.statement) {
+    const sig = signal(s);
+    return sig.state === 'checkingIn'
+      ? { tone: 'attention', who: [{ kind: 'public' }], text: `The statement is on ${OWNER_FIRST}'s public page, and anyone can read it. Skip to the deadline to see what the page says when she stops checking in.` }
+      : { tone: sig.state === 'released' ? 'done' : 'attention', who: [{ kind: 'public' }], text: `The public page now says "${sig.title}", and that the statement no longer holds. Nobody had to announce it.` };
+  }
   if (s.messages.length === 0) {
     return s.phase === Phase.released
       ? { tone: 'done', who: [], text: 'The will is released and no message was sealed. Reset the demo to seal one and follow it through.' }
-      : { tone: 'attention', who: [{ kind: 'owner' }], text: `${OWNER_FIRST} can seal a message for one person. It opens only after the vault releases.` };
+      : { tone: 'attention', who: [{ kind: 'owner' }], text: `${OWNER_FIRST} can seal a message for one person, or a disclosure for everyone. It opens only after the vault releases.` };
   }
   const at = (stage: MessageStage) => s.messages.filter((m) => messageStage(s, m) === stage);
   const ready = at('ready');
   if (ready.length) {
-    return { tone: 'attention', who: ready.map((m): Actor => ({ kind: 'heir', id: m.to })), text: `Enough pieces have arrived. ${name(ready[0])} can open the message now.` };
+    const m = ready[0];
+    return {
+      tone: 'attention', who: ready.map(reader),
+      text: open(m) ? 'Enough pieces are on the register. Anyone can open the disclosure now.' : `Enough pieces have arrived. ${name(m)} can open the message now.`,
+    };
   }
   const collecting = at('collecting');
   if (collecting.length) {
@@ -219,14 +252,16 @@ export function messagesNext(s: Snapshot): NextUp {
     const more = m.needed - m.handed.length;
     return {
       tone: 'attention', who: waiting.map((id): Actor => ({ kind: 'guardian', id })),
-      text: `The vault has released, so guardians can hand over their pieces. ${more === 1 ? 'One more is' : `${more} more are`} needed before ${name(m)} can open the message.`,
+      text: `The vault has released, so guardians can hand over their pieces. ${more === 1 ? 'One more is' : `${more} more are`} needed before ${open(m) ? 'anyone can open the disclosure' : `${name(m)} can open the message`}.`,
     };
   }
   if (at('sealed').length) {
     const up = nextUp(s);
     return { ...up, text: `Sealed, and shut until the vault releases. ${up.text}` };
   }
-  return { tone: 'done', who: [], text: 'Every sealed message has been opened by the person it was for. None of it touched the chain.' };
+  return s.messages.every((m) => m.via === 'hand')
+    ? { tone: 'done', who: [], text: 'Every sealed message has been opened by the person it was for. None of it touched the chain.' }
+    : { tone: 'done', who: [], text: 'Every sealed message has been opened. The register held fingerprints and key pieces, and never a word of a message.' };
 }
 
 export interface Rule { topic: string; rule: string; meaning: string }

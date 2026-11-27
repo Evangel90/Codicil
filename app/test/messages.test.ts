@@ -88,9 +88,9 @@ describe('sealing a message', () => {
 
   it('can be removed while the vault is armed', async () => {
     await demo.sealMessage('ada', LETTER);
-    expect(demo.removeMessage('ada')).toBeUndefined();
+    expect(await demo.removeMessage('ada')).toBeUndefined();
     expect(s().messages).toEqual([]);
-    expect(demo.removeMessage('ada')).toBe('There is no sealed message for that person.');
+    expect(await demo.removeMessage('ada')).toBe('There is no sealed message for that person.');
   });
 
   it('several people can each have their own', async () => {
@@ -182,7 +182,7 @@ describe('after the vault releases', () => {
     const closed = 'Your vault has released, so messages can no longer be sealed or changed.';
     expect(await demo.sealMessage('ben', 'Too late.')).toBe(closed);
     expect(await demo.sealMessage('ada', 'Changed.')).toBe(closed);
-    expect(demo.removeMessage('ada')).toBe(closed);
+    expect(await demo.removeMessage('ada')).toBe(closed);
     expect(msg().text).toBe(LETTER);
   });
 

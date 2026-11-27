@@ -23,6 +23,7 @@ import { InspectView } from './InspectView.js';
 import { SavingsView } from './SavingsView.js';
 import { SettingsView } from './SettingsView.js';
 import { MessagesView } from './MessagesView.js';
+import { Stories, type Story } from './Stories.js';
 
 export type { Tab };
 
@@ -119,7 +120,7 @@ function DemoBar({ s, tab, setTab, onReset }: { s: Snapshot; tab: Tab; setTab: (
 function NextBar({ s, up, openSavings }: { s: Snapshot; up: NextUp; openSavings?: () => void }) {
   const who = s.actor.kind === 'public' ? 'Someone' : actorName(s.actor);
   const busy = s.tx?.status === 'running';
-  const others = up.who.filter((w) => !sameActor(w, s.actor) && w.kind !== 'public').slice(0, 3);
+  const others = up.who.filter((w) => !sameActor(w, s.actor)).slice(0, 3);
   return (
     <div className={`nextbar tone-${up.tone}`} role="status" aria-live="polite">
       <div className="wrap nextbar-row">
@@ -159,6 +160,8 @@ export function Demo() {
   const s = useDemo();
   const [tab, setTab] = useState<Tab>('vault');
   const [sealed, setSealed] = useState(s.ready);
+  // Which story the visitor picked on the first screen; a vault that already exists skips the choice.
+  const [story, setStory] = useState<Story | undefined>(s.ready ? 'will' : undefined);
 
   useEffect(() => {
     demo.startClock();
@@ -168,9 +171,9 @@ export function Demo() {
   useEffect(() => { if (s.actor.kind !== 'owner' && (tab === 'will' || tab === 'settings')) setTab('vault'); }, [s.actor.kind, tab]);
 
   // Each screen starts at the top.
-  useEffect(() => { window.scrollTo(0, 0); }, [tab, sealed, s.actor.kind]);
+  useEffect(() => { window.scrollTo(0, 0); }, [tab, sealed, story, s.actor.kind]);
 
-  const reset = useCallback(() => { demo.reset(); setSealed(false); setTab('vault'); }, []);
+  const reset = useCallback(() => { demo.reset(); setSealed(false); setStory(undefined); setTab('vault'); }, []);
   const inApp = s.ready && sealed;
   const [palette, setPalette] = usePaletteShortcut();
   const ctx = useMemo<CommandContext>(() => ({
@@ -202,11 +205,13 @@ export function Demo() {
       </header>
       {inApp && <DemoBar s={s} tab={tab} setTab={setTab} onReset={reset} />}
 
-      {!inApp ? <Wizard s={s} onDone={() => setSealed(true)} /> : (
+      {!inApp && !story ? (
+        <Stories onPick={(picked, startTab) => { setStory(picked); if (picked !== 'will') { setTab(startTab ?? 'vault'); setSealed(true); } }} />
+      ) : !inApp ? <Wizard s={s} onDone={() => setSealed(true)} /> : (
         <main className="wrap page" id="main">
           {tab === 'lens' ? <LensView s={s} />
             : tab === 'savings' ? <SavingsView s={s} />
-            : tab === 'messages' ? <MessagesView s={s} />
+            : tab === 'messages' ? <MessagesView s={s} focus={story === 'disclosure' ? 'everyone' : story === 'canary' ? 'statement' : undefined} />
             : tab === 'will' && s.actor.kind === 'owner' ? <WillView s={s} />
             : tab === 'settings' && s.actor.kind === 'owner' ? <SettingsView s={s} />
             : s.actor.kind === 'owner' ? <OwnerView s={s} openTab={setTab} />
@@ -219,7 +224,7 @@ export function Demo() {
         <footer className="wrap appfoot">
           <Icon d={ICONS.lens} size={14} stroke={1.6} />
           <span>
-            This demo runs the real Codicil vault contract, and the savings contract that calls it, in your browser, on a simulated chain with a clock you control.
+            This demo runs the real Codicil vault contract, and the savings contract and seal register that call it, in your browser, on a simulated chain with a clock you control.
             It skips proof generation and fees. Everything else is the same code.
           </span>
         </footer>

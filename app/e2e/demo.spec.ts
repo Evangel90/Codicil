@@ -39,8 +39,12 @@ async function finish(page: Page, expectText: RegExp) {
 test('landing page tells the story and opens the demo', async ({ page }) => {
   const errors = watchErrors(page);
   await page.goto('/');
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Leave your crypto to the people you choose.');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Decide what happens if you go silent.');
   await page.getByRole('link', { name: /Try the guided demo/ }).first().click();
+  // The demo opens on a choice of four stories; the will is the one set up by hand.
+  await expect(page.getByRole('heading', { name: 'What do you want to see?' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Seal a disclosure/ })).toBeVisible();
+  await page.getByRole('button', { name: /Leave a will/ }).click();
   await expect(page.getByRole('heading', { name: 'Protect your vault with your face or fingerprint.' })).toBeVisible();
   expect(errors).toEqual([]);
 });
@@ -51,6 +55,7 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
   await page.goto('/#/demo');
 
   // The wizard: register the passkey, choose a 1-of-3 guardian threshold, seal.
+  await page.getByRole('button', { name: /Leave a will/ }).click();
   await page.getByRole('button', { name: /Register Face ID/ }).click();
   await expect(page.getByText('Passkey registered on this device.')).toBeVisible();
   const next = page.getByRole('button', { name: /Continue|Looks right/ });
@@ -208,6 +213,7 @@ test('full story with a real (virtual) passkey', async ({ page }) => {
 async function createVault(page: Page, opts: { grace?: string; recoveryKey?: boolean; message?: string } = {}) {
   await addVirtualPasskey(page);
   await page.goto('/#/demo');
+  await page.getByRole('button', { name: /Leave a will/ }).click();
   await page.getByRole('button', { name: /Register Face ID/ }).click();
   await expect(page.getByText('Passkey registered on this device.')).toBeVisible();
   const next = page.getByRole('button', { name: /Continue|Looks right/ });
@@ -442,7 +448,7 @@ test('a sealed message: shut until the release, then opened by the one person it
 
   // Amara writes to Ada and seals it. No transaction sheet opens: nothing goes to the chain.
   await messages();
-  await expect(nextBar).toContainText('Amara can seal a message for one person.');
+  await expect(nextBar).toContainText('Amara can seal a message for one person, or a disclosure for everyone.');
   await main.getByRole('button', { name: 'Write to Ada' }).click();
   await expect(main.getByRole('button', { name: 'Seal for Ada' })).toBeDisabled();
   await main.getByRole('button', { name: 'a recovery phrase' }).click();
@@ -457,6 +463,7 @@ test('a sealed message: shut until the release, then opened by the one person it
   await expect(page.locator('.lens-public')).toContainText('nothing · no field');
   await expect(page.locator('.lens-public')).not.toContainText('Ada');
   await expect(page.locator('.lens-private .ledger')).toContainText('1, for Ada');
+  await expect(page.locator('.lens-public')).toContainText('0 sealed · 0 commitments · 0 pieces');
 
   // Ada holds sealed text she cannot open, and a guardian's app keeps its piece.
   await actAs.getByRole('button', { name: 'Heir' }).click();
@@ -505,6 +512,116 @@ test('a sealed message: shut until the release, then opened by the one person it
   await nav.getByRole('button', { name: 'Privacy Lens' }).click();
   await expect(page.locator('.lens-public')).toContainText('nothing · no field');
   await expect(page.locator('.lens-public')).not.toContainText(/Ada|harbor/);
+
+  expect(errors).toEqual([]);
+});
+
+test('a public disclosure: the register refuses every piece until the release, then anyone opens it', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto('/#/demo');
+  // The story starts with a vault already made, on the owner's Messages screen, with the editor open.
+  await page.getByRole('button', { name: /Seal a disclosure/ }).click();
+  const nav = page.getByRole('navigation', { name: 'Sections' });
+  const main = page.getByRole('main');
+  const actAs = page.getByRole('group', { name: 'Act as' });
+  const nextBar = page.getByRole('status').filter({ hasText: /^Next/ });
+  const messages = () => nav.getByRole('button', { name: 'Messages' }).click();
+  const lens = page.locator('.lens-public');
+  await expect(main.getByRole('heading', { name: 'Sealed messages' })).toBeVisible({ timeout: 30_000 });
+
+  // Amara seals it: a real transaction to the seal register, which records a fingerprint and no words.
+  await main.getByRole('button', { name: 'documents to publish' }).click();
+  await expect(main.getByLabel('Your disclosure, for everyone')).toHaveValue(/payment ledger/);
+  await main.getByRole('button', { name: 'Seal for everyone' }).click();
+  await finish(page, /Sealed for everyone\. The register now holds its fingerprint/);
+  await expect(main).toContainText('Any 2 of them open it, for everyone.');
+  await expect(main).toContainText('On the register: fingerprint');
+  await nav.getByRole('button', { name: 'Privacy Lens' }).click();
+  await expect(lens).toContainText('1 sealed · 3 commitments · 0 pieces');
+  await expect(lens).not.toContainText('payment ledger');
+
+  // Before the release the contract refuses a guardian's genuine piece, and nobody can open the text.
+  await actAs.getByRole('button', { name: 'Guardian' }).click();
+  await messages();
+  await main.getByRole('button', { name: 'Hand over through the register' }).click();
+  await finish(page, /The register asked the vault, and the vault said it has not released/);
+  await expect(main.getByRole('heading', { name: /^Refused on/ })).toBeVisible();
+  await expect(main.locator('.attempt-code')).toHaveText('vault not released');
+  await actAs.getByRole('button', { name: 'Anyone' }).click();
+  await messages();
+  await expect(main.getByRole('heading', { name: 'A sealed disclosure is waiting.' })).toBeVisible();
+  await expect(main).not.toContainText('payment ledger');
+  await main.getByRole('button', { name: 'Open the disclosure' }).click();
+  await expect(main.getByRole('alert')).toHaveText('It is still locked. It needs 2 guardian pieces and none is on the register.');
+
+  // Amara goes silent. The switch starts, nobody cancels, the vault releases.
+  await actAs.getByRole('button', { name: 'Guardian' }).click();
+  await page.getByRole('button', { name: 'Skip to deadline' }).click();
+  await nav.getByRole('button', { name: 'Guardian' }).click();
+  await nextBar.getByRole('button', { name: /Start the switch/ }).click();
+  await finish(page, /switch has started|countdown/i);
+  await page.getByRole('button', { name: 'Skip challenge window' }).click();
+  await nextBar.getByRole('button', { name: /Release the will/ }).click();
+  await finish(page, /The will is released/);
+
+  // Now the register asks the vault, hears yes, checks each piece and publishes it.
+  await messages();
+  await expect(nextBar).toContainText('2 more are needed before anyone can open the disclosure.');
+  await main.getByRole('button', { name: 'Hand over through the register' }).click();
+  await finish(page, /The register checked your piece and published it/);
+  await expect(main.getByRole('heading', { name: /^Accepted on/ })).toBeVisible();
+  await expect(main.locator('.calls')).toContainText('vault.isReleasedForContract');
+  await expect(main.locator('.calls')).toContainText('register.handOver');
+  await page.getByRole('group', { name: 'Which guardian' }).getByRole('button', { name: /Tomás/ }).click();
+  await main.getByRole('button', { name: 'Hand over through the register' }).click();
+  await finish(page, /The register checked your piece and published it/);
+  await expect(nextBar).toContainText('Enough pieces are on the register. Anyone can open the disclosure now.');
+
+  // A stranger cannot plant a piece, and can open the text from what is on the ledger.
+  await actAs.getByRole('button', { name: 'Anyone' }).click();
+  await messages();
+  await main.getByRole('button', { name: 'Send the register a made-up piece' }).click();
+  await finish(page, /It matches none of them, so nothing was recorded/);
+  await expect(main.getByRole('img', { name: '2 of 2 pieces have arrived' })).toBeVisible();
+  await main.getByRole('button', { name: 'Open the disclosure' }).click();
+  await expect(main.getByRole('heading', { name: 'The disclosure is public.' })).toBeVisible();
+  await expect(main.getByRole('article', { name: 'The disclosure' })).toContainText('payment ledger');
+
+  // The chain holds the fingerprint and the pieces, and still not a word of the text.
+  await nav.getByRole('button', { name: 'Privacy Lens' }).click();
+  await expect(lens).toContainText('1 sealed · 3 commitments · 2 pieces');
+  await expect(lens).not.toContainText('payment ledger');
+
+  expect(errors).toEqual([]);
+});
+
+test('a canary: a statement the owner stands behind, and a status anyone can read', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto('/#/demo');
+  await page.getByRole('button', { name: /Publish a canary/ }).click();
+  const main = page.getByRole('main');
+  const actAs = page.getByRole('group', { name: 'Act as' });
+  await expect(main.getByRole('heading', { name: 'A public signal' })).toBeVisible({ timeout: 30_000 });
+
+  // Amara stands behind a statement: its fingerprint goes on the register, the words on her page.
+  await expect(main.getByRole('button', { name: 'Stand behind this statement' })).toBeDisabled();
+  await main.getByRole('button', { name: 'Use an example' }).click();
+  await main.getByRole('button', { name: 'Stand behind this statement' }).click();
+  await finish(page, /the register holds its fingerprint/);
+  await expect(main.locator('.signal')).toContainText('Still checking in');
+  await expect(main.locator('.signal')).toContainText('nobody has ordered us to hand over data');
+
+  // Anyone reads the same page from the public ledger, with no key.
+  await actAs.getByRole('button', { name: 'Anyone' }).click();
+  const signal = main.locator('.signal');
+  await expect(signal).toContainText('This vault, read as a signal');
+  await expect(signal).toContainText('Still checking in');
+  await expect(signal).toContainText('It holds for as long as the check-ins continue.');
+
+  // She misses a check-in. Nobody has to announce anything.
+  await page.getByRole('button', { name: 'Skip to deadline' }).click();
+  await expect(signal).toContainText('Gone silent');
+  await expect(signal).toContainText('The check-ins have stopped, so it no longer holds.');
 
   expect(errors).toEqual([]);
 });

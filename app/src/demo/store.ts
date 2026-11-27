@@ -17,9 +17,11 @@ import { useSyncExternalStore } from 'react';
 import {
   encodeContractAddress, encodeRawTokenType, encodeUserAddress, sampleRawTokenType, sampleUserAddress, type ContractAddress,
 } from '@midnight-ntwrk/compact-runtime';
-import { randomBytes } from '@noble/hashes/utils.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { Phase, pureCircuits, type HeirLeaf } from '@codicil/contracts/vault';
 import * as escrowModule from '@codicil/contracts/escrow';
+import * as sealsModule from '@codicil/contracts/seals';
 import {
   attestationDigest,
   buildGuardianSet,
@@ -33,7 +35,9 @@ import {
   encodeHeirLetter,
   explainError,
   guardianLeaf,
+  handOverArgs,
   isCurrentGuardian,
+  keeperCommitment,
   lastRecoveryStart,
   letterFingerprint,
   guardianSecrets,
@@ -44,12 +48,17 @@ import {
   newSalt,
   openMessageText,
   payoutFor,
+  pieceCommitment,
+  piecesHandedOver,
   recoveryCommitment,
   recoveryConfig,
   recoveryStatus,
   rpIdHash,
+  sealArgs,
+  sealedFingerprint,
   sealMessage as sealForRecipient,
   SealedError,
+  sealsWitnesses,
   settingsDigest,
   signAttestation,
   timeoutOpensAt,
@@ -66,6 +75,7 @@ import {
   type P256Key,
   type RecoveryStatus,
   type SealedMessage,
+  type SealsLedger,
   type VaultEventName,
   type Will,
 } from '@codicil/sdk';
@@ -312,12 +322,62 @@ export interface GuardianView extends GuardianProfile {
 /** The longest message the demo seals, in characters. */
 export const MESSAGE_MAX = 2000;
 
+/** Who a sealed message is for: one person in the will, or everyone (a public disclosure). */
+export type MessageTo = HeirProfile['id'] | 'everyone';
+/**
+ * How the guardians' pieces travel after the release. By hand: guardian to
+ * recipient, with no trace on the chain. Through the register: a contract that
+ * accepts a piece only once the vault has released, and publishes it.
+ */
+export type MessageVia = 'hand' | 'register';
+export const MESSAGE_TO: MessageTo[] = [...(['ada', 'ben', 'cleo', 'kofi'] as const), 'everyone'];
+/** Who a message is for, as a name. */
+export const recipientName = (to: MessageTo): string => (to === 'everyone' ? 'everyone' : HEIRS.find((h) => h.id === to)!.name);
+
+/** The assert messages of the seal register a guardian or a stranger can meet. */
+export type RegisterRefusal = 'vault not released' | 'not a genuine piece' | 'no such seal';
+
+export interface RegisterAttempt {
+  at: number;
+  /** Who tried, by first name; never published. */
+  by: string;
+  ok: boolean;
+  /** The contract's own assert message when it refused. */
+  code?: string;
+  /** The circuits the transaction ran, in the order they finished. */
+  calls?: { contract: 'vault' | 'register'; circuit: string }[];
+}
+
+/** The seal register's public ledger, and what the demo cast knows beside it. */
+export interface RegisterView {
+  address: string;
+  // The public ledger.
+  vault: string;
+  keeperCommit: string;
+  seals: { fingerprint: string; needed: number; pieces: number; sealedBefore: number }[];
+  pieceChecks: number;
+  handedOver: { seal: string; x: number; y: string }[];
+  /** All zeros until the owner stands behind a statement. */
+  statementFingerprint: string;
+  // Off-chain.
+  /** The statement on the owner's public page, and whether it matches the fingerprint on the ledger. */
+  statement?: { text: string; at: number; genuine: boolean };
+  lastAttempt?: RegisterAttempt;
+}
+
 /**
  * A sealed message, as the demo cast holds it. Each part is on a different
- * person's device; none of it is on the chain.
+ * person's device. By hand, none of it is on the chain; through the register,
+ * the chain holds a fingerprint and commitments, and later the pieces.
  */
 export interface MessageView {
-  to: HeirProfile['id'];
+  to: MessageTo;
+  /** How the guardians' pieces reach the reader. */
+  via: MessageVia;
+  /** Through the register only: the fingerprint of the sealed text, as the chain records it. */
+  fingerprint?: string;
+  /** Through the register only: the chain accepted the seal before this time. */
+  sealedBefore?: number;
   sealedAt: number;
   /** What the owner wrote, as the owner's own device keeps it. */
   text: string;
@@ -329,7 +389,7 @@ export interface MessageView {
   needed: number;
   /** Guardians who hold a piece. */
   holders: number[];
-  /** Guardians whose piece has reached the recipient. */
+  /** Guardians whose piece has reached the reader: by hand, or on the register's public ledger. */
   handed: number[];
   /** What the recipient read, once it was opened on their device. */
   opened?: { at: number; text: string };
@@ -410,7 +470,9 @@ export interface Snapshot {
   heirs: HeirView[];
   /** The savings contract that pays out when this vault is released. */
   position: PositionView;
-  /** Sealed messages, in the order of the cast. */
+  /** The contract that hands over key pieces once this vault is released. */
+  register: RegisterView;
+  /** Sealed messages, in the order of the cast; the public disclosure last. */
   messages: MessageView[];
   /** Leaf hashes, computed on the owner's device only. */
   leafHashes: string[];
@@ -461,6 +523,8 @@ interface Keys {
   guardianSecretsList: Uint8Array[];
   /** Made on the beneficiary's device; Amara only ever receives its commitment. */
   beneficiarySecret: Uint8Array;
+  /** Made on the owner's device: it alone may seal on the register. Only its commitment goes on-chain. */
+  keeperSecret: Uint8Array;
   /** Made in the wizard; it goes on paper, and only its commitment goes on-chain. */
   recoverySecret: Uint8Array;
   /** The attestor's own signing key; Amara only ever receives its commitment. */
@@ -482,6 +546,20 @@ const savingsWitnesses = (secret?: Uint8Array) => ({
   },
 });
 
+const REGISTER_REFUSALS: Record<RegisterRefusal, string> = {
+  'vault not released': 'The register asked the vault, and the vault said it has not released. The piece stays where it was, and nothing was published.',
+  'not a genuine piece': 'The register checked this piece against the commitments made when the message was sealed. It matches none of them, so nothing was recorded.',
+  'no such seal': 'The register holds no sealed text with this fingerprint. Its owner took it back, so no piece of its key can be handed over here.',
+};
+
+const REGISTER_STAGES: RunOptions['stages'] = {
+  circuit: {
+    label: 'Running the seal register, which calls the vault',
+    detail: 'Two compiled circuits run on this device: the register and, inside it, the vault\'s "is it released?" check.',
+  },
+  proof: { label: 'Generating two zero-knowledge proofs', detail: 'On Midnight this step proves both circuits ran correctly, one proof each, in one transaction.' },
+};
+
 const POSITION_REFUSALS: Record<PositionRefusal, string> = {
   'vault not released': `${POSITION.name} asked the vault, and the vault said the will is not released. Nothing was paid. Try again once the will is released.`,
   'not the beneficiary': `${POSITION.name} refused: that secret does not match its beneficiary. Nothing was paid. Only the beneficiary's own device can withdraw.`,
@@ -492,6 +570,9 @@ const POSITION_REFUSALS: Record<PositionRefusal, string> = {
 interface HeldMessage {
   /** On the owner's device: what she wrote. */
   text: string;
+  via: MessageVia;
+  /** Through the register: the fingerprint it holds for this sealed text. */
+  fingerprint?: Uint8Array;
   sealedAt: number;
   /** On the recipient's device: the sealed text and their half of the key. */
   sealed: SealedMessage;
@@ -534,7 +615,8 @@ interface World extends Keys {
   /** Letters each heir has loaded on their own device. */
   held: Map<HeirProfile['id'], string>;
   /** Sealed messages, by recipient. */
-  messages: Map<HeirProfile['id'], HeldMessage>;
+  messages: Map<MessageTo, HeldMessage>;
+  register: { address: ContractAddress; lastAttempt?: RegisterAttempt; statement?: { text: string; at: number } };
   votedRound: Map<number, bigint>;
 }
 
@@ -578,6 +660,7 @@ class DemoStore {
       heirKeys: Object.fromEntries(HEIRS.map((h) => [h.id, { key: newHeirKey(), salt: newSalt() }])) as Keys['heirKeys'],
       guardianSecretsList: GUARDIAN_POOL.map(() => newGuardianSecret()),
       beneficiarySecret: randomBytes(32),
+      keeperSecret: randomBytes(32),
       recoverySecret: newRecoverySecret(),
       attestor: { key: newP256Key(), salt: newSalt() },
     };
@@ -659,8 +742,14 @@ class DemoStore {
       encodeRawTokenType(sampleRawTokenType()),
       escrowModule.pureCircuits.beneficiaryCommitment(k.beneficiarySecret),
     );
+    // The seal register is fixed to this vault too, and to a commitment to a
+    // secret only the owner's device holds.
+    const register = await chain.deployContract(
+      'codicil_seals', sealsModule, sealsWitnesses(), { bytes: encodeContractAddress(chain.address) }, keeperCommitment(k.keeperSecret),
+    );
     this.world = {
       ...k, chain, passkey, setup: { ...setup, attestor: false }, will, guardianSet, deployedAt: now, lastCheckIn: now,
+      register: { address: register },
       claimed: new Map(), votedRound: new Map(), held: new Map(), messages: new Map(),
       // Each guardian's device gets the path to its leaf; nobody else does.
       guardianHeld: new Map(setup.guardians.map((id) => [id, guardianSecrets(guardianSet, k.guardianSecretsList[id])])),
@@ -1148,53 +1237,138 @@ class DemoStore {
   // None of these is a transaction. A message is sealed, handed over and
   // opened between people's devices; the chain only says when: "released".
 
-  private async sealFor(w: World, text: string): Promise<HeldMessage> {
+  private sealsLedger(w: World): SealsLedger {
+    return sealsModule.ledger(w.chain.ledgerOf(w.register.address));
+  }
+
+  private async sealFor(w: World, text: string, via: MessageVia): Promise<HeldMessage> {
     const holders = w.setup.guardians;
     const { sealed, pieces } = await sealForRecipient({ vault: w.chain.address, message: text, pieces: holders.length, needed: w.setup.threshold });
-    return { text, sealedAt: w.chain.now, sealed, pieces: new Map(holders.map((id, i) => [id, pieces[i]])), handed: new Map() };
+    return {
+      text, via, sealedAt: w.chain.now, sealed, pieces: new Map(holders.map((id, i) => [id, pieces[i]])), handed: new Map(),
+      fingerprint: via === 'register' ? sealedFingerprint(sealed) : undefined,
+    };
+  }
+
+  /** Records a sealed text on the register: its fingerprint and a commitment to each piece of its key. */
+  private async registerSeal(w: World, m: HeldMessage): Promise<void> {
+    await w.chain.callContract(
+      w.register.address, 'seal', { witnesses: sealsWitnesses(w.keeperSecret) }, ...sealArgs(m.sealed, [...m.pieces.values()], w.chain.now),
+    );
+  }
+
+  private async unregisterSeal(w: World, m: HeldMessage): Promise<void> {
+    if (m.fingerprint) await w.chain.callContract(w.register.address, 'unseal', { witnesses: sealsWitnesses(w.keeperSecret) }, m.fingerprint);
   }
 
   /** Seal every message again for the current guardians. Returns how many. */
   private async resealMessages(w: World): Promise<number> {
-    for (const [to, m] of w.messages) w.messages.set(to, await this.sealFor(w, m.text));
+    for (const [to, m] of w.messages) {
+      const next = await this.sealFor(w, m.text, m.via);
+      if (m.via === 'register') {
+        await this.unregisterSeal(w, m);
+        await this.registerSeal(w, next);
+      }
+      w.messages.set(to, next);
+    }
     return w.messages.size;
   }
 
+  /** Seals, records on the register when asked to, and notes it in the activity. Returns the words to show. */
+  private async placeSeal(w: World, to: MessageTo, body: string, via: MessageVia): Promise<string> {
+    const old = w.messages.get(to);
+    const next = await this.sealFor(w, body, via);
+    if (old?.via === 'register') await this.unregisterSeal(w, old);
+    if (via === 'register') await this.registerSeal(w, next);
+    w.messages.set(to, next);
+    const name = recipientName(to);
+    const n = w.setup.guardians.length;
+    const k = w.setup.threshold;
+    const held = n === 1
+      ? `${guardianById(w.setup.guardians[0]).name} holds the guardians' half of the key.`
+      : `Each of your ${n} guardians holds a piece of the key. ${k} of them are needed.`;
+    const what = to === 'everyone'
+      ? (old ? 'Public disclosure replaced' : 'Public disclosure sealed')
+      : old ? `Sealed message for ${name} replaced` : `Message sealed for ${name}`;
+    this.log(OWNER_NAME, what, 'plain', via === 'register' ? [
+      'A fingerprint of the sealed text', `Commitments to ${n} piece${n === 1 ? '' : 's'} of its key, and that ${k} ${k === 1 ? 'is' : 'are'} needed`,
+      'That it was sealed before a time a few minutes from now',
+    ] : [], to === 'everyone' ? [
+      'What it says', 'The key and its pieces', 'Who your guardians are',
+    ] : [
+      'The message', via === 'register' ? 'Who it is for' : 'That a message exists, and who it is for',
+      `The key: half with ${name}, half cut into ${n} piece${n === 1 ? '' : 's'} for your guardians`,
+    ]);
+    if (via === 'hand') return held;
+    return to === 'everyone'
+      ? `Sealed for everyone. The register now holds its fingerprint, which later shows it existed today. ${held}`
+      : `Sealed for ${name}. The register holds a fingerprint and nothing that says who it is for. ${held}`;
+  }
+
   /**
-   * Seal a message for one person, replacing any earlier one for them.
+   * Seal a message for one person, or for everyone, replacing any earlier one.
+   * By hand, nothing is sent anywhere. Through the register it is a
+   * transaction, shown in the transaction sheet unless `quiet`.
    * Returns what went wrong, in words to show, or nothing when it worked.
    */
-  async sealMessage(to: HeirProfile['id'], text: string): Promise<string | undefined> {
+  async sealMessage(
+    to: MessageTo, text: string, via: MessageVia = to === 'everyone' ? 'register' : 'hand', opts: { quiet?: boolean } = {},
+  ): Promise<string | undefined> {
     const w = this.world;
     if (!w) return 'There is no vault yet.';
     const body = text.trim();
     if (!body) return 'Write the message first.';
     if (body.length > MESSAGE_MAX) return `That is ${body.length.toLocaleString()} characters. The demo seals up to ${MESSAGE_MAX.toLocaleString()}.`;
     if (w.chain.ledger.phase === Phase.released) return 'Your vault has released, so messages can no longer be sealed or changed.';
-    const replaced = w.messages.has(to);
-    w.messages.set(to, await this.sealFor(w, body));
-    const name = HEIRS.find((h) => h.id === to)!.name;
-    const n = w.setup.guardians.length;
-    this.log(OWNER_NAME, replaced ? `Sealed message for ${name} replaced` : `Message sealed for ${name}`, 'plain', [], [
-      'The message', 'That a message exists, and who it is for', `The key: half with ${name}, half cut into ${n} piece${n === 1 ? '' : 's'} for your guardians`,
-    ]);
-    this.toast = {
-      id: Date.now(), title: `Sealed for ${name}`,
-      body: n === 1
-        ? `${guardianById(w.setup.guardians[0]).name} holds the guardians' half of the key.`
-        : `Each of your ${n} guardians holds a piece of the key. ${w.setup.threshold} of them are needed.`,
-    };
-    this.emit();
+    if (to === 'everyone' && via !== 'register') return 'A public disclosure goes through the register, so that everyone can check it and open it.';
+    const name = recipientName(to);
+    if (via === 'hand' && w.messages.get(to)?.via !== 'register') {
+      const held = await this.placeSeal(w, to, body, via);
+      this.toast = { id: Date.now(), title: `Sealed for ${name}`, body: held };
+      this.emit();
+      return undefined;
+    }
+    if (opts.quiet) {
+      try {
+        await this.placeSeal(w, to, body, via);
+      } catch (e) {
+        return describeFailure(e);
+      }
+      this.emit();
+      return undefined;
+    }
+    await this.run(to === 'everyone' ? 'Sealing a public disclosure' : `Sealing a message for ${name}`, ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
+      await stage('circuit');
+      return this.placeSeal(w, to, body, via);
+    }, {
+      stages: {
+        prepare: { label: 'Sealing it on this device', detail: 'The message is encrypted here, and the guardians\' half of its key is cut into pieces. The plain text goes nowhere.' },
+        circuit: { label: 'Running the seal register on this device', detail: 'The compiled circuit records a fingerprint of the sealed text and a commitment to each piece of its key.' },
+      },
+    });
     return undefined;
   }
 
   /** Take a sealed message back. Returns what went wrong, if anything. */
-  removeMessage(to: HeirProfile['id']): string | undefined {
+  async removeMessage(to: MessageTo): Promise<string | undefined> {
     const w = this.world;
-    if (!w?.messages.has(to)) return 'There is no sealed message for that person.';
+    const m = w?.messages.get(to);
+    if (!w || !m) return to === 'everyone' ? 'There is no public disclosure to take back.' : 'There is no sealed message for that person.';
     if (w.chain.ledger.phase === Phase.released) return 'Your vault has released, so messages can no longer be sealed or changed.';
+    const name = recipientName(to);
+    if (m.via === 'register') {
+      await this.run(to === 'everyone' ? 'Taking back the public disclosure' : `Taking back the message for ${name}`, ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
+        await stage('circuit');
+        await this.unregisterSeal(w, m);
+        w.messages.delete(to);
+        this.log(OWNER_NAME, to === 'everyone' ? 'Public disclosure taken back' : `Sealed message for ${name} removed`, 'plain', [
+          'That the seal with this fingerprint was removed',
+        ], ['What it said', to === 'everyone' ? 'Why' : 'Who it was for']);
+        return 'The register no longer holds its seal, so no piece of its key can be handed over there. Copies of the sealed text that exist stay shut.';
+      }, { stages: REGISTER_STAGES });
+      return undefined;
+    }
     w.messages.delete(to);
-    const name = HEIRS.find((h) => h.id === to)!.name;
     this.log(OWNER_NAME, `Sealed message for ${name} removed`, 'plain', [], ['That a message existed, and who it was for']);
     this.toast = { id: Date.now(), title: `Removed the message for ${name}`, body: "Your guardians' apps deleted their pieces of its key." };
     this.emit();
@@ -1202,13 +1376,14 @@ class DemoStore {
   }
 
   /**
-   * A guardian hands over every piece their device holds. Their app reads the
-   * vault's state from the chain first and keeps the pieces unless it says released.
+   * A guardian hands over, by hand, every piece their device holds for a
+   * message delivered that way. Their app reads the vault's state from the
+   * chain first and keeps the pieces unless it says released.
    */
   handOverPieces(id: number): string | undefined {
     const w = this.world;
     if (!w) return 'There is no vault yet.';
-    const mine = [...w.messages.values()].filter((m) => m.pieces.has(id) && !m.handed.has(id));
+    const mine = [...w.messages.values()].filter((m) => m.via === 'hand' && m.pieces.has(id) && !m.handed.has(id));
     if (mine.length === 0) return 'This device holds no piece to hand over.';
     if (w.chain.ledger.phase !== Phase.released) {
       return `The vault has not released, so your piece${mine.length === 1 ? ' stays' : 's stay'} on this device. Nothing was sent.`;
@@ -1225,28 +1400,135 @@ class DemoStore {
     return undefined;
   }
 
-  /** The recipient opens their message with their own half of the key and the pieces they were handed. */
-  async openMessage(to: HeirProfile['id']): Promise<string | undefined> {
+  /**
+   * A guardian hands over, through the register, every piece their device
+   * holds for it. The register asks the vault first and refuses unless it has
+   * released; then it checks each piece and writes it to the public ledger.
+   * The guardian never learns who a message is for.
+   */
+  publishPieces(id: number): Promise<boolean> {
+    return this.run('Handing over a piece through the register', ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
+      const w = this.world!;
+      const l = this.sealsLedger(w);
+      const mine = [...w.messages.values()].filter((m) => m.via === 'register' && m.pieces.has(id)
+        && !l.handedOver.member(pieceCommitment(m.fingerprint!, m.pieces.get(id)!)));
+      if (mine.length === 0) throw new InputError('this device holds no piece that is still to be handed over');
+      await stage('circuit');
+      const attempt = { at: w.chain.now, by: guardianById(id).name };
+      try {
+        let calls: RegisterAttempt['calls'];
+        for (const m of mine) {
+          const out = await w.chain.callContract(w.register.address, 'handOver', { witnesses: sealsWitnesses() }, ...handOverArgs(m.fingerprint!, m.pieces.get(id)!));
+          calls = out.trace.map((t) => ({ contract: t.address === w.chain.address ? 'vault' as const : 'register' as const, circuit: t.circuitId }));
+        }
+        w.register.lastAttempt = { ...attempt, ok: true, calls };
+        this.log('A guardian', mine.length === 1 ? 'A piece of a key was handed over through the register' : `${mine.length} pieces of keys were handed over through the register`, 'released', [
+          'That the register asked this vault whether it is released', 'The piece: its number and its value', 'Which sealed text it belongs to, by fingerprint',
+        ], [`That it was ${guardianById(id).name}`, 'Who the message is for', 'The message']);
+        return mine.length === 1
+          ? 'The register checked your piece and published it. The vault confirmed the release in the same transaction.'
+          : `The register checked your ${mine.length} pieces and published them. The vault confirmed the release in the same transaction.`;
+      } catch (e) {
+        w.register.lastAttempt = { ...attempt, ok: false, code: contractErrorCode(e) };
+        throw e;
+      }
+    }, { stages: REGISTER_STAGES, explain: (code) => REGISTER_REFUSALS[code as RegisterRefusal] });
+  }
+
+  /**
+   * Someone who holds no piece sends the register a made-up one. Before the
+   * release the register refuses it like any other; after, it fails the check
+   * against the commitments made when the message was sealed.
+   */
+  plantPiece(to: MessageTo, actor: Actor = this.actor): Promise<boolean> {
+    const by = actor.kind === 'owner' ? OWNER_FIRST : actor.kind === 'heir' ? HEIRS.find((h) => h.id === actor.id)!.name
+      : actor.kind === 'guardian' ? guardianById(actor.id).name : 'Someone';
+    return this.run('Sending the register a made-up piece', ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
+      const w = this.world!;
+      const m = w.messages.get(to);
+      if (!m?.fingerprint) throw new InputError('there is no sealed text on the register to try this on');
+      await stage('circuit');
+      const attempt = { at: w.chain.now, by };
+      try {
+        await w.chain.callContract(w.register.address, 'handOver', { witnesses: sealsWitnesses() }, ...handOverArgs(m.fingerprint, { x: 1, y: randomBytes(32) }));
+      } catch (e) {
+        w.register.lastAttempt = { ...attempt, ok: false, code: contractErrorCode(e) };
+        throw e;
+      }
+      // 32 random bytes that match a commitment: not in this universe.
+      throw new Error('the register accepted a made-up piece');
+    }, { stages: REGISTER_STAGES, explain: (code) => REGISTER_REFUSALS[code as RegisterRefusal] });
+  }
+
+  /**
+   * Open a message: with the pieces handed to the recipient, or, through the
+   * register, with the pieces on its public ledger. A public disclosure can be
+   * opened by anyone; a private one only on the device that holds its sealed
+   * text and the recipient's half of the key.
+   */
+  async openMessage(to: MessageTo): Promise<string | undefined> {
     const w = this.world;
     const m = w?.messages.get(to);
-    if (!w || !m) return 'This device holds no sealed message.';
+    if (!w || !m) return to === 'everyone' ? 'There is no public disclosure.' : 'This device holds no sealed message.';
     if (m.opened) return undefined;
+    const given = m.fingerprint
+      ? piecesHandedOver(this.sealsLedger(w), m.fingerprint)
+      : [...m.handed.keys()].map((id) => m.pieces.get(id)!);
     let text: string;
     try {
-      text = await openMessageText(m.sealed, [...m.handed.keys()].map((id) => m.pieces.get(id)!));
+      text = await openMessageText(m.sealed, given);
     } catch (e) {
       if (e instanceof SealedError && e.problem === 'not enough pieces') {
-        const have = m.handed.size;
-        return `It is still locked. It needs ${m.sealed.needed} guardian piece${m.sealed.needed === 1 ? '' : 's'} and ${have === 0 ? 'none has' : have === 1 ? 'one has' : `${have} have`} arrived.`;
+        const have = given.length;
+        const count = have === 0 ? 'none' : have === 1 ? 'one' : String(have);
+        const verb = m.via === 'register' ? `${have > 1 ? 'are' : 'is'} on the register` : `${have > 1 ? 'have' : 'has'} arrived`;
+        return `It is still locked. It needs ${m.sealed.needed} guardian piece${m.sealed.needed === 1 ? '' : 's'} and ${count} ${verb}.`;
       }
       if (e instanceof SealedError && e.problem === 'not a genuine piece') return 'One of the pieces is not a piece of this message’s key. Ask that guardian to send theirs again.';
       return 'The sealed text does not match its key, so it cannot be opened.';
     }
     m.opened = { at: w.chain.now, text };
-    const name = HEIRS.find((h) => h.id === to)!.name;
-    this.log(name, 'A sealed message was opened', 'released', [], ['The message', 'That it was opened, and by whom']);
+    if (to === 'everyone') this.log('Someone', 'The public disclosure was opened', 'released', [], ['Who opened it: reading the ledger is not a transaction']);
+    else this.log(recipientName(to), 'A sealed message was opened', 'released', [], ['The message', 'That it was opened, and by whom']);
     this.emit();
     return undefined;
+  }
+
+  /**
+   * The owner stands behind a public statement, such as a canary: the words go
+   * on her public page, and their fingerprint on the register, so anyone can
+   * check that the page shows what she signed off.
+   */
+  setStatement(text: string): Promise<boolean> {
+    return this.run('Standing behind a public statement', ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
+      const w = this.world!;
+      const body = text.trim();
+      if (!body) throw new InputError('write the statement first');
+      if (body.length > 400) throw new InputError('keep the statement under 400 characters');
+      await stage('circuit');
+      await w.chain.callContract(w.register.address, 'state', { witnesses: sealsWitnesses(w.keeperSecret) }, sha256(utf8ToBytes(body)));
+      w.register.statement = { text: body, at: w.chain.now };
+      this.log(OWNER_NAME, 'Public statement updated', 'plain', ['A fingerprint of the statement'], ['Who wrote it', 'The words: they are on your public page, not on the chain']);
+      return 'Your public page shows the statement, and the register holds its fingerprint. Anyone can check that the two match.';
+    }, {
+      stages: { circuit: { label: 'Running the seal register on this device', detail: 'The compiled circuit checks that this device is the keeper, then records the fingerprint.' } },
+    });
+  }
+
+  private registerView(w: World): RegisterView {
+    const l = this.sealsLedger(w);
+    const st = w.register.statement;
+    return {
+      address: w.register.address,
+      vault: hex(l.vault.bytes),
+      keeperCommit: hex(l.keeperCommit),
+      seals: [...l.seals].map(([fp, seal]) => ({ fingerprint: hex(fp), needed: Number(seal.needed), pieces: Number(seal.pieces), sealedBefore: Number(seal.sealedBefore) })),
+      pieceChecks: Number(l.pieceChecks.size()),
+      handedOver: [...l.handedOver].map(([, p]) => ({ seal: hex(p.seal), x: Number(p.x), y: hex(p.y) })).sort((a, b) => a.seal.localeCompare(b.seal) || a.x - b.x),
+      statementFingerprint: hex(l.statement),
+      statement: st && { ...st, genuine: hex(sha256(utf8ToBytes(st.text))) === hex(l.statement) },
+      lastAttempt: w.register.lastAttempt,
+    };
   }
 
   // ─── Recovery key ─────────────────────────────────────────────────────────
@@ -1498,6 +1780,7 @@ class DemoStore {
         guardians: [], events: [],
         recovery: { state: 'off', readyAt: 0, delay: 0, lastStart: 0, nextKeyToSave: false, formerPasskey: false },
         heirs: [], messages: [], leafHashes: [], votedThisRound: [], activity: [], tx: this.tx, toast: this.toast,
+        register: { address: '', vault: '', keeperCommit: '', seals: [], pieceChecks: 0, handedOver: [], statementFingerprint: '0'.repeat(64) },
         position: { name: POSITION.name, address: '', vault: '', beneficiaryCommit: '', held: 0n, withdrawn: false, beneficiary: POSITION.beneficiary },
       };
     }
@@ -1571,12 +1854,20 @@ class DemoStore {
         };
       }),
       position: this.positionView(w),
-      messages: HEIRS.flatMap((h): MessageView[] => {
-        const m = w.messages.get(h.id);
-        return m ? [{
-          to: h.id, sealedAt: m.sealedAt, text: m.text, bytes: m.sealed.ciphertext.length, sealedStart: hex(m.sealed.ciphertext.slice(0, 24)),
-          needed: m.sealed.needed, holders: [...m.pieces.keys()], handed: [...m.handed.keys()], opened: m.opened,
-        }] : [];
+      register: this.registerView(w),
+      messages: MESSAGE_TO.flatMap((to): MessageView[] => {
+        const m = w.messages.get(to);
+        if (!m) return [];
+        const seals = this.sealsLedger(w);
+        const onLedger = m.fingerprint ? piecesHandedOver(seals, m.fingerprint).map((p) => p.x) : [];
+        return [{
+          to, via: m.via, sealedAt: m.sealedAt, text: m.text, bytes: m.sealed.ciphertext.length, sealedStart: hex(m.sealed.ciphertext.slice(0, 24)),
+          fingerprint: m.fingerprint && hex(m.fingerprint),
+          sealedBefore: m.fingerprint && seals.seals.member(m.fingerprint) ? Number(seals.seals.lookup(m.fingerprint).sealedBefore) : undefined,
+          needed: m.sealed.needed, holders: [...m.pieces.keys()],
+          handed: m.via === 'register' ? [...m.pieces].filter(([, p]) => onLedger.includes(p.x)).map(([id]) => id) : [...m.handed.keys()],
+          opened: m.opened,
+        }];
       }),
       leafHashes: leaves.map((leaf) => hex(pureCircuits.heirLeafHash(leaf))),
       votedThisRound: [...w.votedRound].filter(([, r]) => r === l.guardianRound).map(([id]) => id),

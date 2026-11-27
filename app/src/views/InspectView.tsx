@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import { Phase } from '@codicil/contracts/vault';
 import { HashChip, StateTag } from '../components/ui.js';
+import { SignalCard } from './Signal.js';
 import { checkInState, eventSummary } from '../demo/guide.js';
 import { days, fmtDate, span, spanAdj, TOKEN, type Snapshot } from '../demo/store.js';
 
@@ -61,6 +62,7 @@ export function InspectView({ s }: { s: Snapshot }) {
     ['Claims', <span key="c" className="mono">{claims} one-time stamp{claims === 1 ? '' : 's'}</span>, claims ? 'Each stamp stops a share being claimed twice. It says nothing about who claimed or which share it was.' : 'Nobody has claimed.'],
     ['Balance', <span key="b" className="mono">{s.estate.toLocaleString()} {TOKEN}</span>, s.phase === Phase.released ? `Payouts went to fresh addresses, so they can't be tied to the heirs or to each other.` : 'The total is public; how it divides is not.'],
     ['Linked contracts', <span key="l"><HashChip value={p.address} /> · <span className="mono">{p.held.toLocaleString()} {TOKEN}{p.withdrawn ? ', paid out' : ''}</span></span>, `Another contract, ${p.name}, asks this vault "released?" before it pays. The link and the amount are public. Its beneficiary is a sealed commitment, not a name or an address.`],
+    ['Seal register', <span key="r"><HashChip value={s.register.address} /> · <span className="mono">{s.register.seals.length} sealed · {s.register.handedOver.length} piece{s.register.handedOver.length === 1 ? '' : 's'} handed over</span></span>, 'Another contract asks this vault "released?" before it accepts a piece of a sealed message\'s key. It holds fingerprints and commitments: no message, no key, and nothing that says who a message is for.'],
   ];
 
   return (
@@ -82,6 +84,7 @@ export function InspectView({ s }: { s: Snapshot }) {
         <p className="err-inline" role="alert">No vault at that address on the demo chain. The demo has one vault, {`0x${s.chain.address.slice(0, 4)}…${s.chain.address.slice(-4)}`}.</p>
       ) : (
         <>
+          <SignalCard s={s} />
           <div className="inspect-state"><StateTag phase={s.phase} /></div>
           <dl className="inspect-rows">
             {rows.map(([key, value, meaning]) => (

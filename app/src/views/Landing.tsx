@@ -3,8 +3,8 @@
 //
 // The landing page: an ordinary scrolling website over a fixed field of points.
 // As each section reaches the middle of the screen the field morphs: a sphere
-// (the will), a cube (sealed), a ring (the clock), three clusters (the heirs)
-// and a flat ledger split into what is public and what is not.
+// (what you leave), a cube (sealed), a ring (the clock), three clusters (the
+// people you name) and a flat ledger split into what is public and what is not.
 
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { Brand, ThemeToggle } from '../components/ui.js';
@@ -213,20 +213,49 @@ function storyTime(anchors: HTMLElement[]): number {
 /** Where "Create your will" goes. */
 const APP = '#/app';
 const DEMO = '#/demo';
+const REPO = 'https://github.com/Evangel90/Codicil';
 
 /** What people do today, and how each goes wrong. */
 const TODAY: [string, string][] = [
-  ['Tell nobody', 'If only you know the keys, your crypto is gone the day you are. Nobody can recover it for your family, however much it is worth.'],
-  ['Write the keys down', 'A seed phrase in a will or a drawer can be used by anyone who reads it, long before you die: a relative, a clerk, a burglar.'],
-  ['Use a public contract', 'Inheritance contracts on other blockchains work, and publish everything: who your heirs are, what each will get, and how recently you were active.'],
+  ['Keep it to yourself', 'If only you hold the keys, the letter or the files, they are gone the day you are. Nobody can recover them for the people who needed them.'],
+  ['Hand it over early', 'A seed phrase in a drawer, or documents left with a friend, can be used or leaked long before you meant them to be.'],
+  ['Use a public contract', 'Switches like this exist on other blockchains. They work, and they publish everything: who is named, what each person gets, and how recently you were active.'],
+];
+
+/** The four things a vault can release, each as the person who would use it. */
+const USES: { who: string; kind: string; body: string; where: string }[] = [
+  {
+    who: 'A parent with savings',
+    kind: 'A will',
+    body: 'Amara keeps her savings in crypto. She names three heirs and the share each one gets. If she stops checking in, each of them claims their part with a letter she gave them. No heir sees what another one gets.',
+    where: 'In the live app on Midnight’s test networks, and in the guided demo.',
+  },
+  {
+    who: 'Someone with a letter to leave',
+    kind: 'A sealed message',
+    body: 'Some things are words: a letter to a daughter, or the recovery phrase of a wallet that is not in the vault. The message is locked on your device. The person it is for keeps the locked text and half of the key. Your guardians keep the other half, cut into pieces, and hand them over only after the vault releases.',
+    where: 'In the guided demo.',
+  },
+  {
+    who: 'A reporter who might be stopped',
+    kind: 'A public disclosure',
+    body: 'She seals her documents for everyone. A fingerprint of the sealed text goes on the chain that day, which later proves it existed before she went silent. A contract refuses every piece of the key until her vault has released. Once enough pieces are published, anyone can open the text.',
+    where: 'In the guided demo.',
+  },
+  {
+    who: 'An organisation with a canary',
+    kind: 'A signal',
+    body: 'Some organisations promise to say so if they are ever served a secret order, and go quiet when they no longer can. A vault makes that silence visible. Its public status reads still checking in, gone silent or released, and other Midnight contracts can act on it.',
+    where: 'Every vault has a public status. The guided demo shows it, and a contract that acts on it.',
+  },
 ];
 
 const STEPS: { t: number; title: string; body: string; rows: [string, string, 'pub' | 'priv' | 'txt'][] }[] = [
   {
     t: 1,
-    title: 'Name your heirs',
-    body: 'Choose who gets what share, and when: straight away, or on a date you pick, such as a child’s 21st birthday. Name a backup for anyone who might not be able to claim. The will is written and kept on your own device.',
-    rows: [['Takes', 'about ten minutes', 'txt'], ['You need', 'Face ID or Touch ID, and a Midnight wallet', 'txt'], ['Change the will', 'whenever you like', 'txt']],
+    title: 'Put what matters in a vault',
+    body: 'A vault can hold a will, a sealed message, a disclosure, or all three. You choose who receives each one. Everything is written and locked on your own device. The network is given fingerprints, never the contents.',
+    rows: [['Takes', 'about ten minutes', 'txt'], ['You need', 'Face ID or Touch ID, and a Midnight wallet', 'txt'], ['Change your mind', 'any time before it releases', 'txt']],
   },
   {
     t: 2,
@@ -237,14 +266,14 @@ const STEPS: { t: number; title: string; body: string; rows: [string, string, 'p
   {
     t: 3,
     title: 'If you stop, nothing happens fast',
-    body: 'A missed deadline starts a waiting period, two weeks unless you choose otherwise. One check-in during it cancels everything, so a month without signal or a false alarm costs you nothing. Guardians, a few people you trust, can start the same waiting period sooner if you die.',
-    rows: [['A missed deadline starts', 'a waiting period, not a payout', 'txt'], ['To cancel it', 'one check-in', 'txt'], ['Guardians can', 'start the wait early, and nothing else', 'txt']],
+    body: 'A missed deadline starts a waiting period, two weeks unless you choose otherwise. One check-in during it cancels everything, so a month without signal or a false alarm costs you nothing. Guardians, a few people you trust, can start the same waiting period sooner if they know something has happened to you.',
+    rows: [['A missed deadline starts', 'a waiting period, not a release', 'txt'], ['To cancel it', 'one check-in', 'txt'], ['Guardians can', 'start the wait early', 'txt']],
   },
   {
     t: 4,
-    title: 'Your heirs claim their share',
-    body: 'You give each heir a letter, printed or as a file. When the waiting period has ended they open Codicil, show the letter and receive their share at an address of their own. No heir sees what another one gets, and no lawyer or company has to approve anything.',
-    rows: [['An heir needs', 'their letter and their key', 'txt'], ['They can check the letter', 'any time, years ahead', 'txt'], ['If an heir cannot claim', 'their backup can, after a wait', 'txt']],
+    title: 'Then the vault releases',
+    body: 'Your heirs claim their shares with the letters you gave them. Your guardians hand over their pieces, and a sealed message opens for the one person it was written for, or a disclosure opens for everyone. No lawyer or company has to approve anything.',
+    rows: [['An heir needs', 'their letter and their key', 'txt'], ['A message opens with', 'pieces from enough guardians', 'txt'], ['If an heir cannot claim', 'their backup can, after a wait', 'txt']],
   },
 ];
 
@@ -255,23 +284,52 @@ const LEDGER: [string, string, string][] = [
   ['Guardians', 'root 0x51e0…9a3c, 2 must agree', 'Dr. Mensah, Sarah Lin, Tomás'],
   ['Claims', '1 one-time stamp', 'Ben claimed on 2 April'],
   ['Balance', '25,000 tokens', 'Ada 12,500, Ben 7,500, Cleo 5,000'],
+  ['Letter by hand', 'nothing', 'For Ada, 412 characters'],
+  ['Disclosure', 'fingerprint 0x9be2…41d7, 2 of 3', 'What the documents say'],
 ];
 
 const PEOPLE: [string, string, string][] = [
-  ['You', 'Write the will, fund the vault and check in. You can change your heirs, their shares or your guardians at any time, and nobody is told that you did.', 'You need your phone or laptop.'],
-  ['Your heirs', 'Keep the letter you give them somewhere safe. They can open Codicil and check that it is still valid whenever they like. When the time comes, the letter and their own key are all they need.', 'They need a letter and their key.'],
-  ['Your guardians', 'A doctor, a lawyer, a sibling: people who would know if you had died. If enough of them say so, the waiting period starts without waiting for your deadline. They cannot see the will, move money or stop you cancelling.', 'They need a secret you give them.'],
+  ['You', 'Set up the vault and check in. You can change your heirs, their shares, your guardians or a sealed message at any time before a release, and nobody is told that you did.', 'You need your phone or laptop.'],
+  ['The people you name', 'An heir keeps the letter you give them and can check it is still valid whenever they like. The person a sealed message is for keeps the locked text and their half of its key. Neither can do anything with it until the vault releases.', 'They need what you gave them, and their own key.'],
+  ['Your guardians', 'A doctor, a lawyer, a sibling: people who would know if something had happened to you. If enough of them say so, the waiting period starts without waiting for your deadline. They cannot see the will, move money or stop you cancelling. If you seal a message, each of them also holds one piece of its key.', 'They need a secret you give them.'],
 ];
 
-const REPO = 'https://github.com/Evangel90/Codicil';
+/** What another contract writes to build on a vault. Copied from contracts/src. */
+const BUILD: { title: string; body: string; code: string; file: string; link: string }[] = [
+  {
+    title: 'Ask a vault whether it has released',
+    body: 'One line lets any Midnight contract act on a release: a savings position that pays a beneficiary, a membership that passes on, an account that changes hands. The vault answers yes or no and reveals nothing else.',
+    code: 'contract CodicilVault {\n  circuit isReleasedForContract(): Boolean;\n}\n\nassert(vault.isReleasedForContract(), "vault not released");',
+    file: 'inheritable_escrow.compact',
+    link: 'The savings example, 52 lines',
+  },
+  {
+    title: 'Hand a key over only after a release',
+    body: 'The seal register sits beside a vault. It records a fingerprint of each sealed text and a commitment to every piece of its key. It refuses a piece until the vault has released, checks that the piece is genuine, then publishes it. Use it for anything that should unlock on a release: files, credentials, a decryption key.',
+    code: 'assert(vault.isReleasedForContract(), "vault not released");\nassert(pieceChecks.member(check), "not a genuine piece");',
+    file: 'codicil_seals.compact',
+    link: 'The seal register',
+  },
+];
+
+/** Said plainly, on the page, not only in the docs. */
+const LIMITS: [string, string][] = [
+  ['Guardians keep a promise', 'The seal register controls the public route, not the people. Guardians could share their pieces somewhere else. The number of guardians you require, acting together, could open a disclosure early. For a private message they would also need the person it is for. A message you replace or take back can still be opened by anyone who kept the old copies.'],
+  ['Silence is all it can see', 'A vault cannot tell why you stopped checking in. And someone who can force you to keep checking in can keep it shut.'],
+  ['Messages are in the guided demo', 'The live app creates wills. Sealed messages and public disclosures work in the guided demo and are not in the live app yet.'],
+  ['Test networks, not audited', 'Codicil runs on Midnight’s test networks, where tokens are free and worth nothing. Nobody has audited it. Treat it as a rehearsal.'],
+];
+
 const FAQ: [string, React.ReactNode][] = [
-  ['What if I am reported dead while I am alive?', 'Nothing is paid out. A report, like a missed deadline, only starts the waiting period. One check-in cancels it and wipes the report. Your heirs can claim only after the waiting period has ended without a word from you.'],
-  ['What if I lose my phone?', 'A passkey normally follows you to a new phone through iCloud Keychain or Google Password Manager. You can add a wallet as a second way to check in, and keep a recovery key on paper that installs a new passkey after a public delay. If you lose every one of them, the vault does what it would do if you had died: it releases to your heirs.'],
+  ['What if I am reported dead while I am alive?', 'Nothing is released. A report, like a missed deadline, only starts the waiting period. One check-in cancels it and wipes the report. A vault releases only after the waiting period has ended without a word from you.'],
+  ['What if I lose my phone?', 'Save the backup file when you create your vault. Your will and the keys that go with it live in your browser, and the backup is how you move them to another device. The passkey itself normally follows you through iCloud Keychain or Google Password Manager. The guided demo also has a recovery key on paper, which installs a new passkey after a public delay; the live app does not have it yet. With no device and no backup you can no longer check in, and the vault does what it would do if you had died: it releases to your heirs, provided they already have their letters.'],
   ['Can Codicil take my money or read my will?', <>No. Your will never leaves your device, and the funds sit in a contract that pays only by its rules: to an heir who proves their claim, after the waiting period. One thing to know while this is on a test network: the device that creates a vault keeps a maintenance key that could change the contract. Removing that key after set-up is planned. <a href={`${REPO}/blob/main/docs/THREAT_MODEL.md`}>What we protect against, and what we don’t yet</a>.</>],
+  ['Is anything about my message on the chain?', 'That depends on how you send it. A message delivered by hand leaves nothing on the chain, not even that it exists. A message sent through the seal register, and every public disclosure, records a fingerprint of the sealed text and how many pieces its key needs. That shows a sealed text exists and when it was sealed. It never shows what it says or who a private message is for.'],
+  ['Can my guardians read my message?', 'Not a private one. Its key has two halves and the person it is for holds one of them, so guardians alone cannot open it. A public disclosure has no single recipient, so the guardians’ pieces are the whole lock. Choose how many of them it takes with that in mind.'],
   ['What does it cost?', 'Network fees only. On Midnight they are paid in DUST, which your wallet generates by itself from the NIGHT it holds. Creating a vault takes eight small transactions; a check-in is one. Codicil takes nothing.'],
   ['What happens to my heirs if Codicil disappears?', <>Nothing changes for them. The vault is a contract on Midnight, not an account with us, and <a href={REPO}>the app is open source</a>. An heir needs their letter, their key and a copy of the app, which anyone can run.</>],
   ['Is this a legal will?', 'No. Codicil moves crypto you hold, by rules you set. Use it next to a legal will, not in place of one. Nothing here is legal advice.'],
-  ['Can I use it for real money today?', 'Not yet. Codicil runs on Midnight’s Preprod test network, where tokens are free and worth nothing. The whole path, from creating a vault to an heir’s claim, has been run there. It is not on mainnet and has not had a security audit, so treat it as a rehearsal.'],
+  ['Can I use it for real money today?', 'Not yet. Codicil runs on Midnight’s test networks, where tokens are free and worth nothing. A will has been run there from start to finish, from creating the vault to an heir’s claim. It is not on mainnet and has not had a security audit, so treat it as a rehearsal.'],
 ];
 
 // ─── Page ───────────────────────────────────────────────────────────────────
@@ -366,6 +424,7 @@ export function Landing() {
         <div className="lx-wrap lx-header-row">
           <Brand />
           <nav aria-label="On this page" className="lx-nav">
+            <button type="button" onClick={jump('uses')}>What it releases</button>
             <button type="button" onClick={jump('how')}>How it works</button>
             <button type="button" onClick={jump('privacy')}>What stays private</button>
             <button type="button" onClick={jump('questions')}>Questions</button>
@@ -380,25 +439,27 @@ export function Landing() {
       <main>
         <section className="lx-wrap lx-hero" data-t="0" aria-labelledby="lx-title">
           <div className="lx-hero-text">
-            <h1 id="lx-title" className="lx-h1 fade-in">Leave your crypto to the people you choose.</h1>
+            <h1 id="lx-title" className="lx-h1 fade-in">Decide what happens if you go silent.</h1>
             <p className="lx-lede fade-in" style={{ animationDelay: '150ms' }}>
-              Codicil is a will for crypto. You name your heirs and check in with Face ID now and then. If you ever stop,
-              they can claim what you left them. Until that day, nobody can see who they are or what they will get.
+              Codicil is a private switch on Midnight. You check in with Face ID now and then. If you ever stop, your
+              vault releases what you chose: money to your heirs, a letter to one person, or documents to everyone.
+              Until that day, nobody can tell what is inside, who it is for, or that it is yours.
             </p>
             <div className="lx-actions fade-in" style={{ animationDelay: '300ms' }}>
-              <a href={APP} className="btn btn-primary btn-lg">Create your will</a>
-              <a href={DEMO} className="btn btn-secondary btn-lg">Try the guided demo</a>
+              <a href={DEMO} className="btn btn-primary btn-lg">Try the guided demo</a>
+              <a href={APP} className="btn btn-secondary btn-lg">Create your will</a>
             </div>
             <p className="lx-note fade-in" style={{ animationDelay: '450ms' }}>
-              On Midnight’s test network for now: free test tokens, nothing real at risk.
+              The guided demo plays every kind of release in a few minutes. The live app creates wills on Midnight’s
+              test networks, with free test tokens and nothing real at risk.
             </p>
           </div>
         </section>
 
         <section className="lx-wrap lx-why" aria-labelledby="why-h">
           <div className="lx-intro">
-            <h2 id="why-h" className="lx-h2">Crypto has no next of kin</h2>
-            <p>A bank can be told that you have died. A wallet cannot. That leaves three ways to plan, and each one costs you something.</p>
+            <h2 id="why-h" className="lx-h2">Some things should happen only if you are gone</h2>
+            <p>Savings your family could not reach without you. A letter. Documents that must come out if you cannot publish them yourself. There are three ways to plan for that today, and each one costs you something.</p>
           </div>
           <dl className="lx-people-list">
             {TODAY.map(([plan, cost]) => (
@@ -410,10 +471,25 @@ export function Landing() {
           </dl>
         </section>
 
+        <section id="uses" className="lx-wrap lx-uses" data-t="1" aria-labelledby="uses-h">
+          <div className="lx-intro">
+            <h2 id="uses-h" className="lx-h2">One switch, four things it can release</h2>
+            <p>The rule is always the same: you check in, and if you stop, the vault releases. What it releases is up to you.</p>
+          </div>
+          <dl className="lx-people-list lx-uses-list">
+            {USES.map((u) => (
+              <div key={u.kind}>
+                <dt>{u.who}<span className="lx-kind">{u.kind}</span></dt>
+                <dd><p>{u.body}</p><p className="lx-needs">{u.where}</p></dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+
         <section id="how" className="lx-wrap lx-how" aria-labelledby="how-h">
           <div className="lx-intro">
             <h2 id="how-h" className="lx-h2">How Codicil works</h2>
-            <p>You keep your keys and your will. The network holds the funds and enforces the rules, without being shown who they are for.</p>
+            <p>You keep your keys and everything you write. The network holds the funds and enforces the rules, without being shown what they are for or who benefits.</p>
           </div>
           <ol className="lx-steps">
             {STEPS.map((s, i) => (
@@ -473,7 +549,9 @@ export function Landing() {
             </div>
           </div>
           <p className="lx-note">
-            Not hidden yet: how much a vault holds, and the size of each share at the moment it is claimed.{' '}
+            Not hidden: how much a vault holds, the size of each share at the moment it is claimed, and the fact that
+            a disclosure exists. Codicil uses zero-knowledge proofs, which let the network check a rule was followed
+            without being shown the details.{' '}
             <a href={`${REPO}/blob/main/docs/PRIVACY.md`}>Every field, explained</a>.
           </p>
         </section>
@@ -487,6 +565,37 @@ export function Landing() {
               <div key={who}>
                 <dt>{who}</dt>
                 <dd><p>{what}</p><p className="lx-needs">{needs}</p></dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+
+        <section className="lx-wrap lx-build" aria-labelledby="build-h">
+          <div className="lx-intro">
+            <h2 id="build-h" className="lx-h2">Build on it</h2>
+            <p>A vault’s release is something other Midnight contracts can use. There are two ways in, and both are a few lines.</p>
+          </div>
+          <div className="lx-build-list">
+            {BUILD.map((b) => (
+              <article key={b.file}>
+                <h3>{b.title}</h3>
+                <p>{b.body}</p>
+                <pre className="lx-code" tabIndex={0} aria-label={`From ${b.file}`}><code>{b.code}</code></pre>
+                <p className="lx-needs"><a href={`${REPO}/blob/main/contracts/src/${b.file}`}>{b.link}</a></p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="lx-wrap lx-limits" aria-labelledby="limits-h">
+          <div className="lx-intro">
+            <h2 id="limits-h" className="lx-h2">What it does not do</h2>
+          </div>
+          <dl className="lx-people-list lx-limits-list">
+            {LIMITS.map(([limit, detail]) => (
+              <div key={limit}>
+                <dt>{limit}</dt>
+                <dd><p>{detail}</p></dd>
               </div>
             ))}
           </dl>
@@ -508,10 +617,10 @@ export function Landing() {
 
         <section className="lx-wrap lx-cta" aria-labelledby="cta-h">
           <h2 id="cta-h" className="lx-h2">Set it up once. After that, it is one touch.</h2>
-          <p>Create your will on the test network in about ten minutes. Or watch one work first: the guided demo plays a whole inheritance, from the will to an heir’s claim, in five.</p>
+          <p>Watch it work first: the guided demo plays a will, a sealed letter and a public disclosure from start to release. When you are ready, create your will on a test network in about ten minutes.</p>
           <div className="lx-actions">
-            <a href={APP} className="btn btn-primary btn-lg">Create your will</a>
-            <a href={DEMO} className="btn btn-secondary btn-lg">Try the guided demo</a>
+            <a href={DEMO} className="btn btn-primary btn-lg">Try the guided demo</a>
+            <a href={APP} className="btn btn-secondary btn-lg">Create your will</a>
           </div>
         </section>
       </main>

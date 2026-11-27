@@ -8,12 +8,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { HashChip, Icon, ICONS, FACE_ID, Logo, Segmented } from '../components/ui.js';
 import {
-  DAY, days, defaultSetup, demo, fitSetup, fmtShort, graceChoices, GUARDIANS, HEIRS, MESSAGE_MAX, OWNER_NAME, recoveryDelayChoices, span,
-  type HeirProfile, type Snapshot, type VaultSetup,
+  DAY, days, defaultSetup, demo, fitSetup, fmtShort, graceChoices, GUARDIANS, HEIRS, MESSAGE_MAX, OWNER_NAME, recipientName, recoveryDelayChoices, span,
+  type MessageTo, type Snapshot, type VaultSetup,
 } from '../demo/store.js';
 import { PRESETS, presetFor } from '../demo/guide.js';
 import { recoveryKeyGroups } from '../demo/recoveryKey.js';
-import { MESSAGE_EXAMPLES } from './MessagesView.js';
+import { DISCLOSURE_EXAMPLES, MESSAGE_EXAMPLES } from './MessagesView.js';
 import { PlanSummary } from './PlanSummary.js';
 import { RecoveryKeySheet } from './RecoveryKeySheet.js';
 import { createDemoPasskey, createDevicePasskey, passkeySupport, type OwnerPasskey, type PasskeySupport } from '../demo/passkey.js';
@@ -50,7 +50,7 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
   const [keySaved, setKeySaved] = useState(false);
   const [sheet, setSheet] = useState(false);
   // A message written here is sealed on this device right after the vault exists.
-  const [noteTo, setNoteTo] = useState<HeirProfile['id']>('ada');
+  const [noteTo, setNoteTo] = useState<MessageTo>('ada');
   const [note, setNote] = useState('');
   useEffect(() => { void passkeySupport().then(setSupport); }, []);
 
@@ -63,7 +63,9 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
   const wantsKey = setup.recoveryDelay > 0;
   const recoveryKey = useMemo(() => (wantsKey ? demo.draftRecoveryKey() : ''), [wantsKey]);
   const delays = recoveryDelayChoices(setup.every);
-  const noteFor = HEIRS.find((h) => h.id === noteTo)!;
+  const noteOpen = noteTo === 'everyone';
+  const noteFor = { name: recipientName(noteTo) };
+  const noteExamples = noteOpen ? DISCLOSURE_EXAMPLES : MESSAGE_EXAMPLES.map((x) => ({ label: x.label, text: x.text(noteFor.name) }));
   const noteLength = note.trim().length;
   const noteOver = noteLength > MESSAGE_MAX;
   const holders = setup.guardians.length;
@@ -90,7 +92,7 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
     try {
       await demo.setUp(passkey, setup);
       if (noteLength > 0) {
-        const wrong = await demo.sealMessage(noteTo, note);
+        const wrong = await demo.sealMessage(noteTo, note, undefined, { quiet: true });
         if (wrong) setError(`Your vault is created, but the message was not sealed. ${wrong} You can seal it under Messages.`);
       }
     } catch (e) {
@@ -103,7 +105,9 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
   const blocked = (step === 0 && !passkey) || (step === 2 && (over || !!preview.problem)) || (step === RECOVERY && wantsKey && !keySaved) || (step === MESSAGE && noteOver);
   const [eyebrow, title, plainLede] = COPY[step];
   const lede = step === DEPLOY && noteLength > 0
-    ? `One confirmation creates your vault and seals the will. Your message for ${noteFor.name} is sealed on this device at the same moment, and never goes to the chain.`
+    ? (noteOpen
+      ? 'One confirmation creates your vault and seals the will. Your disclosure is sealed on this device at the same moment, and only its fingerprint goes to the chain.'
+      : `One confirmation creates your vault and seals the will. Your message for ${noteFor.name} is sealed on this device at the same moment, and never goes to the chain.`)
     : plainLede;
   const keyEnd = (id: string) => demo.heirKeyEnd(id as never);
 
@@ -378,26 +382,27 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
             <div className="card wiz-card">
               <label className="field-label">
                 Who is it for?
-                <select className="field" value={noteTo} onChange={(e) => setNoteTo(e.target.value as HeirProfile['id'])}>
+                <select className="field" value={noteTo} onChange={(e) => setNoteTo(e.target.value as MessageTo)}>
                   {HEIRS.map((h) => <option key={h.id} value={h.id}>{h.name}, {h.relation[0].toLowerCase() + h.relation.slice(1)}</option>)}
+                  <option value="everyone">Everyone, as a public disclosure</option>
                 </select>
               </label>
               <div className="stack-12">
                 <label className="field-label">
-                  Your message for {noteFor.name}
+                  {noteOpen ? 'Your disclosure, for everyone' : `Your message for ${noteFor.name}`}
                   <textarea
                     className="field msg-text" value={note} rows={8} aria-invalid={noteOver || undefined}
-                    placeholder={`Write to ${noteFor.name}. Only ${noteFor.name} will ever read this.`}
+                    placeholder={noteOpen ? 'Write what should come out if you can no longer say it yourself.' : `Write to ${noteFor.name}. Only ${noteFor.name} will ever read this.`}
                     onChange={(e) => setNote(e.target.value)}
                   />
                 </label>
                 <div className="msg-under">
                   <span className="small muted">
                     Or start from an example:{' '}
-                    {MESSAGE_EXAMPLES.map((x, i) => (
+                    {noteExamples.map((x, i) => (
                       <span key={x.label}>
-                        <button type="button" className="linkish" onClick={() => setNote(x.text(noteFor.name))}>{x.label.toLowerCase()}</button>
-                        {i < MESSAGE_EXAMPLES.length - 1 && ', '}
+                        <button type="button" className="linkish" onClick={() => setNote(x.text)}>{x.label.toLowerCase()}</button>
+                        {i < noteExamples.length - 1 && ', '}
                       </span>
                     ))}
                   </span>
@@ -407,13 +412,22 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
               </div>
               <div className="stack-8">
                 <h2 className="rk-title">How it stays shut</h2>
-                <ul className="plain-list">
-                  <li>It is locked on this device when you create the vault. Nothing about it goes on the chain, not even that it exists.</li>
-                  <li>{noteFor.name} keeps the locked text and half of the key. {holders === 1
-                    ? 'Your guardian keeps the other half'
-                    : `Your ${holders} guardians each keep a piece of the other half`} and {holders === 1 ? 'hands' : 'hand'} it over only after the vault releases{holders === 1 ? '' : `; ${setup.threshold} of them ${setup.threshold === 1 ? 'is' : 'are'} needed`}.</li>
-                  <li>It rests on that promise. {setup.threshold === 1 ? 'One guardian' : `Any ${setup.threshold} guardians`} and {noteFor.name}, acting together, could open it early, so choose guardians you trust with it.</li>
-                </ul>
+                {noteOpen ? (
+                  <ul className="plain-list">
+                    <li>It is locked on this device when you create the vault. The sealed text can be posted anywhere: without its key it is noise.</li>
+                    <li>A fingerprint of it goes on the chain, in a contract called the seal register. Later, that shows the text existed today and was not changed.</li>
+                    <li>{holders === 1 ? 'Your guardian keeps the key' : `Your ${holders} guardians each keep a piece of the key`}. The register refuses {holders === 1 ? 'it' : 'every piece'} until your vault has released. After that{holders === 1 ? '' : `, once ${setup.threshold} ${setup.threshold === 1 ? 'is' : 'are'} handed over`}, anyone can open the text.</li>
+                    <li>It rests on that promise. {setup.threshold === 1 ? 'One guardian' : `Any ${setup.threshold} guardians`}, acting together, could open it early, so choose guardians you trust with it.</li>
+                  </ul>
+                ) : (
+                  <ul className="plain-list">
+                    <li>It is locked on this device when you create the vault. Nothing about it goes on the chain, not even that it exists.</li>
+                    <li>{noteFor.name} keeps the locked text and half of the key. {holders === 1
+                      ? 'Your guardian keeps the other half'
+                      : `Your ${holders} guardians each keep a piece of the other half`} and {holders === 1 ? 'hands' : 'hand'} it over only after the vault releases{holders === 1 ? '' : `; ${setup.threshold} of them ${setup.threshold === 1 ? 'is' : 'are'} needed`}.</li>
+                    <li>It rests on that promise. {setup.threshold === 1 ? 'One guardian' : `Any ${setup.threshold} guardians`} and {noteFor.name}, acting together, could open it early, so choose guardians you trust with it.</li>
+                  </ul>
+                )}
               </div>
             </div>
           )}
@@ -428,7 +442,7 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
                 ['Guardians', `${setup.threshold} of ${GUARDIANS.length} must agree`, 3],
                 ['Timers', `Check in every ${days(setup.every)} days · ${setup.grace > 0 ? `${span(setup.grace)} of grace` : 'no grace period'} · ${days(setup.window)}-day challenge window`, 4],
                 ['Recovery key', wantsKey ? `Saved by you · takes effect after ${span(setup.recoveryDelay)}` : 'None', RECOVERY],
-                ['Sealed message', noteLength > 0 ? `${noteLine}. Kept off the chain.` : 'None', MESSAGE],
+                ['Sealed message', noteLength > 0 ? `${noteLine}. ${noteOpen ? 'Only its fingerprint goes on the chain.' : 'Kept off the chain.'}` : 'None', MESSAGE],
               ] as const).map(([k, v, go]) => (
                 <div key={k} className="review-row">
                   <span className="eyebrow">{k}</span>
@@ -464,7 +478,9 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
                   <p className="muted">Vault deployed. Your first check-in is due on {fmtShort(s.deadline)}.</p>
                   {s.messages.length > 0 && (
                     <p className="muted">
-                      Your message for {noteFor.name} is sealed too. It opens only after the vault releases, and only for {noteFor.name}.
+                      {noteOpen
+                        ? 'Your disclosure is sealed too, and its fingerprint is on the seal register. It opens only after the vault releases.'
+                        : `Your message for ${noteFor.name} is sealed too. It opens only after the vault releases, and only for ${noteFor.name}.`}
                     </p>
                   )}
                   {error && <p className="err-inline" role="alert">{error}</p>}
@@ -516,7 +532,7 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
               <div><dt>Recovery key</dt><dd className="mono">{preview.recoveryCommit ? `commit 0x${preview.recoveryCommit.slice(0, 4)}…${preview.recoveryCommit.slice(-4)}` : 'none'}</dd></div>
               {wantsKey && <div><dt>Recovery delay</dt><dd className="mono">{setup.recoveryDelay.toLocaleString('en-GB')} s</dd></div>}
               <div><dt>Release fee</dt><dd className="mono">none</dd></div>
-              <div><dt>Sealed message</dt><dd className="mono">nothing</dd></div>
+              <div><dt>Sealed message</dt><dd className="mono">{noteOpen && noteLength > 0 ? 'a fingerprint' : 'nothing'}</dd></div>
             </dl>
             <p className="small muted">
               The heirs root changes as you edit. It is a fingerprint of the whole will, computed by the real circuit, so it
