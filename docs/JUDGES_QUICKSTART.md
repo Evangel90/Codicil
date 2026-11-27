@@ -26,7 +26,7 @@ found, add `~/.local/bin` to your `PATH`.
 npm test
 ```
 
-Expected: four suites, **186 + 49 + 135 + 88 = 458 passed**, in about 20 seconds (one SDK test and
+Expected: four suites, **196 + 49 + 152 + 88 = 485 passed**, in about a minute (one SDK test and
 one network-script test are skipped on a fresh checkout: they need a local capture file and the
 proving keys). The contract suite
 checks every successful call against the compiled ZK circuit, so these are calls a proof can be made
@@ -39,14 +39,15 @@ npm run dev
 ```
 
 Open **http://localhost:5173** exactly (passkeys are bound to the site they were made on, and the
-vault is compiled for this address). Click **Launch the demo**.
+vault is compiled for this address). Click **Try the guided demo**. The demo opens on four stories.
+**Leave a will** is the full walk-through below. The other three start with a vault already made.
 
-The demo runs the real compiled vault, and an example contract that calls it, in your browser on a
+The demo runs the real compiled vault, and two contracts that call it, in your browser on a
 simulated chain whose clock you can move forward. Only proof generation and network fees are skipped.
 
 | Step | What to do | What it shows |
 |---|---|---|
-| 1 | In the wizard, **Register Face ID or Touch ID** (or use a demo key), then Continue through the steps and **Seal & deploy vault**. To try the newest features, choose a **3 days** grace period in step 5 and **Create a recovery key** in step 6 (both are off by default) | The side panel shows the real values that would go on-chain: commitments and roots, no names. The recovery key is shown once, to print or download |
+| 1 | Choose **Leave a will**. In the wizard, **Register Face ID or Touch ID** (or use a demo key), then Continue through the steps and **Seal & deploy vault**. To try the newest features, choose a **3 days** grace period in step 5 and **Create a recovery key** in step 6 (both are off by default) | The side panel shows the real values that would go on-chain: commitments and roots, no names. The recovery key is shown once, to print or download |
 | 2 | Press **I'm alive** | Your passkey signs; the circuit verifies the signature, the website and that Face ID was used |
 | 3 | Follow the **Next** line under the demo bar; it says whose turn it is | Guardians vote anonymously; Amara cancels with one touch |
 | 4 | **Skip to deadline** → **Start the switch** → **Skip challenge window** → **Release the will** | Anyone can trigger; the owner always has a window to veto |
@@ -57,6 +58,9 @@ simulated chain whose clock you can move forward. Only proof generation and netw
 | 9 | As Amara, **Settings** → **Change guardians or the attestor**: swap Tomás for Ngozi and save. Then act as guardian **Tomás** | One signed update replaces the guardians. It starts a new voting round, so earlier votes are void. Tomás's own app tells him he is no longer a guardian. Once a countdown has started the settings are locked |
 | 10 | With a recovery key: **Settings** → **Use the key Amara saved** → **Start the recovery**. Then either **Skip the recovery delay** → **Finish the recovery**, or go to **Vault** and check in | "I lost my passkey": a new passkey takes over after a public delay. Or the owner's side: an unmissable warning, one check-in cancels the recovery, and the recovery key is retired for good |
 | 11 | Act as **Ben**, load his letter, then as Amara change the will, then act as Ben again | The vault emits a `will-changed` event; Ben's page says his letter is out of date and what to do |
+| 12 | **Reset**, then choose **Seal a disclosure**. Press **documents to publish**, then **Seal for everyone**. Act as a **Guardian**, open **Messages** and press **Hand over through the register**. Then skip to the deadline, start the switch, skip the challenge window and release. Hand over as two guardians, act as **Anyone**, and **Open the disclosure** | A third contract, the seal register (`codicil_seals`), runs beside the vault. Sealing records a fingerprint and no words. Before the release the register refuses the piece with its own error, `vault not released`. After it, each piece is checked and published in a transaction that also runs the vault's check, and anyone can open the text from the ledger. **Send the register a made-up piece** is refused with `not a genuine piece` |
+| 13 | As Amara, **Messages** → **Write to Ben**, choose **By hand** or **Through the register**, and seal | By hand, nothing goes on the chain and the guardians learn who it is for. Through the register, the chain shows that a sealed text exists and the guardians never learn who it is for. Either way only Ben can open it |
+| 14 | **Reset**, then choose **Publish a canary**. Press **Use an example**, then **Stand behind this statement**. Act as **Anyone**, then **Skip to deadline** | The vault's public status read as a signal: "Still checking in", then "Gone silent". The statement's fingerprint is on the register, so the page cannot change it unnoticed |
 
 Shortcuts: **⌘K** (Ctrl+K) opens a command palette to check in, skip time or act as anyone.
 **Reset** starts again.
@@ -66,6 +70,7 @@ Shortcuts: **⌘K** (Ctrl+K) opens a command palette to check in, skip time or a
 | To check | Read |
 |---|---|
 | The contract | [`codicil_vault.compact`](../contracts/src/codicil_vault.compact): each circuit is commented; start at `checkInPasskey` and `claim` |
+| A contract that builds on the vault | [`codicil_seals.compact`](../contracts/src/codicil_seals.compact) and [`seals.test.ts`](../contracts/test/seals.test.ts); the guide is [BUILD_ON_CODICIL.md](BUILD_ON_CODICIL.md) |
 | Passkeys verified in a circuit | [`lib/WebAuthn.compact`](../contracts/src/lib/WebAuthn.compact) and the real Touch ID test [`webauthn-real.test.ts`](../contracts/test/webauthn-real.test.ts) |
 | Private state and witnesses | [`sdk/src/witnesses.ts`](../sdk/src/witnesses.ts) |
 | Public vs private | [PRIVACY.md](PRIVACY.md), including the leaks we have not removed yet |

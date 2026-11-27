@@ -33,10 +33,12 @@ results are written down ([VALIDATION.md](VALIDATION.md), [DECISIONS.md](DECISIO
    parameters, [D12](DECISIONS.md)) and deploy the static app.
 6. **Heirs create their own keys** on their own devices, and send the owner only a commitment.
    Today the owner's device generates them, in the demo and in live mode.
-7. **Sealed messages in live mode.** The demo seals a message for one person and opens it after the
-   release, with the key split among the guardians ([D20](DECISIONS.md)). Live mode needs the pieces
-   and the sealed text carried in the invitations, a way for a guardian to deliver a piece without
-   learning who it is for, and files as well as text.
+7. **Sealed messages, disclosures and the seal register in live mode.** The demo seals a message for
+   one person or for everyone, and hands the key's pieces over by hand or through the seal register
+   ([D20, D21](DECISIONS.md)). The register's circuits compile with full keys, and it has not been
+   deployed to a network. Live mode needs the register deployed beside a live vault, the sealed text
+   and the pieces carried in the guardian and heir invitations, and storage outside the app for
+   texts larger than a short message, and for files.
 
 ## Live mode: what it does not do yet
 
@@ -91,8 +93,9 @@ Stated plainly, so nobody relies on it for more than it is.
 ## Stretch (Phase 7)
 
 - **Unlinkable check-ins:** a liveness registry so observers cannot tell which vault checked in.
-- **Sealed digital legacy:** letters and passwords encrypted and stored on IPFS or Arweave, with the
-  key split among guardians and released with the will.
+- **Sealed files:** the demo seals short texts with the key split among guardians (D20, D21).
+  Larger files need the sealed bytes stored on IPFS or Arweave, with only the fingerprint on the
+  register.
 - **Executor disclosure:** prove single facts about the will to a court or tax authority without
   revealing the rest ([PRIVACY.md](PRIVACY.md)).
 

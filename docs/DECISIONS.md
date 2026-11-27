@@ -436,3 +436,76 @@ second set of key holders would be a second thing to set up and explain.
 **Not built yet.** Live mode has no messages. There, pieces and sealed text have to travel inside
 the guardian and heir invitations, and a guardian needs a way to deliver a piece without learning
 who the recipient is. Files, not only text, need storage outside the app.
+
+## D21: The seal register: key pieces can travel through a contract that asks the vault first (2026-11-27)
+
+**Problem.** D20 leaves two gaps. A guardian who hands a piece over by hand has to know who the
+recipient is, so the owner must tell every guardian who the message is for. And a message for
+everyone, such as a reporter's documents, has no single recipient to hand pieces to: it needs a
+public place where pieces appear only after the release, and a way for a reader to know the text
+was not written afterwards.
+
+**Decision.** A second contract, the seal register
+([`codicil_seals.compact`](../contracts/src/codicil_seals.compact)), sits beside a vault. When a
+message is sealed, the owner's device records a fingerprint of the sealed text and a commitment to
+every piece of its key. A commitment is a hash that fixes a value without showing it. After the
+release, a guardian sends a piece to the register's `handOver` circuit. The register asks the vault
+with `vault.isReleasedForContract()`, checks the piece against its commitment, and writes it to the
+public ledger. The reader collects the pieces from the ledger. The SDK side is
+[`sdk/src/seals.ts`](../sdk/src/seals.ts).
+
+This amends D20 and does not replace it. A message delivered by hand still leaves nothing on the
+chain, and stays the default for a message to one person. The owner chooses the route for each
+message. A public disclosure always goes through the register.
+
+**Why.**
+
+- A guardian no longer has to know who a message is for. They hand the piece to the contract from
+  any wallet. A private message still needs the half of the key only its recipient holds, so
+  publishing the guardians' pieces opens it for nobody else.
+- A wrong piece cannot be planted. The register accepts a piece only if it matches a commitment made
+  when the message was sealed.
+- The fingerprint shows the sealed text existed before the owner went silent, and that the copy a
+  reader holds was not changed.
+- A disclosure for everyone needs a channel everyone can read. The ledger is one, and the contract
+  keeps it shut until the release.
+
+**What goes on the chain.** Per sealed text: its fingerprint, how many pieces exist and how many are
+needed, a commitment to each piece, and a time the seal was recorded before. After the release: the
+pieces that guardians handed over. Separately, the fingerprint of a public statement the owner
+stands behind (the `state` circuit, used for a canary). The register also stores the vault's
+address and a commitment to the keeper's secret. The keeper is the owner's device, the only one
+that may seal or take a seal back.
+
+**What does not.** The message, the sealed text, the key, the recipient's half, who the recipient
+is, and who the guardians are.
+
+**Why one register per vault.** The register stores the vault it asks as a contract reference fixed
+in its constructor, the same pattern as the example escrow, which the tests already prove end to
+end. It keeps a vault's seals apart from everyone else's, and it lets the keeper be one secret.
+
+**Why piece commitments use the contract's `persistentHash`.** The register has to recompute a
+commitment inside the `handOver` circuit. `persistentHash` is the hash a Compact circuit can
+compute and whose result is stable across compiler versions. The SDK computes the same value with
+the contract's own generated `pieceCommitment` function, so the two cannot drift apart. The checks
+a recipient keeps off the chain (D20) are separate and unchanged.
+
+**Why "sealed before" and not "sealed at".** A Compact circuit cannot read the block time. It can
+only compare it. The owner's device proposes a time a few minutes ahead, and `seal` asserts
+`blockTimeLt(sealedBefore)`. The ledger therefore holds an upper bound: the block that accepted the
+seal was earlier than that time.
+
+**What it costs.**
+
+- A trace. The chain shows that a vault has a register, how many sealed texts it holds, and how
+  many pieces each needs. A message delivered by hand shows none of this.
+- One more contract to deploy for each vault that uses it.
+- It rules the public route and not the people. Guardians can still share pieces somewhere else.
+- A public disclosure has no recipient holding a half of the key. The needed number of guardians,
+  acting together, can open it early without anyone else.
+- Taking a seal back removes it from the register, so the register accepts no piece for it. Copies
+  of the old sealed text and old pieces that people kept still fit together.
+
+**Not built yet.** The register runs in the guided demo and in the contract tests. Key generation
+for its four circuits succeeds with the full compiler. It has not been deployed to a network, and
+live mode does not use it.

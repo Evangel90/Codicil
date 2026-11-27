@@ -14,9 +14,16 @@ passkey) or a **Cardano wallet**, verified inside a ZK circuit. If they stop, or
 guardians or a trusted attestor report their death, heirs can claim their share privately once the
 owner has had a chance to veto.
 
+The same switch releases more than money. A vault can also release **a sealed message** for one
+person (a letter, a recovery phrase), **a public disclosure** for everyone (a reporter's documents
+that must come out if she is stopped), and **a signal**: its public status works as a canary, and
+any Midnight contract can ask it "have you released?" with one line. Messages, disclosures and the
+canary run in the guided demo today. The live app on a test network creates wills.
+[Build on it](docs/BUILD_ON_CODICIL.md).
+
 > **Status (Wave 3, in progress):** the vault contract, SDK and web app are built and tested. That
 > covers passkey and wallet check-ins, multi-heir wills with tranches and backup heirs, hidden k-of-n
-> guardians, the attestation trigger and the cross-contract hook: 419 tests, every contract call
+> guardians, the attestation trigger and the cross-contract hook: 485 tests, every contract call
 > checked against its ZK circuit, plus browser tests that check in with Chrome's real WebAuthn. On
 > 26 November 2026 the vault ran end to end on **Preprod**: deploy, both kinds of check-in, release,
 > a claim and the cross-contract withdrawal ([results](preprod/results/v14-preprod.md), vault
@@ -24,7 +31,9 @@ owner has had a chance to veto.
 > their own vault on Preview or Preprod through the Lace wallet
 > ([how to try it](#try-it-on-a-test-network)); its store and chain code ran that whole story on
 > Preview with a wallet built from a seed. It has not yet been run with the Lace extension itself,
-> and a check-in from a browser is not yet proven on a network.
+> and a check-in from a browser is not yet proven on a network. Sealed messages, public
+> disclosures, the canary and the seal register contract run in the guided demo only: the register
+> compiles with full proving keys and is not deployed to a network.
 > See [What changed this Wave](#what-changed-this-wave).
 > Demo video and deck: *coming*.
 
@@ -42,7 +51,7 @@ curl --proto '=https' --tlsv1.2 -LsSf \
 compact update 0.36.1
 npm ci
 npm run compile     # compiles the Compact contracts (--skip-zk: seconds, not minutes)
-npm test            # contracts, SDK and app, about 10 s
+npm test            # contracts, SDK and app, about a minute
 npm run dev         # the web app at http://localhost:5173
 ```
 
@@ -50,13 +59,19 @@ npm run dev         # the web app at http://localhost:5173
 
 `npm run dev`, then open **http://localhost:5173** (use exactly this address: passkeys are bound to
 the site they were made on, and the vault was compiled for it). The demo runs the **real vault
-contract in your browser** on a simulated chain with a clock you can fast-forward. Only proof
-generation and network fees are skipped.
+contract in your browser**, with two contracts that call it, on a simulated chain with a clock you
+can fast-forward. Only proof generation and network fees are skipped.
 
-1. **Create a vault** in the nine-step wizard: register Face ID / Touch ID (or a demo key), set the
+The demo opens on four stories: **Leave a will**, **Seal a disclosure**, **Publish a canary** and
+**Make a contract wait for the release**. The will is set up by hand in the steps below. The other
+three start with a vault already made and open on the screen the story is about (steps 9, 10 and 7).
+**Reset** returns to the four stories.
+
+1. Choose **Leave a will** and **create a vault** in the nine-step wizard: register Face ID / Touch ID (or a demo key), set the
    shares, the guardian threshold and the timers (or start from a Careful / Balanced / Quick preset).
    Three choices are optional and off by default: a **grace period** (step 5), a **recovery key**
-   (step 6), which is shown once to print or download, and a **sealed message** for one person (step 7).
+   (step 6), which is shown once to print or download, and a **sealed message** for one person or for
+   everyone (step 7).
    The review step reads the will back in plain words and flags risky choices. The side panel shows the real heirs root and
    commitments that would go on-chain, recomputed as you edit.
 2. **I'm alive**: your passkey signs the check-in, and the circuit verifies the signature, the
@@ -77,23 +92,40 @@ generation and network fees are skipped.
    holds tokens for Ben and calls the vault before it pays. Before the release it refuses with its
    own error, `vault not released`; after, the same button pays. The screen shows the one line of
    Compact that makes any contract inheritable.
-8. Open the **Messages** tab as the owner and seal a message for one person: a letter, a recovery
-   phrase, documents to publish. It is encrypted in your browser, and half of its key is split among
-   the guardians. Before the release the recipient cannot open it and a guardian's app keeps its
-   piece; after, two guardians hand theirs over and the recipient reads it. None of it is a
-   transaction, and the Privacy Lens shows the chain has no record of it.
-9. On the owner's **Settings** tab: add, remove or replace **guardians**, change how many must
+8. Open the **Messages** tab as the owner and seal a message for one person: a letter or a recovery
+   phrase. It is encrypted in your browser, and half of its key is split among the guardians. Choose
+   how the pieces travel. **By hand**: before the release a guardian's app keeps its piece; after,
+   two guardians hand theirs over and the recipient reads it. None of it is a transaction, and the
+   Privacy Lens shows the chain has no record of it. **Through the register**: the pieces go through
+   a third contract, the compiled `codicil_seals`, so the guardians never learn who the message is
+   for, and the chain shows a fingerprint and nothing about the message.
+9. Seal a **public disclosure** (the **Everyone** row, or the "Seal a disclosure" story): a text for
+   everyone, such as documents to publish. Sealing is a transaction that records a fingerprint and
+   no words. As a guardian, **Hand over through the register** before the release: the register
+   asks the vault and refuses with its own error, `vault not released`. After the release two
+   guardians hand over, each in a transaction that also runs the vault's check, and then anyone,
+   with no key, can **Open the disclosure**. **Send the register a made-up piece** is refused.
+10. Publish a **canary** (the "A public signal" card on the Messages tab, or the "Publish a canary"
+   story): stand behind a statement, then **Act as Anyone**. The public page reads "Still checking
+   in" beside the statement. Skip to the deadline and it reads "Gone silent", and says the statement
+   no longer holds.
+11. On the owner's **Settings** tab: add, remove or replace **guardians**, change how many must
    agree, or name an attestor, all in one update signed like a check-in. It starts a new voting
    round and is locked once a countdown has started. With a recovery key, play **"I lost my
    passkey"**: start a recovery with the saved key, then either skip the delay and finish it (the new
    passkey works, the old one is refused) or check in as Amara, which cancels it and retires the key
    for good. While a recovery is in progress her dashboard shows a warning that cannot be missed.
-10. Open the **Privacy Lens** at any point: the real public ledger beside what only the owner's
+12. Open the **Privacy Lens** at any point: the real public ledger beside what only the owner's
    device knows. Or **Act as Anyone** for the public inspector: what a stranger can learn from the
-   vault address alone.
-11. The owner can download check-in reminders as a calendar file, made on the device, so no server
+   vault address alone. Both show the seal register.
+13. The owner can download check-in reminders as a calendar file, made on the device, so no server
    learns the deadline.
-12. Press **⌘K** (Ctrl+K) to do anything from the keyboard: check in, skip ahead, act as anyone.
+14. Press **⌘K** (Ctrl+K) to do anything from the keyboard: check in, skip ahead, act as anyone.
+
+What is real in the demo and what is not: the contracts are the compiled ones, the passkey is real
+when the browser supports it, and the encryption and key splitting of sealed messages are real.
+Proofs and fees are skipped, the chain is in memory, and every person's device is the same browser
+tab, so a piece "arrives" at once.
 
 `npm run compile:full` also generates the proving keys (several minutes; sizes in
 [docs/VALIDATION.md](docs/VALIDATION.md)).
@@ -177,11 +209,13 @@ flowchart LR
     subgraph Chain["Midnight (public ledger)"]
       V["codicil_vault<br/>commitments · will root · deadline · nullifiers"]
       E["any contract, e.g. inheritable_escrow"]
+      R["codicil_seals<br/>fingerprints · piece commitments"]
     end
     K --> SDK
     W --> SDK
     SDK -- "ZK proof (no secrets)" --> V
     E -- "isReleasedForContract()" --> V
+    R -- "isReleasedForContract()" --> V
 ```
 
 - **Owner** registers a passkey and/or a Cardano wallet. Only salted *commitments* to the keys go
@@ -212,11 +246,12 @@ Repository layout:
 | [`contracts/src/lib/WebAuthn.compact`](contracts/src/lib/WebAuthn.compact) | Passkey (WebAuthn) verification in-circuit |
 | [`contracts/src/lib/Cip30.compact`](contracts/src/lib/Cip30.compact) | Cardano CIP-30 wallet signature verification in-circuit |
 | [`contracts/src/inheritable_escrow.compact`](contracts/src/inheritable_escrow.compact) | Example: any contract becomes inheritable with one call |
+| [`contracts/src/codicil_seals.compact`](contracts/src/codicil_seals.compact) | The seal register: hands over the pieces of a sealed message's key only after the vault has released |
 | [`contracts/test/`](contracts/test) | Simulator, property and cross-contract tests |
 | [`sdk/src/`](sdk/src) | Witnesses, will builder, passkey/wallet conversion, error catalogue |
 | [`codicil-spike/`](codicil-spike) | Phase 0 validation spike (gates V1–V15) |
 | [`tools/webauthn-capture/`](tools/webauthn-capture) | Page used to capture real passkey and wallet signatures |
-| [`docs/`](docs) | [Architecture](docs/ARCHITECTURE.md), [privacy](docs/PRIVACY.md), [threat model](docs/THREAT_MODEL.md), [testing](docs/TESTING.md), [validation](docs/VALIDATION.md), [decisions](docs/DECISIONS.md), [errors](docs/ERRORS.md), [roadmap](docs/ROADMAP.md), [business](docs/BUSINESS.md), [progress by Wave](docs/WAVES.md) |
+| [`docs/`](docs) | [Architecture](docs/ARCHITECTURE.md), [privacy](docs/PRIVACY.md), [threat model](docs/THREAT_MODEL.md), [testing](docs/TESTING.md), [validation](docs/VALIDATION.md), [decisions](docs/DECISIONS.md), [errors](docs/ERRORS.md), [roadmap](docs/ROADMAP.md), [business](docs/BUSINESS.md), [progress by Wave](docs/WAVES.md), [building on Codicil](docs/BUILD_ON_CODICIL.md) |
 
 ## Midnight integration
 
@@ -231,7 +266,7 @@ Repository layout:
 | **Ed25519** `ed25519Verify` (Ledger 9) | Cardano wallet (CIP-30) check-ins | [`lib/Cip30.compact:38`](contracts/src/lib/Cip30.compact#L38) |
 | **Curve25519** `ecMulGenerator` (Ledger 9) | Heirs prove they hold their key | [`codicil_vault.compact:370`](contracts/src/codicil_vault.compact#L370) |
 | **`kernel.caller()`** (Ledger 9) | The integrator hook answers only contracts | [`codicil_vault.compact:350`](contracts/src/codicil_vault.compact#L350) |
-| **Cross-contract calls** (Ledger 9) | `inheritable_escrow` asks the vault before paying out | [`inheritable_escrow.compact:49`](contracts/src/inheritable_escrow.compact#L49) |
+| **Cross-contract calls** (Ledger 9) | `inheritable_escrow` asks the vault before paying out; `codicil_seals` asks it before accepting a piece of a key | [`inheritable_escrow.compact:49`](contracts/src/inheritable_escrow.compact#L49), [`codicil_seals.compact:113`](contracts/src/codicil_seals.compact#L113) |
 | **Events** `emit` (Ledger 9) | Heir apps and indexers learn of a release | [`codicil_vault.compact:344`](contracts/src/codicil_vault.compact#L344) |
 | Block time (`blockTimeGte` / `blockTimeLt`) | Deadlines, challenge window, tranches | [`codicil_vault.compact:218`](contracts/src/codicil_vault.compact#L218) |
 | Unshielded tokens (`receiveUnshielded` / `sendUnshielded`) | Hold the estate, pay heirs | [`codicil_vault.compact:277`](contracts/src/codicil_vault.compact#L277), [`:388`](contracts/src/codicil_vault.compact#L388) |
@@ -247,6 +282,8 @@ Repository layout:
 | Guardian identities and votes | Private; only the Merkle root, threshold and a vote count on-chain | Each guardian knows only themselves |
 | Claims | Public nullifier; payout to an address the heir chooses | Everyone sees *that* a share was claimed, not by which heir |
 | Payout amount | Public (unshielded transfer) | Everyone. Hiding amounts is on the roadmap ([D4, D8](docs/DECISIONS.md)) |
+| A sealed message delivered by hand | Private; nothing on-chain | The recipient, after the release. Nobody can tell that it exists |
+| A sealed message or disclosure through the seal register | The text is private; a fingerprint, the number of pieces and a commitment to each are on-chain; after the release, the pieces | Everyone sees that a sealed text exists. A private message opens only for its recipient. A public disclosure opens for anyone once enough pieces are handed over ([D21](docs/DECISIONS.md)) |
 
 Every ledger field and transaction, and what each reveals: [docs/PRIVACY.md](docs/PRIVACY.md).
 Threats and mitigations, each linked to the test that demonstrates it: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
@@ -273,11 +310,12 @@ this call can be generated", not just "the JavaScript ran".
 | [`settings.test.ts`](contracts/test/settings.test.ts) | Owner-signed replacement of guardians and attestor: votes and attestations voided, replay, other vault, tampered values, wrong key, when it is locked |
 | [`recovery.test.ts`](contracts/test/recovery.test.ts) | Recovery key: new owner keys after a public delay, cancelled by any owner signature, never delays the switch, restarts, timestamps, limits |
 | [`escrow.test.ts`](contracts/test/escrow.test.ts) | Cross-contract hook: two proofs in one transaction |
+| [`seals.test.ts`](contracts/test/seals.test.ts) | The seal register: every piece refused before the release, genuine pieces published after it through a proven vault sub-call, made-up pieces refused, no secret in its public state |
 | [`webauthn-real.test.ts`](contracts/test/webauthn-real.test.ts) | Real Touch ID assertions verified by the vault's own WebAuthn module |
 | [`errors.test.ts`](contracts/test/errors.test.ts) | Every contract error has a friendly UI message and is documented |
 | [`sdk/test`](sdk/test) | Passkey/wallet format conversion, will builder, witnesses, heir letter encoding and checking against the will root |
-| [`app/test`](app/test/demo.test.ts) | The whole demo story through the app's own store: wizard setup and preview, check-ins, veto, guardian rounds, release, claims, tranche, backup, retries; who acts next, the plain-words summary and its warnings, presets, letters held by heirs (stale after a will change, announced by the will-changed event), calendar reminders, the command palette; the savings contract that calls the vault (refused before the release, paid after); the grace period (late but fine, the switch held back, the full window kept); changing guardians and the attestor (new round, locked during a countdown); the recovery key (its text form, recover with a new passkey, cancelled and retired by any owner signature) |
-| [`app/e2e`](app/e2e/demo.spec.ts) | In Chrome: the setup wizard with a passkey (virtual authenticator), check-in through the real WebAuthn API, a refused and then a successful cross-contract withdrawal, will change and letter, guardian votes, release, loading and checking a letter, the command palette, claim, public inspector, privacy lens; a late check-in inside the grace period; a recovery the owner cancels; replacing a guardian; a lost passkey recovered with the saved key. `npm run e2e` |
+| [`app/test`](app/test/demo.test.ts) | The whole demo story through the app's own store: wizard setup and preview, check-ins, veto, guardian rounds, release, claims, tranche, backup, retries; who acts next, the plain-words summary and its warnings, presets, letters held by heirs (stale after a will change, announced by the will-changed event), calendar reminders, the command palette; the savings contract that calls the vault (refused before the release, paid after); the grace period (late but fine, the switch held back, the full window kept); changing guardians and the attestor (new round, locked during a countdown); the recovery key (its text form, recover with a new passkey, cancelled and retired by any owner signature); sealed messages by hand; the seal register (a public disclosure refused before the release and opened by anyone after it, a private message through the register, the canary) |
+| [`app/e2e`](app/e2e/demo.spec.ts) | In Chrome: the setup wizard with a passkey (virtual authenticator), check-in through the real WebAuthn API, a refused and then a successful cross-contract withdrawal, will change and letter, guardian votes, release, loading and checking a letter, the command palette, claim, public inspector, privacy lens; a late check-in inside the grace period; a recovery the owner cancels; replacing a guardian; a lost passkey recovered with the saved key; a sealed message by hand; a public disclosure through the seal register; a canary. `npm run e2e` |
 
 The property tests already found one design flaw, now fixed ([D9](docs/DECISIONS.md)). How to run each
 level, and the bugs the tests caught: [docs/TESTING.md](docs/TESTING.md).
@@ -312,8 +350,10 @@ Design decisions: [docs/DECISIONS.md](docs/DECISIONS.md). Error catalogue: [docs
 2. In the app: writing a will from scratch, and heirs creating their own keys on their own devices.
 3. A recovery that can outlast a deadline, and owner-signed rotation of a single lost key
    ([D18](docs/DECISIONS.md)).
-4. Stretch: unlinkable check-ins, a sealed digital legacy (encrypted letters with keys split among
-   guardians), and executor disclosures for courts and tax authorities.
+4. Sealed messages, public disclosures and the seal register in live mode: today they run in the
+   guided demo ([D20, D21](docs/DECISIONS.md)).
+5. Stretch: unlinkable check-ins, sealed files stored off the chain, and executor disclosures for
+   courts and tax authorities.
 
 Milestones and status: [docs/ROADMAP.md](docs/ROADMAP.md). Customers, go-to-market and revenue:
 [docs/BUSINESS.md](docs/BUSINESS.md).
@@ -338,7 +378,11 @@ Milestones and status: [docs/ROADMAP.md](docs/ROADMAP.md). Customers, go-to-mark
   invitations that let an heir claim and a guardian vote from their own browser, passphrase-locked
   backups, and a plain message for everything that can go wrong. Its store and chain code ran end
   to end on Preview with a wallet from a seed (`npm run live:e2e`).
-- 419 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
+- More than a will, in the guided demo: sealed messages for one person, delivered by hand or through
+  a new contract, the seal register (`codicil_seals`), which accepts a piece of a key only after
+  the vault has released; a public disclosure anyone can open after the release; and the vault's
+  public status read as a canary. The demo opens on four stories.
+- 485 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
   CI on every push.
 - Docs: architecture, privacy (every field and transaction), a threat model mapping each threat to
   the test that covers it, testing, roadmap, business and a judges' quickstart. Details: [docs/WAVES.md](docs/WAVES.md).

@@ -60,6 +60,15 @@ or death-registry service), **any third party** (every trigger is permissionless
   or removed can still be opened after a release by anyone who kept the old pieces and the old
   sealed text. An owner under duress can be made to keep checking in, which keeps a message shut.
   This is unaudited: do not rely on it where someone's safety depends on a disclosure.
+- **The seal register rules the public route, not the people.** A message can travel through the
+  seal register, a contract that accepts a piece of its key only after the vault has released
+  (D21). That stops a piece being published through the register early, and stops a made-up piece
+  being recorded. It does not stop guardians sharing pieces anywhere else. A public disclosure has
+  no recipient holding half of the key, so the needed number of guardians alone can open it early.
+  The register leaves a trace: anyone can see that a vault has sealed texts, how many, and how many
+  pieces each needs, though not what they say or who they are for. Once a piece is handed over it
+  is public for good. A seal taken back is removed from the register, but kept copies of old pieces
+  and old sealed text still fit together. The register is unaudited and runs only in the demo.
 - **The maintenance key can change the vault's rules.** Like every contract deployed through
   Midnight.js, the vault has a maintenance authority: a key that can insert and remove circuits'
   verifier keys. The staged deployment uses it for a few minutes (D19). Afterwards it is a standing

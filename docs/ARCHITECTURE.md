@@ -21,12 +21,14 @@ flowchart TB
     subgraph Chain["Midnight public ledger"]
       V["codicil_vault<br/>commitments · will root · deadline<br/>guardian root · nullifiers · estate"]
       E["inheritable_escrow (or any contract)"]
+      R["codicil_seals<br/>fingerprints · piece commitments<br/>pieces handed over"]
     end
     O --> WB & SG
     H --> LT
     O & H & G --> WI
     WI -- "ZK proof + public transcript" --> V
     E -- "isReleasedForContract()" --> V
+    R -- "isReleasedForContract()" --> V
 ```
 
 ## Repository layout
@@ -37,6 +39,7 @@ flowchart TB
 | [`contracts/src/lib/WebAuthn.compact`](../contracts/src/lib/WebAuthn.compact) | Passkey assertion verification, generic over the site origin's lengths |
 | [`contracts/src/lib/Cip30.compact`](../contracts/src/lib/Cip30.compact) | Cardano CIP-30 `signData` verification (COSE_Sign1, plain Ed25519) |
 | [`contracts/src/inheritable_escrow.compact`](../contracts/src/inheritable_escrow.compact) | Example integrator using a cross-contract call |
+| [`contracts/src/codicil_seals.compact`](../contracts/src/codicil_seals.compact) | The seal register: hands over the pieces of a sealed message's key only after the vault has released ([D21](DECISIONS.md)) |
 | [`contracts/test/`](../contracts/test) | Simulator tests; every successful call is also checked against the ZK circuit |
 | [`sdk/src/`](../sdk/src) | Keys, commitments, will builder, witnesses, signing, letters, error catalogue |
 | [`sdk/src/staged-deploy.ts`](../sdk/src/staged-deploy.ts) | Deploying the vault in stages, resumably; shared by the app and the Preprod script ([D19](DECISIONS.md)) |
@@ -234,7 +237,25 @@ started one. A recovery that could not finish before the deadline is refused whe
 its beneficiary. Any Midnight contract can make a position inheritable this way. Both proofs go in
 one transaction ([`escrow.test.ts`](../contracts/test/escrow.test.ts)). The demo's **Savings** tab
 runs this for real: the compiled escrow next to the compiled vault, refused before the release and
-paid after it.
+paid after it. [BUILD_ON_CODICIL.md](BUILD_ON_CODICIL.md) shows the lines to copy.
+
+### The seal register
+
+`codicil_seals` uses the same hook for words instead of money. A sealed message is encrypted off
+the chain, and the guardians hold the pieces of half of its key ([D20](DECISIONS.md)). The register
+is one of two routes for those pieces ([D21](DECISIONS.md)). It has four circuits:
+
+| Circuit | Who | What it does |
+|---|---|---|
+| `seal` | The keeper (the owner's device) | Records a fingerprint of the sealed text, how many pieces exist and are needed, a commitment to each piece (eight at most), and a time the seal was recorded before |
+| `unseal` | The keeper | Removes a seal. Refused once the vault has released |
+| `handOver` | Anyone holding a piece | Asks the vault whether it has released, checks the piece against its commitment, and writes it to the public ledger |
+| `state` | The keeper | Records the fingerprint of a public statement, such as a canary |
+
+The register never receives a message or a key. A reader collects the pieces from its ledger and
+opens the text on their own device. Tests: [`seals.test.ts`](../contracts/test/seals.test.ts). The
+demo's **Messages** tab runs the compiled register next to the compiled vault. It is not deployed
+to a network and live mode does not use it.
 
 ## The SDK
 
@@ -249,6 +270,8 @@ paid after it.
 | [`recovery.ts`](../sdk/src/recovery.ts) | Recovery secret, its commitment, config limits and `recoveryStatus()` from public ledger fields |
 | [`witnesses.ts`](../sdk/src/witnesses.ts) | `CodicilPrivateState` and the witness functions the circuits call |
 | [`letter.ts`](../sdk/src/letter.ts) | Heir letter encoding, decoding, fingerprint and on-device check |
+| [`sealed.ts`](../sdk/src/sealed.ts) | Sealed messages: AES-256-GCM, a key in two halves, Shamir's scheme for the guardians' half, the sealed text as text and its fingerprint |
+| [`seals.ts`](../sdk/src/seals.ts) | The seal register from outside: arguments for `seal` and `handOver`, piece commitments, reading handed-over pieces from its ledger |
 | [`errors.ts`](../sdk/src/errors.ts) | Every contract `assert` message mapped to plain language ([ERRORS.md](ERRORS.md)) |
 | [`events.ts`](../sdk/src/events.ts) | Names of the events the vault emits, and `vaultEventName()` to recognise one |
 
@@ -258,9 +281,12 @@ The app is React + Vite with hand-written CSS tokens (the "Obsidian" design: dar
 works on phones).
 
 - **Landing page** (`#/`): a scrolling page over a WebGL point field that changes shape with each section.
-- **Demo** (`#/demo`): a nine-step setup wizard, then the vault from four points of view: the
-  owner (Amara), an heir (Ada, Ben, Cleo, Kofi), a guardian, and "Anyone" (the public inspector).
-  The owner has three more tabs: Will, Settings (guardians, attestor and the recovery key) and Savings.
+- **Demo** (`#/demo`): it opens on four stories: leave a will, seal a disclosure, publish a canary,
+  make a contract wait for the release. The will runs a nine-step setup wizard. The other three
+  start with a vault already made. Then the vault is shown from four points of view: the owner
+  (Amara), an heir (Ada, Ben, Cleo, Kofi), a guardian, and "Anyone" (the public inspector). Everyone
+  has Savings, Messages and Privacy Lens tabs. The owner also has Will and Settings (guardians,
+  attestor and the recovery key).
 - **Live mode** (`#/app`): a real vault on a Midnight test network, through the person's own Lace
   wallet. Three ways in: create a vault, open an invitation as an heir or a guardian, or restore a
   backup file. See [Two chains and the wallet boundary](#two-chains-and-the-wallet-boundary).
@@ -278,6 +304,12 @@ and is the state and module provider for cross-contract calls, so a withdrawal r
 circuit and, inside it, the vault's `isReleasedForContract` circuit against the vault's current
 state. The runtime's cross-contract path uses Node's `Buffer` for hex, so
 [`buffer-shim.ts`](../app/src/demo/buffer-shim.ts) supplies those two conversions in the browser.
+
+It holds a third compiled contract, `codicil_seals`, deployed with the vault. Sealing a message
+through the register, taking it back, handing over a piece and recording a public statement each
+run its circuits, and `handOver` and `unseal` run the vault's `isReleasedForContract` inside them.
+The encryption and key splitting are real ([`sdk/src/sealed.ts`](../sdk/src/sealed.ts)). What the
+demo simulates is delivery between people: everyone's device is in one browser tab.
 
 [`app/src/demo/store.ts`](../app/src/demo/store.ts) holds the world (chain, keys, will, letters held
 by heirs, the proof each guardian holds, the saved recovery key) and exposes it to React through

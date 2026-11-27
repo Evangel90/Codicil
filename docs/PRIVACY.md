@@ -101,6 +101,30 @@ We state these plainly rather than hide them ([D4](DECISIONS.md), [D8](DECISIONS
    What a Midnight fee payment reveals about the payer is checked as part of the Preprod test (V14).
    Until then, assume an owner should check in from a wallet that is not publicly theirs.
 
+## Sealed messages and the seal register
+
+A sealed message is encrypted on the owner's device. How its key reaches the reader decides what
+the chain shows ([D20, D21](DECISIONS.md)). Both routes run in the guided demo only.
+
+**By hand.** Nothing is on the chain: not the message, not that one exists, not who it is for.
+The guardians learn who the recipient is, because they hand their pieces to that person.
+
+**Through the seal register** ([`codicil_seals.compact`](../contracts/src/codicil_seals.compact)).
+The register's public ledger, field by field:
+
+| Field | What it holds | What it reveals |
+|---|---|---|
+| `vault` | The vault this register asks | That this vault has a register |
+| `keeperCommit` | A commitment to a secret on the owner's device | Nothing about the owner |
+| `seals` | For each sealed text: its fingerprint, how many pieces exist, how many are needed, and a time it was recorded before | That a sealed text exists, and roughly when. Not what it says, how long it is, or who it is for |
+| `pieceChecks` | A commitment to each piece of each key | How many pieces there are in all. Not the pieces |
+| `handedOver` | Pieces handed over after the release | The pieces themselves. A private message still needs the half only its recipient holds. A public disclosure opens for anyone once enough are here |
+| `statement` | The fingerprint of a public statement, or zeros | That the owner stands behind some statement. The words are on the owner's page, not on the chain |
+
+A guardian who hands over through the register sends a transaction from any wallet. The contract
+records the piece and its number, and nothing about who sent it. What a transaction's fee payment
+reveals is leak 10 above. The guardian never learns who a message is for.
+
 ## Why the heir's letter is safe to lose
 
 A letter holds the vault address, one will entry and its Merkle path. Someone who finds it learns

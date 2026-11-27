@@ -44,7 +44,16 @@ wallet, for real people: the owner's own heirs and guardians, real timers, a sta
 resumes, invitations for heirs and guardians, backups ([ARCHITECTURE](ARCHITECTURE.md#two-chains-and-the-wallet-boundary)).
 Its store and chain code ran end to end on Preview with a wallet built from a seed.
 
-**Not done yet, stated plainly:** a run of live mode with the Lace extension itself (our tooling
+**More than a will.** In the guided demo a vault also releases words and a signal: sealed messages
+for one person, delivered by hand or through a new contract, the seal register
+([`codicil_seals.compact`](../contracts/src/codicil_seals.compact), [D21](DECISIONS.md)); a public
+disclosure anyone can open once the vault has released; and the vault's public status read as a
+canary. The register accepts a piece of a key only after the vault says it has released, with the
+same cross-contract call the savings example uses. It compiles with full proving keys and is not
+deployed to a network. For developers: [BUILD_ON_CODICIL.md](BUILD_ON_CODICIL.md).
+
+**Not done yet, stated plainly:** sealed messages, disclosures and the seal register in live mode,
+a run of live mode with the Lace extension itself (our tooling
 cannot click an extension), a check-in from a browser on a network (the first attempt crashed the
 tab; the fix is untested on a network), a run of live mode on Preprod, changing a sealed will in
 live mode,

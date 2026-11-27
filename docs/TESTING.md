@@ -15,11 +15,11 @@ npm run e2e          # builds the app and runs Playwright in Chrome
 
 | Level | Command | Count | Time |
 |---|---|---|---|
-| Contract simulator + ZK constraint checks | `npm test -w @codicil/contracts` | 186 | ~6 s |
+| Contract simulator + ZK constraint checks | `npm test -w @codicil/contracts` | 196 | ~6 s |
 | SDK | `npm test -w @codicil/sdk` | 49 | ~1 s |
-| App logic (the demo store, the live store and helpers) | `npm test -w @codicil/app` | 135 | ~15 s |
+| App logic (the demo store, the live store and helpers) | `npm test -w @codicil/app` | 152 | ~40 s |
 | Network script, offline parts | `npm test -w @codicil/preprod` | 88 (one more when the proving keys are present) | ~3 s |
-| Browser end-to-end | `npm run e2e` | 10 (one more, on a network, is opt-in) | ~90 s |
+| Browser end-to-end | `npm run e2e` | 14 (one more, on a network, is opt-in) | ~2 min |
 | Live mode on a real network | `npm run live:e2e` | 14 transactions | ~13 min |
 | Full compile with proving keys | `npm run compile:full` | 16 circuits | several minutes |
 
@@ -51,6 +51,7 @@ in the SDK and a row in [ERRORS.md](ERRORS.md).
 | [`settings.test.ts`](../contracts/test/settings.test.ts) | 28 | Owner-signed replacement of guardians, threshold and attestor, by passkey and by wallet: votes and attestations voided, replay, another vault, tampered values, approvals for other actions, wrong key, forged signature, when it is locked, and a byte search of the transcript |
 | [`webauthn-real.test.ts`](../contracts/test/webauthn-real.test.ts) | 6 | Real Touch ID assertions captured in Chrome on macOS, verified by the vault's own WebAuthn module, including Chrome's long `clientDataJSON` form |
 | [`escrow.test.ts`](../contracts/test/escrow.test.ts) | 5 | Cross-contract call: the escrow asks the vault, two proofs in one transaction |
+| [`seals.test.ts`](../contracts/test/seals.test.ts) | 10 | The seal register (D21): a seal records a fingerprint and piece commitments and no secret (a byte search of its whole public state); every piece is refused while the vault is armed or pending; after the release a genuine piece is published through a proven vault sub-call and the message opens from the ledger; a made-up piece, a piece under the wrong number and another message's piece are refused; only the keeper seals; bad piece counts and a late seal are refused; a seal taken back accepts no piece, and cannot be taken back after the release; the public statement |
 | [`errors.test.ts`](../contracts/test/errors.test.ts) | 5 | Every contract error is mapped and documented |
 | [`properties.test.ts`](../contracts/test/properties.test.ts) | 5 | fast-check: random wills, estates, fees and claim orders never overpay; a fully allocated will leaves only rounding dust, whatever the fee; the owner can always veto, with any grace period; during the grace period the owner can always check in; a recovery never completes early and an owner with a key can always cancel it |
 
@@ -67,6 +68,10 @@ secret possible, 255 pieces work, and pieces that cannot belong together are ref
 message opens with any needed pieces, not with fewer, not with a forged piece (which is named), not
 with another message's pieces, not by the guardians without the recipient's half, and not after the
 sealed text, its nonce or its vault is changed.
+
+The register's SDK helpers ([`sdk/src/seals.ts`](../sdk/src/seals.ts)) and the sealed text's
+fingerprint and text form are exercised by the contract suite's
+[`seals.test.ts`](../contracts/test/seals.test.ts), which needs both contracts.
 
 ## 3. App tests
 
@@ -105,7 +110,17 @@ sealed text, its nonce or its vault is changed.
   pending; the recipient cannot open with their half alone; after the release any two of three
   pieces open it and one does not; a check-in that cancels the switch keeps it shut; changing the
   guardians seals it again so the removed guardian holds nothing; and the guidance and palette
-  commands for the screen.
+  commands for the screen. These are messages delivered by hand.
+- [`register.test.ts`](../app/test/register.test.ts): the seal register in the demo, with the real
+  cross-contract call. It is deployed with the vault and fixed to it. A public disclosure is sealed
+  in a transaction that publishes a fingerprint and commitments and none of the words; before the
+  release the register refuses a guardian's genuine piece and a made-up one with `vault not
+  released`; after it, two guardians' pieces are published with both circuits in the trace, and the
+  text opens from the ledger; a made-up piece is refused with `not a genuine piece`; a disclosure
+  can be replaced or taken back while armed and not after the release. A private message through
+  the register opens only for its recipient and nothing public names them. Changing the guardians
+  replaces the seal. The vault read as a signal (checking in, silent, released), and a public
+  statement that puts only a fingerprint on the register.
 
 Live mode has two more files. They run the **live store** on the in-memory chain, which is the same
 store the app runs on a network: only the host behind the chain boundary differs
@@ -147,7 +162,7 @@ address comparison in the script's own payout check.
 
 [`app/e2e/demo.spec.ts`](../app/e2e/demo.spec.ts) runs in Chrome with a **CDP virtual authenticator**,
 so the passkey goes through the browser's real WebAuthn API and is verified by the circuit. The story:
-landing page → wizard with a passkey → check in → a withdrawal from the savings contract, refused
+landing page → the choice of four stories → wizard with a passkey → check in → a withdrawal from the savings contract, refused
 because the vault is armed → change the will → open a letter → guardian votes
 and veto → the ⌘K palette → timeout and release → Ben loads and checks his letter (a bad letter is
 rejected first) → claim → the same withdrawal, now paid through the cross-contract call → public
@@ -167,6 +182,15 @@ creates a second passkey in the virtual authenticator → the delay is skipped a
 for Ada with no transaction → the Privacy Lens shows nothing on the public side → Ada cannot open
 it and a guardian's app refuses to hand over its piece → timeout and release → one guardian's piece
 is not enough, a second is → Ada opens it with real decryption in the browser, and Ben sees nothing.
+**A message written in the wizard** is sealed with the vault, for Ben, and is absent from the public
+side of the Privacy Lens. **A public disclosure:** the demo starts from the "Seal a disclosure"
+story → the owner seals a text for everyone through the seal register → the Privacy Lens shows one
+fingerprint and three commitments and none of the words → the register refuses a guardian's piece
+with `vault not released`, and nobody can open the text → timeout and release → two guardians hand
+their pieces over, each in a transaction that runs the vault's check and the register → a made-up
+piece is refused → anyone opens the text from the ledger. **A canary:** from the "Publish a canary"
+story the owner stands behind a statement → anyone reads "Still checking in" beside it → after a
+missed check-in the same page says "Gone silent" and that the statement no longer holds.
 
 [`app/e2e/live.spec.ts`](../app/e2e/live.spec.ts) opens live mode with a stand-in for the Lace
 extension under `window.midnight`, shaped as the DApp connector 4.1.0 types describe. No wallet: it
