@@ -2,9 +2,10 @@
 
 Status: **complete**.
 
-- Generated: 2026-11-26T00:52:03.125Z
-- Vault contract: `df8ba3d21b106c41d9deb603c58e97101716595d22bbc351882dfc90c0c6f6d4`
-- Escrow contract: `aceee253536d2932a0cb116be7feeaaa61d84bfd41334b544cd1138cade1cdd4`
+- Generated: 2026-11-27T11:48:53.330Z
+- Vault contract: `39cba0b46d2a8baadf6e765005392f0edadc7259928a59eec78dbbce02e9864f`
+- Seal register: `d709181d7c271477f322b159474a6491b21cb1381054703636e1ef8aa11f0598`
+- Sealed text fingerprint on the register: `b457509beb147f2c8c89b9f7e208cc96b42c75046749ee87e38e9dab4710b5d5`
 - Test wallet: `mn_addr_preview1ucfa5n7sadm7xtfhdukmqt30fd2a375q8lmtmhyl8dp7wv4eep5s22l0fp`
 - Timers: first deadline 1200 s, max period 1200 s, final period 300 s, challenge window 120 s
 - Midnight.js: 5.0.1
@@ -17,42 +18,56 @@ Status: **complete**.
 
 | step            | block  | tx hash                                                          | status          | prove s | balance s | confirm s | total s | fee DUST  |
 | --------------- | ------ | ---------------------------------------------------------------- | --------------- | ------- | --------- | --------- | ------- | --------- |
-| deploy          | 272832 | 46dc33d1d44180e106be7a77a1f2a812eded26f776d5e437f6b0ce2b5e40b2c2 | SucceedEntirely | 0.0     | 0.8       | 1.0       | 160.4   | 12.827226 |
-| deposit         | 272859 | dc9134b9c9305b3c046a67a52044846756086f63911641417b8246067f3262fc | SucceedEntirely | 2.1     | 1.0       | 1.1       | 23.0    | 0.425159  |
-| checkInPasskey  | 272867 | 40ec872c8e997bcbb5c2cfa2bb909294a3fdcb233aa1edeb2ffbdeff6e1ec279 | SucceedEntirely | 27.9    | 0.9       | 1.3       | 48.2    | 0.252700  |
-| checkInEd25519  | 272873 | 497ce2763d0b95b8d8003bb29870e4028498d450c2aa9bcd70fea21e39298e53 | SucceedEntirely | 15.6    | 0.8       | 1.2       | 35.9    | 0.262027  |
-| triggerTimeout  | 272924 | e6d23ff5273d039fa6682a5fc7a1d3ab307fe5f46f4c9a90e2c0bdb96adeeeaa | SucceedEntirely | 0.4     | 1.1       | 1.3       | 305.8   | 0.240717  |
-| finalizeRelease | 272944 | ecfd18186225c0673dbeaa209cb3e543634889df2cc4539e932c4ee8b3b1a3a6 | SucceedEntirely | 2.2     | 1.1       | 1.3       | 120.1   | 0.254556  |
-| claim           | 272949 | 3d307ebfaf6868dd2674cd9f143095d6d8cd3bd650f6b655376e275fcbe06a66 | SucceedEntirely | 6.7     | 1.0       | 1.3       | 30.7    | 0.530826  |
+| deploy          | 293774 | 1081d7d03ced62ec25c0191bbecf760e5f0774deb4a4d5d1e12f35d3121af7ac | SucceedEntirely | 0.0     | 1.2       | 1.2       | 186.1   | 12.831157 |
+| deposit         | 293805 | 275acdf6a3ef2dd9411e040451d16527e28f46f9b2f0fbbabaf07388dbec80b4 | SucceedEntirely | 0.7     | 2.0       | 1.3       | 21.3    | 0.425159  |
+| checkInPasskey  | 293818 | ed4178f1da04c9fd30f8f482a3a7469cb399e2f63c766af520bad4362acc578d | SucceedEntirely | 56.4    | 1.1       | 1.6       | 79.0    | 0.252949  |
+| sealsDeploy     | 293822 | 5d87d816a723cc38bb3915e7143e4d7a824884eec286e9f992645561ad5bea26 | SucceedEntirely | 0.0     | 1.6       | 0.9       | 23.4    | 5.609038  |
+| sealsSeal       | 293826 | 4d5e57053d4109b8387ef5ca7c01ace84f1d08d2877d4ffc33a9761e86a43246 | SucceedEntirely | 1.6     | 2.4       | 1.2       | 24.3    | 0.711978  |
+| sealsRefused    | -      | -                                                                | no tx           | -       | -         | -         | 2.0     | -         |
+| checkInEd25519  | 293834 | 3b6f6449d3a723de520bd30405181159d0c87b925e6a7a4d2b05380ad0044eb7 | SucceedEntirely | 25.8    | 1.7       | 1.7       | 46.6    | 0.261769  |
+| triggerTimeout  | 293883 | 3c626c95af723473b560094b4b7dcd60c5eaa8ca3ff3bc14823a897faa2a501b | SucceedEntirely | 0.5     | 1.1       | 1.8       | 293.8   | 0.240677  |
+| finalizeRelease | 293903 | 56f364555c7c0f8c20b3cbf04f5b263f91c710109e916e95f688f72396415741 | SucceedEntirely | 0.7     | 1.3       | 1.4       | 119.8   | 0.254556  |
+| claim           | 293909 | f872b424bb6d31b0e4741261a112cc7e15c628c5bd1a376564c827725b03644f | SucceedEntirely | 10.0    | 1.7       | 1.7       | 36.4    | 0.530861  |
 | readEvents      | -      | -                                                                | no tx           | -       | -         | -         | 0.3     | -         |
-| escrowDeploy    | 272953 | e8c41e57cc1d19a17331fa2cafe87eae267c6ad0b64dc82c918117ca7bb8e777 | SucceedEntirely | 0.0     | 0.8       | 0.8       | 22.1    | 2.876202  |
-| escrowDeposit   | 272957 | efc7ff6df64808032de7294ca991047a4e54026ecd56ec0b9bcf86aa31c03ee5 | SucceedEntirely | 0.4     | 1.5       | 1.0       | 22.9    | 0.473568  |
-| escrowWithdraw  | 272961 | 59959b95e21dc2b7deafe61ab7f4f774d9f0c9f8e21d4b4d14a712672d125825 | SucceedEntirely | 1.9     | 1.0       | 0.9       | 25.2    | 0.503287  |
+| sealsHandOver1  | 293913 | b8ce11b896259bfa8ec36a9de8e784816816bc15b325ad4cd4fcbbb6de043064 | SucceedEntirely | 1.6     | 1.1       | 1.4       | 23.4    | 0.526045  |
+| sealsHandOver2  | 293917 | 0dd79e59edd74dc7b929b9c5c7cd8ad16ca537dfed7e080c05e8359a2fe1ce0a | SucceedEntirely | 1.2     | 1.2       | 1.3       | 24.0    | 0.605277  |
+| sealsOpen       | -      | -                                                                | no tx           | -       | -         | -         | 2.4     | -         |
 
-Totals: 10 transactions, 18.646274 DUST in fees, 57.1 s proving contract circuits, 794.7 s in steps (waits excluded).
+Totals: 11 transactions, 22.249471 DUST in fees, 98.3 s proving contract circuits, 882.6 s in steps (waits excluded).
 
-Release event read back from the indexer (gate V13): `codicil:released:v1`, type Misc, event id 160700, payload version 1, protocol version 2001100.
+Release event read back from the indexer (gate V13): `codicil:released:v1`, type Misc, event id 186462, payload version 1, protocol version 2001100.
 
 ## Notes
 
-- deploy: vault address df8ba3d21b106c41d9deb603c58e97101716595d22bbc351882dfc90c0c6f6d4
-- deploy: first deadline 2026-11-26T00:58:46.000Z
-- deploy: deployed in 8 transactions: all at once it would use 97% of a block's write limit, so 7 verifier keys were inserted afterwards (updateSettingsEd25519 63b9449c1cc613d84cfb9c49fd76d0f8e8a2a2527acc8ab62965b31b64972dae; updateSettingsPasskey 785de9cfc481a1e5019d2041d557cf58392128a5ea7c7ccf95b32dbc61345126; startRecovery e76926b695e8c409b7ae9efd7d9bf0c04fcf1e87867aad004a4876e0230ea0b3; finishRecovery 146c3180a6f8ead0e8af67a8ec57fa3cb20bb245a442f0baeb7d71f193b9872c; updateWillEd25519 d3a1571d17f3fef5928084dd52266133d511009b038d418650d070c22cbdfa69; updateWillPasskey 774c540f715976973e44b390ca8abd8812f82d26e57c57edcfd583fdbfb51dd6; triggerAttestation aa0d49d485234e46c3f5f5212ec183a97929e0f06d84435b72fb61d268963287)
+- deploy: vault address 39cba0b46d2a8baadf6e765005392f0edadc7259928a59eec78dbbce02e9864f
+- deploy: first deadline 2026-11-27T11:54:09.000Z
+- deploy: deployed in 8 transactions: all at once it would use 97% of a block's write limit, so 7 verifier keys were inserted afterwards (updateSettingsEd25519 17dbc0c93a7bcd3ecee067145a97c6d9b7ea9defa3dc16b22509adde95851b44; updateSettingsPasskey 76a411431e85ad0b19413b815ce239e0e906128fc172f043445fcf4069d751e8; startRecovery 649a92e19f0747585f6a58f53a969689e32c103119b408797d8a938ea1a8e9af; finishRecovery 16a4f792f439ecfa68c88432d67b1960ba5083049da32a56c8ff559d99e8987a; updateWillEd25519 ce6d7dcfe321f04fbb57a5b4481b92f3b8389a2452612e2577df4b4ce7bf5731; updateWillPasskey 9903e141f730558643db66a61c411885e8c3779c32f43cc725ac37b2dd38bcaf; triggerAttestation ffe38a1b648d5012e2673303f64ed4d57958cc4e243e39427d31023d9694f2a4)
 - deposit: deposited 10.000000 tNIGHT; the indexer shows the vault holding 10.000000
 - checkInPasskey: WebAuthn-format assertion (software P-256 key, origin and UV flag as compiled) verified in-circuit
-- checkInPasskey: deadline moved from 1795654726 to 1795654851; nonce 0 → 1
+- checkInPasskey: deadline moved from 1795780449 to 1795780598; nonce 0 → 1
+- sealsDeploy: seal register address d709181d7c271477f322b159474a6491b21cb1381054703636e1ef8aa11f0598, vault 39cba0b46d2a8baadf6e765005392f0edadc7259928a59eec78dbbce02e9864f
+- sealsSeal: 2 proofs in one transaction, callee first: 39cba0b4…:isReleasedForContract, d709181d…:seal
+- sealsSeal: sealed 87 characters on this machine; the key's guardian half is cut into 3 pieces, 2 needed
+- sealsSeal: fingerprint b457509beb147f2c8c89b9f7e208cc96b42c75046749ee87e38e9dab4710b5d5, recorded as sealed before 2026-11-27T11:49:21.000Z
+- sealsSeal: the register's ledger holds 3 piece commitments and 0 pieces: no text, no key
+- sealsRefused: a genuine piece was refused while the vault is armed: the register asked the vault and stopped with "vault not released"
+- sealsRefused: the call failed on this machine against the chain's state, so nothing was proven or sent; pieces on the ledger: 0
 - checkInEd25519: CIP-30-format signature (software Ed25519 key over the 119-byte Sig_structure) verified in-circuit
-- checkInEd25519: deadline moved from 1795654851 to 1795654059 (5 min after it was built); nonce 1 → 2
-- triggerTimeout: deadline 1795654059 passed; vault is pending until 1795654179
-- finalizeRelease: released at 1795654179; estate snapshot 10.000000 tNIGHT
+- checkInEd25519: deadline moved from 1795780598 to 1795779887 (5 min after it was built); nonce 1 → 2
+- triggerTimeout: deadline 1795779887 passed; vault is pending until 1795780007
+- finalizeRelease: released at 1795780007; estate snapshot 10.000000 tNIGHT
 - finalizeRelease: 1 event(s) emitted while executing the circuit
 - claim: heir 0 (6000 bps of 10.000000) claimed 6.000000 tNIGHT to mn_addr_preview1ucfa5n7sadm7xtfhdukmqt30fd2a375q8lmtmhyl8dp7wv4eep5s22l0fp
 - claim: estatePaid 0.000000 → 6.000000
-- claim: the indexer's record of this transaction lists 1 created UTXO(s), none matching the payout exactly: check by hand
-- readEvents: indexer returned the "codicil:released:v1" event (id 160700) for the vault
-- readEvents: found by the finalizeRelease transaction hash ecfd18186225c0673dbeaa209cb3e543634889df2cc4539e932c4ee8b3b1a3a6
-- escrowDeploy: escrow address aceee253536d2932a0cb116be7feeaaa61d84bfd41334b544cd1138cade1cdd4, vault df8ba3d21b106c41d9deb603c58e97101716595d22bbc351882dfc90c0c6f6d4
-- escrowDeposit: deposited 5.000000 tNIGHT into the escrow
-- escrowWithdraw: 2 proofs in one transaction, callee first: df8ba3d2…:isReleasedForContract, aceee253…:withdrawToBeneficiary
-- escrowWithdraw: withdrew 5.000000 tNIGHT to the test wallet once the vault answered "released"
-- escrowWithdraw: the indexer lists the matching unshielded UTXO in this transaction
+- claim: the indexer lists a new unshielded UTXO of 6.000000 tNIGHT owned by the test wallet in this transaction
+- readEvents: indexer returned the "codicil:released:v1" event (id 186462) for the vault
+- readEvents: found by the finalizeRelease transaction hash 56f364555c7c0f8c20b3cbf04f5b263f91c710109e916e95f688f72396415741
+- sealsHandOver1: 2 proofs in one transaction, callee first: 39cba0b4…:isReleasedForContract, d709181d…:handOver
+- sealsHandOver1: piece 3 of 3 was checked against its commitment and written to the register's public ledger, by a caller holding no keeper secret
+- sealsHandOver1: pieces on the ledger for this text: 3 (2 needed)
+- sealsHandOver2: 2 proofs in one transaction, callee first: 39cba0b4…:isReleasedForContract, d709181d…:handOver
+- sealsHandOver2: piece 1 of 3 was checked against its commitment and written to the register's public ledger, by a caller holding no keeper secret
+- sealsHandOver2: pieces on the ledger for this text: 1, 3 (2 needed)
+- sealsOpen: read pieces 1 and 3 from the register's public ledger, rebuilt the key and opened the sealed text: it is the 87 characters that were sealed
+- sealsOpen: a made-up piece was refused after the release too: "not a genuine piece" (nothing was proven or sent)
+- sealsOpen: the keeper could not seal another text after the release: "vault released" (nothing was proven or sent)

@@ -1,11 +1,12 @@
 {
   "gate": "V14",
   "network": "preview",
-  "generatedAt": "2026-11-26T00:52:03.125Z",
+  "generatedAt": "2026-11-27T11:48:53.330Z",
   "complete": true,
   "remaining": [],
-  "vaultAddress": "df8ba3d21b106c41d9deb603c58e97101716595d22bbc351882dfc90c0c6f6d4",
-  "escrowAddress": "aceee253536d2932a0cb116be7feeaaa61d84bfd41334b544cd1138cade1cdd4",
+  "vaultAddress": "39cba0b46d2a8baadf6e765005392f0edadc7259928a59eec78dbbce02e9864f",
+  "sealsAddress": "d709181d7c271477f322b159474a6491b21cb1381054703636e1ef8aa11f0598",
+  "sealsFingerprint": "b457509beb147f2c8c89b9f7e208cc96b42c75046749ee87e38e9dab4710b5d5",
   "walletAddress": "mn_addr_preview1ucfa5n7sadm7xtfhdukmqt30fd2a375q8lmtmhyl8dp7wv4eep5s22l0fp",
   "timers": {
     "firstDeadlineS": 1200,
@@ -26,261 +27,312 @@
   "steps": [
     {
       "step": "deploy",
-      "startedAt": "2026-11-26T00:38:46.171Z",
-      "finishedAt": "2026-11-26T00:41:26.565Z",
-      "totalMs": 160394,
+      "startedAt": "2026-11-27T11:34:09.151Z",
+      "finishedAt": "2026-11-27T11:37:15.202Z",
+      "totalMs": 186051,
       "notes": [
-        "vault address df8ba3d21b106c41d9deb603c58e97101716595d22bbc351882dfc90c0c6f6d4",
-        "first deadline 2026-11-26T00:58:46.000Z",
-        "deployed in 8 transactions: all at once it would use 97% of a block's write limit, so 7 verifier keys were inserted afterwards (updateSettingsEd25519 63b9449c1cc613d84cfb9c49fd76d0f8e8a2a2527acc8ab62965b31b64972dae; updateSettingsPasskey 785de9cfc481a1e5019d2041d557cf58392128a5ea7c7ccf95b32dbc61345126; startRecovery e76926b695e8c409b7ae9efd7d9bf0c04fcf1e87867aad004a4876e0230ea0b3; finishRecovery 146c3180a6f8ead0e8af67a8ec57fa3cb20bb245a442f0baeb7d71f193b9872c; updateWillEd25519 d3a1571d17f3fef5928084dd52266133d511009b038d418650d070c22cbdfa69; updateWillPasskey 774c540f715976973e44b390ca8abd8812f82d26e57c57edcfd583fdbfb51dd6; triggerAttestation aa0d49d485234e46c3f5f5212ec183a97929e0f06d84435b72fb61d268963287)"
+        "vault address 39cba0b46d2a8baadf6e765005392f0edadc7259928a59eec78dbbce02e9864f",
+        "first deadline 2026-11-27T11:54:09.000Z",
+        "deployed in 8 transactions: all at once it would use 97% of a block's write limit, so 7 verifier keys were inserted afterwards (updateSettingsEd25519 17dbc0c93a7bcd3ecee067145a97c6d9b7ea9defa3dc16b22509adde95851b44; updateSettingsPasskey 76a411431e85ad0b19413b815ce239e0e906128fc172f043445fcf4069d751e8; startRecovery 649a92e19f0747585f6a58f53a969689e32c103119b408797d8a938ea1a8e9af; finishRecovery 16a4f792f439ecfa68c88432d67b1960ba5083049da32a56c8ff559d99e8987a; updateWillEd25519 ce6d7dcfe321f04fbb57a5b4481b92f3b8389a2452612e2577df4b4ce7bf5731; updateWillPasskey 9903e141f730558643db66a61c411885e8c3779c32f43cc725ac37b2dd38bcaf; triggerAttestation ffe38a1b648d5012e2673303f64ed4d57958cc4e243e39427d31023d9694f2a4)"
       ],
-      "txId": "001a8413c8a7ae1078e697c1f2470045bc441afac47dfeb314c222656c32ca6cae",
-      "txHash": "46dc33d1d44180e106be7a77a1f2a812eded26f776d5e437f6b0ce2b5e40b2c2",
-      "blockHeight": 272832,
-      "blockHash": "4eaffe3f011906a864618fec099fd8565f4bf8419847d36277d0438a418ee03d",
-      "blockTimestamp": 1795653534,
+      "txId": "002fbe2df8f27c6dd3bea7eaf14e400b713caa0a5c2526202a5114c8d7cac9ea2f",
+      "txHash": "1081d7d03ced62ec25c0191bbecf760e5f0774deb4a4d5d1e12f35d3121af7ac",
+      "blockHeight": 293774,
+      "blockHash": "3e01aaec56ba5754d9357398d06fb45aa302f89a9d20b3c63809022ee4a91e13",
+      "blockTimestamp": 1795779258,
       "status": "SucceedEntirely",
-      "feePaid": "12827226919654653",
-      "feeEstimated": "12827226919654653",
-      "proveMs": 36,
-      "balanceMs": 809,
-      "confirmMs": 1044
+      "feePaid": "12831157485714286",
+      "feeEstimated": "12831157485714286",
+      "proveMs": 26,
+      "balanceMs": 1187,
+      "confirmMs": 1225
     },
     {
       "step": "deposit",
-      "startedAt": "2026-11-26T00:41:27.673Z",
-      "finishedAt": "2026-11-26T00:41:50.703Z",
-      "totalMs": 23030,
+      "startedAt": "2026-11-27T11:37:16.724Z",
+      "finishedAt": "2026-11-27T11:37:37.990Z",
+      "totalMs": 21266,
       "notes": [
         "deposited 10.000000 tNIGHT; the indexer shows the vault holding 10.000000"
       ],
-      "txId": "0079c4e7a4dc8558aec21f28bc3ba69cec64ce67c466ec8297e9199d9e129add44",
-      "txHash": "dc9134b9c9305b3c046a67a52044846756086f63911641417b8246067f3262fc",
-      "blockHeight": 272859,
-      "blockHash": "cdd17ce28a81ce3c33aa3bf5a3076535102fd714edf2bbb5465ee68b104be818",
-      "blockTimestamp": 1795653696,
+      "txId": "00f363417366e912fe4db0dda2a7cdc7abdfe9039d5cc38e72320c34af2d99da87",
+      "txHash": "275acdf6a3ef2dd9411e040451d16527e28f46f9b2f0fbbabaf07388dbec80b4",
+      "blockHeight": 293805,
+      "blockHash": "7c3ad3bf98a89e3f6c6369feb791491ee6820b639f036ee1efa8adf441bc41b7",
+      "blockTimestamp": 1795779444,
       "status": "SucceedEntirely",
       "feePaid": "425159870128572",
       "feeEstimated": "425159870128572",
-      "proveMs": 2052,
-      "balanceMs": 961,
-      "confirmMs": 1057,
+      "proveMs": 691,
+      "balanceMs": 1969,
+      "confirmMs": 1321,
       "circuits": [
         "deposit"
       ]
     },
     {
       "step": "checkInPasskey",
-      "startedAt": "2026-11-26T00:41:50.711Z",
-      "finishedAt": "2026-11-26T00:42:38.895Z",
-      "totalMs": 48184,
+      "startedAt": "2026-11-27T11:37:37.993Z",
+      "finishedAt": "2026-11-27T11:38:56.973Z",
+      "totalMs": 78980,
       "notes": [
         "WebAuthn-format assertion (software P-256 key, origin and UV flag as compiled) verified in-circuit",
-        "deadline moved from 1795654726 to 1795654851; nonce 0 → 1"
+        "deadline moved from 1795780449 to 1795780598; nonce 0 → 1"
       ],
-      "txId": "002ce618dc0dcf8bc6289254ce27e67c35ce984a048526d6ed20fcfde65b78afbc",
-      "txHash": "40ec872c8e997bcbb5c2cfa2bb909294a3fdcb233aa1edeb2ffbdeff6e1ec279",
-      "blockHeight": 272867,
-      "blockHash": "12aa6b6dd619e118a67bbc8f79846adead878aad7f380802c69456360eae3e28",
-      "blockTimestamp": 1795653744,
+      "txId": "008c538ad5fe401d99a94d09b389241c68cf1e4448f1d82be1511f0729a2567e09",
+      "txHash": "ed4178f1da04c9fd30f8f482a3a7469cb399e2f63c766af520bad4362acc578d",
+      "blockHeight": 293818,
+      "blockHash": "071c50bfce5390613abb8f752927c075ea05d786d2e1b9cbe2d2fb9e66aa8edf",
+      "blockTimestamp": 1795779522,
       "status": "SucceedEntirely",
-      "feePaid": "252700800000001",
-      "feeEstimated": "252700800000001",
-      "proveMs": 27857,
-      "balanceMs": 933,
-      "confirmMs": 1331,
+      "feePaid": "252949711398868",
+      "feeEstimated": "252949711398868",
+      "proveMs": 56365,
+      "balanceMs": 1098,
+      "confirmMs": 1561,
       "circuits": [
         "checkInPasskey"
       ]
     },
     {
+      "step": "sealsDeploy",
+      "startedAt": "2026-11-27T11:38:56.982Z",
+      "finishedAt": "2026-11-27T11:39:20.361Z",
+      "totalMs": 23379,
+      "notes": [
+        "seal register address d709181d7c271477f322b159474a6491b21cb1381054703636e1ef8aa11f0598, vault 39cba0b46d2a8baadf6e765005392f0edadc7259928a59eec78dbbce02e9864f"
+      ],
+      "txId": "006b2769d17ec6dcefeb4b06414cea1881014058f39abeec64a070a4bb6bf82b52",
+      "txHash": "5d87d816a723cc38bb3915e7143e4d7a824884eec286e9f992645561ad5bea26",
+      "blockHeight": 293822,
+      "blockHash": "edec95b349f8e0b55043d6c8c89656ffc25b5deff93b91805750853e744556a5",
+      "blockTimestamp": 1795779546,
+      "status": "SucceedEntirely",
+      "feePaid": "5609038628571429",
+      "feeEstimated": "5609038628571429",
+      "proveMs": 2,
+      "balanceMs": 1587,
+      "confirmMs": 913
+    },
+    {
+      "step": "sealsSeal",
+      "startedAt": "2026-11-27T11:39:20.368Z",
+      "finishedAt": "2026-11-27T11:39:44.675Z",
+      "totalMs": 24307,
+      "notes": [
+        "2 proofs in one transaction, callee first: 39cba0b4…:isReleasedForContract, d709181d…:seal",
+        "sealed 87 characters on this machine; the key's guardian half is cut into 3 pieces, 2 needed",
+        "fingerprint b457509beb147f2c8c89b9f7e208cc96b42c75046749ee87e38e9dab4710b5d5, recorded as sealed before 2026-11-27T11:49:21.000Z",
+        "the register's ledger holds 3 piece commitments and 0 pieces: no text, no key"
+      ],
+      "txId": "009c2677bb38d826ecaf47af318eb4111c9c3f7e1baf0b2f246d0c587b7a486754",
+      "txHash": "4d5e57053d4109b8387ef5ca7c01ace84f1d08d2877d4ffc33a9761e86a43246",
+      "blockHeight": 293826,
+      "blockHash": "e1f0ab2cafd9d83d77f745100e46b2f279f2fa29b703e2cbe939cc189df88b4c",
+      "blockTimestamp": 1795779570,
+      "status": "SucceedEntirely",
+      "feePaid": "711978285714286",
+      "feeEstimated": "711978285714286",
+      "proveMs": 1569,
+      "balanceMs": 2422,
+      "confirmMs": 1188,
+      "circuits": [
+        "39cba0b4…:isReleasedForContract",
+        "d709181d…:seal"
+      ]
+    },
+    {
+      "step": "sealsRefused",
+      "startedAt": "2026-11-27T11:39:44.676Z",
+      "finishedAt": "2026-11-27T11:39:46.660Z",
+      "totalMs": 1984,
+      "notes": [
+        "a genuine piece was refused while the vault is armed: the register asked the vault and stopped with \"vault not released\"",
+        "the call failed on this machine against the chain's state, so nothing was proven or sent; pieces on the ledger: 0"
+      ]
+    },
+    {
       "step": "checkInEd25519",
-      "startedAt": "2026-11-26T00:42:38.903Z",
-      "finishedAt": "2026-11-26T00:43:14.810Z",
-      "totalMs": 35907,
+      "startedAt": "2026-11-27T11:39:46.665Z",
+      "finishedAt": "2026-11-27T11:40:33.263Z",
+      "totalMs": 46598,
       "notes": [
         "CIP-30-format signature (software Ed25519 key over the 119-byte Sig_structure) verified in-circuit",
-        "deadline moved from 1795654851 to 1795654059 (5 min after it was built); nonce 1 → 2"
+        "deadline moved from 1795780598 to 1795779887 (5 min after it was built); nonce 1 → 2"
       ],
-      "txId": "00096f523b1f88ceaca4da594a2e0010d0802651de0f790f93a2a05b308070fc9e",
-      "txHash": "497ce2763d0b95b8d8003bb29870e4028498d450c2aa9bcd70fea21e39298e53",
-      "blockHeight": 272873,
-      "blockHash": "944f55b5a3d6dfc9c74d7fe0d5b446bf16615240573be413421559480950ff60",
-      "blockTimestamp": 1795653780,
+      "txId": "0037f3b990b74e3a44641b572481265eba1c847ad0a1660a8135a521b7ead41ad5",
+      "txHash": "3b6f6449d3a723de520bd30405181159d0c87b925e6a7a4d2b05380ad0044eb7",
+      "blockHeight": 293834,
+      "blockHash": "216072b25b9fe42b5eaf277afe3d24ca2cd3d9c591ec675d53a44fc54a15c8b2",
+      "blockTimestamp": 1795779618,
       "status": "SucceedEntirely",
-      "feePaid": "262027695900031",
-      "feeEstimated": "262027695900031",
-      "proveMs": 15588,
-      "balanceMs": 812,
-      "confirmMs": 1190,
+      "feePaid": "261769371428572",
+      "feeEstimated": "261769371428572",
+      "proveMs": 25809,
+      "balanceMs": 1729,
+      "confirmMs": 1713,
       "circuits": [
         "checkInEd25519"
       ]
     },
     {
       "step": "triggerTimeout",
-      "startedAt": "2026-11-26T00:43:14.817Z",
-      "finishedAt": "2026-11-26T00:48:20.610Z",
-      "totalMs": 305793,
+      "startedAt": "2026-11-27T11:40:33.270Z",
+      "finishedAt": "2026-11-27T11:45:27.043Z",
+      "totalMs": 293773,
       "notes": [
-        "deadline 1795654059 passed; vault is pending until 1795654179"
+        "deadline 1795779887 passed; vault is pending until 1795780007"
       ],
-      "txId": "0059db31529fe2c6c51e4004cd38118b3254feacadc56cb86cf38ce4d8efca5cb9",
-      "txHash": "e6d23ff5273d039fa6682a5fc7a1d3ab307fe5f46f4c9a90e2c0bdb96adeeeaa",
-      "blockHeight": 272924,
-      "blockHash": "68f6e2eb3a2abfa591bfd6a9ac64375f9397f382701d24c7aeecc4bfc391ca35",
-      "blockTimestamp": 1795654086,
+      "txId": "001e7650d0a7560f65e85083a2ecbfabb8b146aa7f4045381bd57867ccf41ec507",
+      "txHash": "3c626c95af723473b560094b4b7dcd60c5eaa8ca3ff3bc14823a897faa2a501b",
+      "blockHeight": 293883,
+      "blockHash": "2f8894d41f905344ce74bf83be356daf30c7cd70b754fa19b1c5e03bdf13b0e8",
+      "blockTimestamp": 1795779912,
       "status": "SucceedEntirely",
-      "feePaid": "240717942857143",
-      "feeEstimated": "240717942857143",
-      "proveMs": 408,
-      "balanceMs": 1138,
-      "confirmMs": 1251,
+      "feePaid": "240677942857143",
+      "feeEstimated": "240677942857143",
+      "proveMs": 464,
+      "balanceMs": 1090,
+      "confirmMs": 1813,
       "circuits": [
         "triggerTimeout"
       ]
     },
     {
       "step": "finalizeRelease",
-      "startedAt": "2026-11-26T00:48:20.612Z",
-      "finishedAt": "2026-11-26T00:50:20.757Z",
-      "totalMs": 120145,
+      "startedAt": "2026-11-27T11:45:27.052Z",
+      "finishedAt": "2026-11-27T11:47:26.813Z",
+      "totalMs": 119761,
       "notes": [
-        "released at 1795654179; estate snapshot 10.000000 tNIGHT",
+        "released at 1795780007; estate snapshot 10.000000 tNIGHT",
         "1 event(s) emitted while executing the circuit"
       ],
-      "txId": "00aeff8adb437c9532ca5f9b309a5688cca73b319858c44cf515986834b9d31f05",
-      "txHash": "ecfd18186225c0673dbeaa209cb3e543634889df2cc4539e932c4ee8b3b1a3a6",
-      "blockHeight": 272944,
-      "blockHash": "c5e72cfeae2a2f4933791692a15ecd0be4a8b8b9f6cc1348ae00ef2851d0e2d3",
-      "blockTimestamp": 1795654206,
+      "txId": "00ddfd28514eab1ad25459f6a18711147d4e4fd23a53cd6ab41396b6d81316a9c2",
+      "txHash": "56f364555c7c0f8c20b3cbf04f5b263f91c710109e916e95f688f72396415741",
+      "blockHeight": 293903,
+      "blockHash": "20c14da1a82cd2d49cdda0b22d7663ba3ae3ff530e4d2bca9a98c6349afcfb18",
+      "blockTimestamp": 1795780032,
       "status": "SucceedEntirely",
       "feePaid": "254556800000001",
       "feeEstimated": "254556800000001",
-      "proveMs": 2193,
-      "balanceMs": 1145,
-      "confirmMs": 1289,
+      "proveMs": 653,
+      "balanceMs": 1267,
+      "confirmMs": 1448,
       "circuits": [
         "finalizeRelease"
       ]
     },
     {
       "step": "claim",
-      "startedAt": "2026-11-26T00:50:20.760Z",
-      "finishedAt": "2026-11-26T00:50:51.458Z",
-      "totalMs": 30698,
+      "startedAt": "2026-11-27T11:47:26.821Z",
+      "finishedAt": "2026-11-27T11:48:03.183Z",
+      "totalMs": 36362,
       "notes": [
         "heir 0 (6000 bps of 10.000000) claimed 6.000000 tNIGHT to mn_addr_preview1ucfa5n7sadm7xtfhdukmqt30fd2a375q8lmtmhyl8dp7wv4eep5s22l0fp",
         "estatePaid 0.000000 → 6.000000",
-        "the indexer's record of this transaction lists 1 created UTXO(s), none matching the payout exactly: check by hand"
+        "the indexer lists a new unshielded UTXO of 6.000000 tNIGHT owned by the test wallet in this transaction"
       ],
-      "txId": "00badd70c3fac003c613eb0bbc7e3b079c7326c27aae6ff2f2250ac99777a0a825",
-      "txHash": "3d307ebfaf6868dd2674cd9f143095d6d8cd3bd650f6b655376e275fcbe06a66",
-      "blockHeight": 272949,
-      "blockHash": "851187056a46bf4b8d192757c2c91f3571d76567a5d8392789e1b78fab0def45",
-      "blockTimestamp": 1795654236,
+      "txId": "00260a6498e7310689a51d838841c2aa3db0abbbcbc2930dd96d5d71fbeb2bf48f",
+      "txHash": "f872b424bb6d31b0e4741261a112cc7e15c628c5bd1a376564c827725b03644f",
+      "blockHeight": 293909,
+      "blockHash": "5610724d6181a7206a2551f32cb8165a61b21feb5f9d9c03e69f277d2509a194",
+      "blockTimestamp": 1795780068,
       "status": "SucceedEntirely",
-      "feePaid": "530826971428572",
-      "feeEstimated": "530826971428572",
-      "proveMs": 6716,
-      "balanceMs": 990,
-      "confirmMs": 1345,
+      "feePaid": "530861257142858",
+      "feeEstimated": "530861257142858",
+      "proveMs": 9990,
+      "balanceMs": 1681,
+      "confirmMs": 1727,
       "circuits": [
         "claim"
       ]
     },
     {
       "step": "readEvents",
-      "startedAt": "2026-11-26T00:50:51.459Z",
-      "finishedAt": "2026-11-26T00:50:51.763Z",
-      "totalMs": 304,
+      "startedAt": "2026-11-27T11:48:03.186Z",
+      "finishedAt": "2026-11-27T11:48:03.529Z",
+      "totalMs": 343,
       "notes": [
-        "indexer returned the \"codicil:released:v1\" event (id 160700) for the vault",
-        "found by the finalizeRelease transaction hash ecfd18186225c0673dbeaa209cb3e543634889df2cc4539e932c4ee8b3b1a3a6"
+        "indexer returned the \"codicil:released:v1\" event (id 186462) for the vault",
+        "found by the finalizeRelease transaction hash 56f364555c7c0f8c20b3cbf04f5b263f91c710109e916e95f688f72396415741"
       ]
     },
     {
-      "step": "escrowDeploy",
-      "startedAt": "2026-11-26T00:50:51.770Z",
-      "finishedAt": "2026-11-26T00:51:13.852Z",
-      "totalMs": 22082,
+      "step": "sealsHandOver1",
+      "startedAt": "2026-11-27T11:48:03.536Z",
+      "finishedAt": "2026-11-27T11:48:26.889Z",
+      "totalMs": 23353,
       "notes": [
-        "escrow address aceee253536d2932a0cb116be7feeaaa61d84bfd41334b544cd1138cade1cdd4, vault df8ba3d21b106c41d9deb603c58e97101716595d22bbc351882dfc90c0c6f6d4"
+        "2 proofs in one transaction, callee first: 39cba0b4…:isReleasedForContract, d709181d…:handOver",
+        "piece 3 of 3 was checked against its commitment and written to the register's public ledger, by a caller holding no keeper secret",
+        "pieces on the ledger for this text: 3 (2 needed)"
       ],
-      "txId": "000652a0d15d74bbeff0d52bc2e3b6ddc73549c0df7e97fa9c73cf077f7bdc021d",
-      "txHash": "e8c41e57cc1d19a17331fa2cafe87eae267c6ad0b64dc82c918117ca7bb8e777",
-      "blockHeight": 272953,
-      "blockHash": "2674e2b3ec84daa997faf3af2c0f4ae9f9823058d5a38fc580fa245f0901ee47",
-      "blockTimestamp": 1795654260,
+      "txId": "003b4342fbb42b443d1b70601459f350c1ef768826279f07ef9981586a523cb835",
+      "txHash": "b8ce11b896259bfa8ec36a9de8e784816816bc15b325ad4cd4fcbbb6de043064",
+      "blockHeight": 293913,
+      "blockHash": "e2ad196f5abf6b87b7d8a66f6e855b41ee8b4886cd5db1387efc5b41c46fb456",
+      "blockTimestamp": 1795780092,
       "status": "SucceedEntirely",
-      "feePaid": "2876202670536429",
-      "feeEstimated": "2876202670536429",
-      "proveMs": 3,
-      "balanceMs": 811,
-      "confirmMs": 795
-    },
-    {
-      "step": "escrowDeposit",
-      "startedAt": "2026-11-26T00:51:14.955Z",
-      "finishedAt": "2026-11-26T00:51:37.882Z",
-      "totalMs": 22927,
-      "notes": [
-        "deposited 5.000000 tNIGHT into the escrow"
-      ],
-      "txId": "007e88ad6a7dc5f53f05762584a448cc84306ddfcf5ebfc1a08f8aa91fbe5b0719",
-      "txHash": "efc7ff6df64808032de7294ca991047a4e54026ecd56ec0b9bcf86aa31c03ee5",
-      "blockHeight": 272957,
-      "blockHash": "5cd44ee2fe3ca7e4ac99981d854d7aa84bc44ccc68018d5d873e1606d174a85b",
-      "blockTimestamp": 1795654284,
-      "status": "SucceedEntirely",
-      "feePaid": "473568000000001",
-      "feeEstimated": "473568000000001",
-      "proveMs": 367,
-      "balanceMs": 1515,
-      "confirmMs": 1007,
+      "feePaid": "526045028571429",
+      "feeEstimated": "526045028571429",
+      "proveMs": 1567,
+      "balanceMs": 1108,
+      "confirmMs": 1357,
       "circuits": [
-        "deposit"
+        "39cba0b4…:isReleasedForContract",
+        "d709181d…:handOver"
       ]
     },
     {
-      "step": "escrowWithdraw",
-      "startedAt": "2026-11-26T00:51:37.887Z",
-      "finishedAt": "2026-11-26T00:52:03.123Z",
-      "totalMs": 25236,
+      "step": "sealsHandOver2",
+      "startedAt": "2026-11-27T11:48:26.894Z",
+      "finishedAt": "2026-11-27T11:48:50.939Z",
+      "totalMs": 24045,
       "notes": [
-        "2 proofs in one transaction, callee first: df8ba3d2…:isReleasedForContract, aceee253…:withdrawToBeneficiary",
-        "withdrew 5.000000 tNIGHT to the test wallet once the vault answered \"released\"",
-        "the indexer lists the matching unshielded UTXO in this transaction"
+        "2 proofs in one transaction, callee first: 39cba0b4…:isReleasedForContract, d709181d…:handOver",
+        "piece 1 of 3 was checked against its commitment and written to the register's public ledger, by a caller holding no keeper secret",
+        "pieces on the ledger for this text: 1, 3 (2 needed)"
       ],
-      "txId": "004162b86cfa93eac7671c170a86644f0d94a9425cb1012d648769f7a603d8a99f",
-      "txHash": "59959b95e21dc2b7deafe61ab7f4f774d9f0c9f8e21d4b4d14a712672d125825",
-      "blockHeight": 272961,
-      "blockHash": "c440e47cce7e84720f30090ea6f70d897bd06a664615c724b9080cd49d3b926d",
-      "blockTimestamp": 1795654308,
+      "txId": "00aaeffa6b75baab21c3228a1ef257584f4f437963e3b32cd48b2012add8ef11d6",
+      "txHash": "0dd79e59edd74dc7b929b9c5c7cd8ad16ca537dfed7e080c05e8359a2fe1ce0a",
+      "blockHeight": 293917,
+      "blockHash": "774fd2111cb7c7253d64409ed3b7a75c21b598795a6290a1167845b3fd3f43d5",
+      "blockTimestamp": 1795780116,
       "status": "SucceedEntirely",
-      "feePaid": "503287085714286",
-      "feeEstimated": "503287085714286",
-      "proveMs": 1922,
-      "balanceMs": 976,
-      "confirmMs": 870,
+      "feePaid": "605277567107234",
+      "feeEstimated": "605277567107234",
+      "proveMs": 1214,
+      "balanceMs": 1151,
+      "confirmMs": 1341,
       "circuits": [
-        "df8ba3d2…:isReleasedForContract",
-        "aceee253…:withdrawToBeneficiary"
+        "39cba0b4…:isReleasedForContract",
+        "d709181d…:handOver"
+      ]
+    },
+    {
+      "step": "sealsOpen",
+      "startedAt": "2026-11-27T11:48:50.943Z",
+      "finishedAt": "2026-11-27T11:48:53.328Z",
+      "totalMs": 2385,
+      "notes": [
+        "read pieces 1 and 3 from the register's public ledger, rebuilt the key and opened the sealed text: it is the 87 characters that were sealed",
+        "a made-up piece was refused after the release too: \"not a genuine piece\" (nothing was proven or sent)",
+        "the keeper could not seal another text after the release: \"vault released\" (nothing was proven or sent)"
       ]
     }
   ],
   "releaseEvent": {
-    "id": 160700,
+    "id": 186462,
     "eventType": "Misc",
     "name": "codicil:released:v1",
-    "txHash": "ecfd18186225c0673dbeaa209cb3e543634889df2cc4539e932c4ee8b3b1a3a6",
+    "txHash": "56f364555c7c0f8c20b3cbf04f5b263f91c710109e916e95f688f72396415741",
     "payloadVersion": 1,
     "protocolVersion": 2001100
   },
   "totals": {
-    "transactions": 10,
-    "feePaidSpeck": "18646274756219689",
-    "proveMs": 57142,
-    "wallMs": 794700
+    "transactions": 11,
+    "feePaidSpeck": "22249471948634678",
+    "proveMs": 98350,
+    "wallMs": 882587
   }
 }
