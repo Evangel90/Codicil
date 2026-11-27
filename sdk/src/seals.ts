@@ -7,6 +7,7 @@
 
 import { pureCircuits, type Ledger as SealsLedger, type Seal } from '@codicil/contracts/seals';
 import { sealedFingerprint, type KeyPiece, type SealedMessage } from './sealed.js';
+import type { PasskeyOwner, WalletOwner } from './witnesses.js';
 
 export type { SealsLedger, Seal };
 
@@ -15,13 +16,31 @@ export const SEAL_SLOTS = 8;
 /** How far ahead of the clock a seal's "sealed before" time is set, in seconds. */
 export const SEAL_TIME_SLACK = 600;
 
-/** Witnesses for the register: the keeper's secret comes from the owner's own device. */
-export const sealsWitnesses = (keeperSecret?: Uint8Array) => ({
-  keeperSecret: (ctx: { privateState: unknown }): [unknown, Uint8Array] => {
-    if (!keeperSecret) throw new Error('no keeper secret on this device');
-    return [ctx.privateState, keeperSecret];
-  },
-});
+/** The owner key a register's keeper can prove it holds: the same key and salt the vault's ledger commits to. */
+export interface RegisterOwner {
+  passkey?: PasskeyOwner;
+  wallet?: WalletOwner;
+}
+
+/**
+ * Witnesses for the register. The keeper's secret and the owner's key come
+ * from the owner's own device; anyone else calls with neither, which is all
+ * `handOver` needs.
+ */
+export const sealsWitnesses = (keeperSecret?: Uint8Array, owner: RegisterOwner = {}) => {
+  const need = <T>(value: T | undefined, what: string): T => {
+    if (value === undefined) throw new Error(`no ${what} on this device`);
+    return value;
+  };
+  type Ctx = { privateState: unknown };
+  return {
+    keeperSecret: (ctx: Ctx): [unknown, Uint8Array] => [ctx.privateState, need(keeperSecret, 'keeper secret')],
+    ownerPasskey: (ctx: Ctx): [unknown, PasskeyOwner['pk']] => [ctx.privateState, need(owner.passkey, 'owner passkey').pk],
+    ownerPasskeySalt: (ctx: Ctx): [unknown, Uint8Array] => [ctx.privateState, need(owner.passkey, 'owner passkey').salt],
+    ownerEdKey: (ctx: Ctx): [unknown, WalletOwner['pk']] => [ctx.privateState, need(owner.wallet, 'owner wallet key').pk],
+    ownerEdSalt: (ctx: Ctx): [unknown, Uint8Array] => [ctx.privateState, need(owner.wallet, 'owner wallet key').salt],
+  };
+};
 
 export const keeperCommitment = (secret: Uint8Array): Uint8Array => pureCircuits.keeperCommitment(secret);
 
@@ -60,4 +79,18 @@ export function piecesHandedOver(ledger: SealsLedger, fingerprint: Uint8Array): 
     if (sameBytes(piece.seal, fingerprint)) out.push({ x: Number(piece.x), y: piece.y });
   }
   return out.sort((a, b) => a.x - b.x);
+}
+
+const isZero = (b: Uint8Array): boolean => b.every((v) => v === 0);
+
+/**
+ * Whether a register was made by a vault's owner: the register's keeper proved,
+ * in zero knowledge, that it can open one of the owner commitments on the
+ * vault's own ledger. Uses nothing but the two public ledgers.
+ */
+export function registerProvesOwner(
+  vault: { ownerPasskeyCommit: Uint8Array; ownerEdCommit: Uint8Array }, register: { ownerCommit: Uint8Array },
+): boolean {
+  if (isZero(register.ownerCommit)) return false;
+  return sameBytes(register.ownerCommit, vault.ownerPasskeyCommit) || sameBytes(register.ownerCommit, vault.ownerEdCommit);
 }

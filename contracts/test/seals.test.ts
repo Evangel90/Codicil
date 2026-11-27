@@ -9,8 +9,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { randomBytes } from '@noble/hashes/utils.js';
 import { encodeRawTokenType, sampleRawTokenType } from '@midnight-ntwrk/compact-runtime';
-import { pureCircuits as vaultPure, type VaultConfig } from '@codicil/contracts/vault';
-import { ledger as sealsLedger } from '@codicil/contracts/seals';
+import { ledger as vaultLedger, pureCircuits as vaultPure, type VaultConfig } from '@codicil/contracts/vault';
+import { ledger as sealsLedger, pureCircuits as sealsPure } from '@codicil/contracts/seals';
 import {
   buildWill,
   handOverArgs,
@@ -22,6 +22,7 @@ import {
   openMessageText,
   pieceCommitment,
   piecesHandedOver,
+  registerProvesOwner,
   rpIdHash,
   sealArgs,
   sealedFingerprint,
@@ -34,7 +35,9 @@ import {
   VAULT_OPTIONS_OFF,
   witnesses as vaultWitnesses,
   type KeyPiece,
+  type PasskeyOwner,
   type SealedMessage,
+  type WalletOwner,
 } from '@codicil/sdk';
 import { loadModule, TestChain, type Deployed } from './support/chain.js';
 import { CHALLENGE, CLAIM_WINDOW, DAY, FIRST_DEADLINE, MAX_PERIOD, RELEASED_AT, T0 } from './support/world.js';
@@ -46,6 +49,9 @@ interface World {
   vault: Deployed;
   register: Deployed;
   keeper: Uint8Array;
+  /** The vault owner's keys and salts: what only the owner's device holds. */
+  passkey: PasskeyOwner;
+  wallet: WalletOwner;
   sealed: SealedMessage;
   pieces: KeyPiece[];
   fingerprint: Uint8Array;
@@ -54,9 +60,11 @@ interface World {
 async function deployWorld(): Promise<World> {
   const chain = new TestChain();
   const heir = newHeirKey();
+  const passkey: PasskeyOwner = { pk: newP256Key().pk, salt: newSalt() };
+  const wallet: WalletOwner = { pk: newEdKey().pk, salt: newSalt() };
   const config: VaultConfig = {
-    ownerPasskeyCommit: vaultPure.passkeyCommitment(newP256Key().pk, newSalt()),
-    ownerEdCommit: vaultPure.edKeyCommitment(newEdKey().pk, newSalt()),
+    ownerPasskeyCommit: vaultPure.passkeyCommitment(passkey.pk, passkey.salt),
+    ownerEdCommit: vaultPure.edKeyCommitment(wallet.pk, wallet.salt),
     passkeyRpIdHash: rpIdHash(),
     willRoot: buildWill([{ heir: { pk: heir.pk, salt: newSalt() }, shareBps: 10_000n }]).root,
     firstDeadline: BigInt(FIRST_DEADLINE),
@@ -73,7 +81,7 @@ async function deployWorld(): Promise<World> {
   const keeper = randomBytes(32);
   const register = await chain.deploy(await loadModule('codicil_seals'), [vault.encodedAddress, keeperCommitment(keeper)], sealsWitnesses());
   const { sealed, pieces } = await sealMessage({ vault: vault.address, message: TEXT, pieces: 3, needed: 2 });
-  return { chain, vault, register, keeper, sealed, pieces, fingerprint: sealedFingerprint(sealed) };
+  return { chain, vault, register, keeper, passkey, wallet, sealed, pieces, fingerprint: sealedFingerprint(sealed) };
 }
 
 describe('seal register (release-gated key pieces)', () => {
@@ -219,6 +227,54 @@ describe('seal register (release-gated key pieces)', () => {
       .rejects.toThrow('vault released');
     await expect(w.chain.call(w.register, 'unseal', { time: RELEASED_AT + DAY, witnesses: sealsWitnesses(w.keeper) }, randomBytes(32)))
       .rejects.toThrow('no such seal');
+  });
+
+  describe('proving whose register it is', () => {
+    const vault = () => vaultLedger(w.chain.ledgerState(w.vault.address).state);
+    const prove = (circuit: 'provePasskeyOwner' | 'proveWalletOwner', witnesses: object, register = w.register) =>
+      w.chain.call(register, circuit, { time: T0, witnesses });
+
+    it('repeats the vault\'s owner commitments byte for byte', () => {
+      const hexOf = (b: Uint8Array) => Buffer.from(b).toString('hex');
+      expect(hexOf(sealsPure.passkeyCommitment(w.passkey.pk, w.passkey.salt))).toBe(hexOf(vaultPure.passkeyCommitment(w.passkey.pk, w.passkey.salt)));
+      expect(hexOf(sealsPure.edKeyCommitment(w.wallet.pk, w.wallet.salt))).toBe(hexOf(vaultPure.edKeyCommitment(w.wallet.pk, w.wallet.salt)));
+    });
+
+    it('starts unproven, and the owner proves it with the passkey without revealing it', async () => {
+      expect(registerProvesOwner(vault(), ledger())).toBe(false);
+      await prove('provePasskeyOwner', sealsWitnesses(w.keeper, { passkey: w.passkey }));
+      expect(Buffer.from(ledger().ownerCommit).toString('hex')).toBe(Buffer.from(vault().ownerPasskeyCommit).toString('hex'));
+      expect(registerProvesOwner(vault(), ledger())).toBe(true);
+      // The salt that opens the commitment is nowhere in the register's public state.
+      const everything = Buffer.from((await w.chain.getContractState('', w.register.address))!.serialize()).toString('hex');
+      expect(everything).not.toContain(Buffer.from(w.passkey.salt).toString('hex'));
+    });
+
+    it('the owner can prove it with the wallet key instead', async () => {
+      await prove('proveWalletOwner', sealsWitnesses(w.keeper, { wallet: w.wallet }));
+      expect(Buffer.from(ledger().ownerCommit).toString('hex')).toBe(Buffer.from(vault().ownerEdCommit).toString('hex'));
+      expect(registerProvesOwner(vault(), ledger())).toBe(true);
+    });
+
+    it('someone else\'s register pointed at the same vault cannot prove it', async () => {
+      const theirs = randomBytes(32);
+      const fake = await w.chain.deploy(await loadModule('codicil_seals'), [w.vault.encodedAddress, keeperCommitment(theirs)], sealsWitnesses());
+      const fakeLedger = () => sealsLedger(w.chain.ledgerState(fake.address).state);
+      // With a key of their own.
+      await prove('provePasskeyOwner', sealsWitnesses(theirs, { passkey: { pk: newP256Key().pk, salt: newSalt() } }), fake);
+      expect(registerProvesOwner(vault(), fakeLedger())).toBe(false);
+      // Even knowing the owner's public key, without the salt.
+      await prove('provePasskeyOwner', sealsWitnesses(theirs, { passkey: { pk: w.passkey.pk, salt: newSalt() } }), fake);
+      expect(registerProvesOwner(vault(), fakeLedger())).toBe(false);
+      await prove('proveWalletOwner', sealsWitnesses(theirs, { wallet: { pk: w.wallet.pk, salt: newSalt() } }), fake);
+      expect(registerProvesOwner(vault(), fakeLedger())).toBe(false);
+    });
+
+    it('only the keeper can make the proof, and only with a key on the device', async () => {
+      await expect(prove('provePasskeyOwner', sealsWitnesses(randomBytes(32), { passkey: w.passkey }))).rejects.toThrow('not the keeper');
+      await expect(prove('provePasskeyOwner', sealsWitnesses(w.keeper))).rejects.toThrow('no owner passkey on this device');
+      expect(registerProvesOwner(vault(), ledger())).toBe(false);
+    });
   });
 
   it('a public statement is recorded as a fingerprint, by the keeper only', async () => {

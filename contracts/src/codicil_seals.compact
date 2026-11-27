@@ -19,9 +19,12 @@
 // never sees a message or a key.
 //
 // What it cannot do: stop guardians from sharing pieces somewhere else. It
-// rules the public route, not the people. Nor does the vault know its
-// register: anyone can deploy one that points at any vault, so a register's
-// address has to come from the vault's owner.
+// rules the public route, not the people.
+//
+// The vault does not know its register, and anyone can deploy one that points
+// at any vault. So a register proves whose it is: its keeper shows, in zero
+// knowledge, that it can open the vault's own commitment to its owner's key
+// (provePasskeyOwner, proveWalletOwner). A reader compares the two ledgers.
 
 pragma language_version >= 0.28.0;
 
@@ -54,11 +57,37 @@ export ledger pieceChecks: Set<Bytes<32>>;
 export ledger handedOver: Map<Bytes<32>, Piece>;
 // Fingerprint of a statement the keeper stands behind in public (a canary).
 export ledger statement: Bytes<32>;
+// A commitment to an owner key that the keeper proved it can open. When it
+// equals the owner commitment on the vault's own ledger, this register was
+// made by that vault's owner. All zeros until proven.
+export ledger ownerCommit: Bytes<32>;
 
 witness keeperSecret(): Bytes<32>;
+witness ownerPasskey(): Secp256r1Point;
+witness ownerPasskeySalt(): Bytes<32>;
+witness ownerEdKey(): Curve25519Point;
+witness ownerEdSalt(): Bytes<32>;
 
 export pure circuit keeperCommitment(secret: Bytes<32>): Bytes<32> {
   return persistentHash<Vector<2, Bytes<32>>>([pad(32, "codicil:seals:keeper:v1"), secret]);
+}
+
+// The vault's own commitments to its owner's key, repeated here byte for byte
+// (codicil_vault.compact). A test fails if the two ever differ.
+export pure circuit passkeyCommitment(pk: Secp256r1Point, salt: Bytes<32>): Bytes<32> {
+  return persistentCommit<Vector<3, Bytes<32>>>(
+    [pad(32, "codicil:passkey:v1"),
+     secp256r1PointX(pk) as Bytes<32>,
+     secp256r1PointY(pk) as Bytes<32>],
+    salt);
+}
+
+export pure circuit edKeyCommitment(pk: Curve25519Point, salt: Bytes<32>): Bytes<32> {
+  return persistentCommit<Vector<3, Bytes<32>>>(
+    [pad(32, "codicil:edkey:v1"),
+     curve25519PointX(pk) as Bytes<32>,
+     curve25519PointY(pk) as Bytes<32>],
+    salt);
 }
 
 struct PieceInput {
@@ -123,6 +152,23 @@ export circuit handOver(fingerprint: Bytes<32>, x: Uint<8>, y: Bytes<32>): [] {
   const check = pieceCommitment(id, disclose(x), disclose(y));
   assert(pieceChecks.member(check), "not a genuine piece");
   handedOver.insert(check, Piece { seal: id, x: disclose(x), y: disclose(y) });
+}
+
+// Prove that this register's keeper is the vault's owner, without saying who
+// that is. The vault's ledger holds a commitment to its owner's key. Only the
+// owner knows the key and the salt behind it. The keeper shows here, in zero
+// knowledge, that it knows them, and the same commitment is recorded. Anyone
+// can then compare the two ledgers. Someone else's register pointed at this
+// vault cannot produce the vault's commitment, because it lacks the salt.
+// After the owner's key changes, the owner proves it again.
+export circuit provePasskeyOwner(): [] {
+  onlyKeeper();
+  ownerCommit = disclose(passkeyCommitment(ownerPasskey(), ownerPasskeySalt()));
+}
+
+export circuit proveWalletOwner(): [] {
+  onlyKeeper();
+  ownerCommit = disclose(edKeyCommitment(ownerEdKey(), ownerEdSalt()));
 }
 
 // Stand behind a public statement: only its fingerprint is recorded.
