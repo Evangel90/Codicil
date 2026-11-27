@@ -149,7 +149,9 @@ export function Reader() {
         </form>
 
         {reading.status === 'failed' && (
-          <p className="err-inline" role="alert">The network could not be read: {reading.why}. Check your connection and try again.</p>
+          <p className="err-inline" role="alert">
+            The network could not be read: {reading.why}. Preview's indexer may be busy or down, or you may be offline. Try again in a few minutes.
+          </p>
         )}
 
         {done && !done.vault && (
