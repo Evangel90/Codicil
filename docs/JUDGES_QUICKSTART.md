@@ -26,9 +26,9 @@ found, add `~/.local/bin` to your `PATH`.
 npm test
 ```
 
-Expected: four suites, **199 + 51 + 163 + 99 = 512 passed**, in about a minute (one SDK test and
-one network-script test are skipped on a fresh checkout: they need a local capture file and the
-proving keys). The contract suite
+Expected on a fresh checkout: four suites, **199 + 50 + 163 + 99 = 511 passed and 3 skipped**, in
+about a minute. The skipped ones need files a fresh checkout does not have: one SDK test needs a
+local wallet capture, and two network-script tests need the proving keys from the full compile. The contract suite
 checks every successful call against the compiled ZK circuit, so these are calls a proof can be made
 for. Details: [TESTING.md](TESTING.md).
 

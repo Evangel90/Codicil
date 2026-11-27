@@ -30,7 +30,7 @@ Developers can build on two pieces: the release hook and the seal register.
 
 Wave 3, in progress. Test networks only, and unaudited.
 
-- **Built and tested:** the vault contract, the seal register, the SDK and the web app. 512 tests,
+- **Built and tested:** the vault contract, the seal register, the SDK and the web app. 514 tests,
   every contract call checked against its ZK circuit, plus browser tests that check in through
   Chrome's real WebAuthn.
 - **Run on real networks:** on 26 November 2026 the vault ran end to end on Preprod and Preview:
@@ -415,7 +415,7 @@ Milestones and status: [docs/ROADMAP.md](docs/ROADMAP.md). Customers, go-to-mark
   a new contract, the seal register (`codicil_seals`), which accepts a piece of a key only after
   the vault has released; a public disclosure anyone can open after the release; and the vault's
   public status read as a canary. The demo opens on four stories.
-- 512 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
+- 514 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
   CI on every push.
 - Docs: architecture, privacy (every field and transaction), a threat model mapping each threat to
   the test that covers it, testing, roadmap, business and a judges' quickstart. Details: [docs/WAVES.md](docs/WAVES.md).
