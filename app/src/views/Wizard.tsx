@@ -382,7 +382,17 @@ export function Wizard({ s, onDone }: { s: Snapshot; onDone: () => void }) {
             <div className="card wiz-card">
               <label className="field-label">
                 Who is it for?
-                <select className="field" value={noteTo} onChange={(e) => setNoteTo(e.target.value as MessageTo)}>
+                <select
+                  className="field" value={noteTo}
+                  onChange={(e) => {
+                    const to = e.target.value as MessageTo;
+                    // An example that was written to the last person is rewritten to the new one.
+                    const used = noteOpen ? -1 : MESSAGE_EXAMPLES.findIndex((x) => x.text(noteFor.name) === note);
+                    if (used >= 0) setNote(to === 'everyone' ? '' : MESSAGE_EXAMPLES[used].text(recipientName(to)));
+                    else if (noteOpen && DISCLOSURE_EXAMPLES.some((x) => x.text === note)) setNote('');
+                    setNoteTo(to);
+                  }}
+                >
                   {HEIRS.map((h) => <option key={h.id} value={h.id}>{h.name}, {h.relation[0].toLowerCase() + h.relation.slice(1)}</option>)}
                   <option value="everyone">Everyone, as a public disclosure</option>
                 </select>

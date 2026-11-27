@@ -7,12 +7,12 @@
 // holds, whether a pasted sealed text is the one that was sealed, and, once
 // enough pieces are on the ledger, the text itself, opened in this browser.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Brand, HashChip, ThemeToggle } from '../components/ui.js';
 import { signal } from '../demo/guide.js';
 import { EXAMPLE } from '../live/example.js';
 import {
-  checkCopy, cleanAddress, indexerReader, looksLikeAddress, openCopy, readRegister, readVault, type RegisterReading, type VaultReading,
+  checkCopy, cleanAddress, indexerReader, looksLikeAddress, openCopy, readRegister, readVault, WrongContractError, type RegisterReading, type VaultReading,
 } from '../live/reader.js';
 
 /** Test networks run on short timers, so the time of day matters here. */
@@ -24,7 +24,7 @@ type Reading =
   | { status: 'idle' }
   | { status: 'reading' }
   | { status: 'failed'; why: string }
-  | { status: 'done'; at: number; vault?: VaultReading; register?: RegisterReading; registerAsked: boolean };
+  | { status: 'done'; at: number; vault?: VaultReading; register?: RegisterReading; registerAsked: boolean; vaultWrong: boolean; registerWrong: boolean };
 
 /** `#/read/<vault>/<register>` fills the form, so a reading can be shared as a link. */
 function fromHash(): { vault: string; register: string } {
@@ -40,27 +40,57 @@ export function Reader() {
   const [opened, setOpened] = useState<{ text: string } | { why: string }>();
   const fetchState = useMemo(() => indexerReader(), []);
 
+  // Only the latest reading counts: an earlier one that answers late is dropped.
+  const latest = useRef(0);
+
   const read = useCallback(async (v: string, r: string) => {
+    const mine = ++latest.current;
     setReading({ status: 'reading' });
     setOpened(undefined);
+    // A contract of another kind at an address is a finding, not a failure.
+    const one = async <T,>(p: Promise<T | undefined>): Promise<{ value?: T; wrong: boolean }> => {
+      try {
+        return { value: await p, wrong: false };
+      } catch (e) {
+        if (e instanceof WrongContractError) return { wrong: true };
+        throw e;
+      }
+    };
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       // The indexer client retries quietly; give up in words after a while.
-      const late = new Promise<never>((_, reject) => { setTimeout(() => reject(new Error('Preview did not answer in 25 seconds')), 25_000); });
-      const [vaultReading, registerReading] = await Promise.race([
-        Promise.all([readVault(fetchState, v), r ? readRegister(fetchState, r) : Promise.resolve(undefined)]),
+      const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Preview did not answer in 25 seconds')), 25_000); });
+      const [vaultRead, registerRead] = await Promise.race([
+        Promise.all([one(readVault(fetchState, v)), r ? one(readRegister(fetchState, r)) : Promise.resolve({ value: undefined, wrong: false })]),
         late,
       ]);
-      setReading({ status: 'done', at: Math.floor(Date.now() / 1000), vault: vaultReading, register: registerReading, registerAsked: !!r });
-      window.history.replaceState(null, '', `#/read/${cleanAddress(v)}${r ? `/${cleanAddress(r)}` : ''}`);
+      if (mine !== latest.current) return;
+      setReading({
+        status: 'done', at: Math.floor(Date.now() / 1000), vault: vaultRead.value, register: registerRead.value, registerAsked: !!r,
+        vaultWrong: vaultRead.wrong, registerWrong: registerRead.wrong,
+      });
+      if (/^#\/read(\/|$)/.test(window.location.hash)) {
+        window.history.replaceState(null, '', `#/read/${cleanAddress(v)}${r ? `/${cleanAddress(r)}` : ''}`);
+      }
     } catch (e) {
-      setReading({ status: 'failed', why: e instanceof Error ? e.message : String(e) });
+      if (mine === latest.current) setReading({ status: 'failed', why: e instanceof Error ? e.message : String(e) });
+    } finally {
+      clearTimeout(timer);
     }
   }, [fetchState]);
 
-  // A link that carries addresses reads them straight away.
+  // A link that carries addresses reads them straight away, and so does a new link opened on this page.
   useEffect(() => {
-    const start = fromHash();
-    if (start.vault) void read(start.vault, start.register);
+    const follow = () => {
+      const at = fromHash();
+      if (!at.vault) return;
+      setVault(at.vault);
+      setRegister(at.register);
+      void read(at.vault, at.register);
+    };
+    follow();
+    window.addEventListener('hashchange', follow);
+    return () => { window.removeEventListener('hashchange', follow); latest.current += 1; };
   }, [read]);
 
   const done = reading.status === 'done' ? reading : undefined;
@@ -108,9 +138,10 @@ export function Reader() {
             <button type="submit" className="btn btn-primary" disabled={!ready || reading.status === 'reading'}>
               {reading.status === 'reading' ? 'Reading from Preview…' : 'Read from Preview'}
             </button>
-            {EXAMPLE.vault && <button type="button" className="linkish" onClick={useExample}>Use the example vault</button>}
+            {EXAMPLE.vault && <button type="button" className="linkish" disabled={reading.status === 'reading'} onClick={useExample}>Use the example vault</button>}
           </div>
           {vault.trim() !== '' && !looksLikeAddress(vault) && <p className="small muted">A vault address is 64 hexadecimal characters.</p>}
+          {register.trim() !== '' && !looksLikeAddress(register) && <p className="small muted">A register address is 64 hexadecimal characters. Clear the field to read the vault alone.</p>}
           <p className="small muted">
             Take a register's address from the vault's owner. Anyone can deploy a register that points at a vault, and
             this page only shows what a register says.
@@ -122,7 +153,11 @@ export function Reader() {
         )}
 
         {done && !done.vault && (
-          <p className="err-inline" role="alert">Preview has no contract at that vault address. Check the address and the network.</p>
+          <p className="err-inline" role="alert">
+            {done.vaultWrong
+              ? 'There is a contract at that vault address, but it is not a Codicil vault. If it is a seal register, put it in the second field.'
+              : 'Preview has no contract at that vault address. Check the address and the network.'}
+          </p>
         )}
 
         {done?.vault && sig && (
@@ -134,7 +169,11 @@ export function Reader() {
         )}
 
         {done?.registerAsked && !done.register && (
-          <p className="err-inline" role="alert">Preview has no contract at that register address.</p>
+          <p className="err-inline" role="alert">
+            {done.registerWrong
+              ? 'There is a contract at that register address, but it is not a seal register.'
+              : 'Preview has no contract at that register address.'}
+          </p>
         )}
 
         {done?.register && (
@@ -164,7 +203,7 @@ export function Reader() {
               <>
                 <p className="copy-ok" role="status">
                   It matches. This register recorded fingerprint <HashChip value={check.fingerprint} /> before {when(check.sealedBefore)}.
-                  {' '}{check.onLedger.length} of the {check.needed} pieces needed are on the ledger.
+                  {' '}It needs {check.needed} piece{check.needed === 1 ? '' : 's'} of its key, and {check.onLedger.length} {check.onLedger.length === 1 ? 'is' : 'are'} on the ledger.
                 </p>
                 <div className="btn-row">
                   <button type="button" className="btn btn-primary" onClick={() => void openCopy(check).then(setOpened)}>Open it in this browser</button>

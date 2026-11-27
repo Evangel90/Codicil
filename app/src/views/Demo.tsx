@@ -162,6 +162,9 @@ export function Demo() {
   const [sealed, setSealed] = useState(s.ready);
   // Which story the visitor picked on the first screen; a vault that already exists skips the choice.
   const [story, setStory] = useState<Story | undefined>(s.ready ? 'will' : undefined);
+  // The disclosure story opens its editor once, the first time the owner's Messages screen shows.
+  const [opened, setOpened] = useState(false);
+  const markOpened = useCallback(() => setOpened(true), []);
 
   useEffect(() => {
     demo.startClock();
@@ -173,7 +176,7 @@ export function Demo() {
   // Each screen starts at the top.
   useEffect(() => { window.scrollTo(0, 0); }, [tab, sealed, story, s.actor.kind]);
 
-  const reset = useCallback(() => { demo.reset(); setSealed(false); setStory(undefined); setTab('vault'); }, []);
+  const reset = useCallback(() => { demo.reset(); setSealed(false); setStory(undefined); setOpened(false); setTab('vault'); }, []);
   const inApp = s.ready && sealed;
   const [palette, setPalette] = usePaletteShortcut();
   const ctx = useMemo<CommandContext>(() => ({
@@ -211,7 +214,7 @@ export function Demo() {
         <main className="wrap page" id="main">
           {tab === 'lens' ? <LensView s={s} />
             : tab === 'savings' ? <SavingsView s={s} />
-            : tab === 'messages' ? <MessagesView s={s} focus={story === 'disclosure' ? 'everyone' : story === 'canary' ? 'statement' : undefined} />
+            : tab === 'messages' ? <MessagesView s={s} onFocused={markOpened} focus={story === 'disclosure' && !opened ? 'everyone' : story === 'canary' ? 'statement' : undefined} />
             : tab === 'will' && s.actor.kind === 'owner' ? <WillView s={s} />
             : tab === 'settings' && s.actor.kind === 'owner' ? <SettingsView s={s} />
             : s.actor.kind === 'owner' ? <OwnerView s={s} openTab={setTab} />

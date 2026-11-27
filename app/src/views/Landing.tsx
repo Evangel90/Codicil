@@ -240,7 +240,7 @@ const USES: { who: string; kind: string; body: string; where: string }[] = [
     who: 'A reporter who might be stopped',
     kind: 'A public disclosure',
     body: 'She seals her documents for everyone. A fingerprint of the sealed text goes on the chain that day, which later proves it existed before she went silent. A contract refuses every piece of the key until her vault has released. Once enough pieces are published, anyone can open the text.',
-    where: 'In the guided demo.',
+    where: 'In the guided demo. The contract has also run on the Preview network, and the reader page opens that disclosure from the real ledger.',
   },
   {
     who: 'An organisation with a canary',
@@ -316,7 +316,7 @@ const BUILD: { title: string; body: string; code: string; file: string; link: st
 const LIMITS: [string, string][] = [
   ['Guardians keep a promise', 'The seal register controls the public route, not the people. Guardians could share their pieces somewhere else. The number of guardians you require, acting together, could open a disclosure early. For a private message they would also need the person it is for. A message you replace or take back can still be opened by anyone who kept the old copies.'],
   ['Silence is all it can see', 'A vault cannot tell why you stopped checking in. And someone who can force you to keep checking in can keep it shut.'],
-  ['Messages are in the guided demo', 'The live app creates wills. Sealed messages and public disclosures work in the guided demo and are not in the live app yet.'],
+  ['Messages are in the guided demo', 'The live app creates wills. Sealed messages and public disclosures work in the guided demo and are not in the live app yet. The seal register has run on the Preview network through a script, not through the app.'],
   ['Test networks, not audited', 'Codicil runs on Midnight’s test networks, where tokens are free and worth nothing. Nobody has audited it. Treat it as a rehearsal.'],
 ];
 

@@ -23,7 +23,7 @@ canary run in the guided demo today. The live app on a test network creates will
 
 > **Status (Wave 3, in progress):** the vault contract, SDK and web app are built and tested. That
 > covers passkey and wallet check-ins, multi-heir wills with tranches and backup heirs, hidden k-of-n
-> guardians, the attestation trigger and the cross-contract hook: 510 tests, every contract call
+> guardians, the attestation trigger and the cross-contract hook: 512 tests, every contract call
 > checked against its ZK circuit, plus browser tests that check in with Chrome's real WebAuthn. On
 > 26 November 2026 the vault ran end to end on **Preprod**: deploy, both kinds of check-in, release,
 > a claim and the cross-contract withdrawal ([results](preprod/results/v14-preprod.md), vault
@@ -405,7 +405,7 @@ Milestones and status: [docs/ROADMAP.md](docs/ROADMAP.md). Customers, go-to-mark
   a new contract, the seal register (`codicil_seals`), which accepts a piece of a key only after
   the vault has released; a public disclosure anyone can open after the release; and the vault's
   public status read as a canary. The demo opens on four stories.
-- 510 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
+- 512 tests with ZK constraint checks, including property tests, plus browser end-to-end tests.
   CI on every push.
 - Docs: architecture, privacy (every field and transaction), a threat model mapping each threat to
   the test that covers it, testing, roadmap, business and a judges' quickstart. Details: [docs/WAVES.md](docs/WAVES.md).

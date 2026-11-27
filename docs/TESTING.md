@@ -17,7 +17,7 @@ npm run e2e          # builds the app and runs Playwright in Chrome
 |---|---|---|---|
 | Contract simulator + ZK constraint checks | `npm test -w @codicil/contracts` | 199 | ~6 s |
 | SDK | `npm test -w @codicil/sdk` | 51 | ~1 s |
-| App logic (the demo store, the live store and helpers) | `npm test -w @codicil/app` | 161 | ~40 s |
+| App logic (the demo store, the live store and helpers) | `npm test -w @codicil/app` | 163 | ~40 s |
 | Network script, offline parts | `npm test -w @codicil/preprod` | 99 (two more when the proving keys are present) | ~3 s |
 | Browser end-to-end | `npm run e2e` | 16 (one more, on a network, is opt-in) | ~2 min |
 | Live mode on a real network | `npm run live:e2e` | 14 transactions | ~13 min |

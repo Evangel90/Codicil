@@ -11,7 +11,7 @@ import { Phase } from '@codicil/contracts/vault';
 import { CHALLENGE, demo } from '../src/demo/store.js';
 import { createDemoPasskey } from '../src/demo/passkey.js';
 import { signal } from '../src/demo/guide.js';
-import { checkCopy, cleanAddress, looksLikeAddress, openCopy, readRegister, readVault, type FetchState } from '../src/live/reader.js';
+import { checkCopy, cleanAddress, looksLikeAddress, openCopy, readRegister, readVault, WrongContractError, type FetchState } from '../src/live/reader.js';
 
 const s = () => demo.getSnapshot();
 const fetchState: FetchState = (address) => demo.contractState(address);
@@ -59,6 +59,11 @@ describe('reading a vault with no wallet', () => {
     const v = (await readVault(fetchState, s().chain.address))!;
     expect(v.phase).toBe(Phase.released);
     expect(signal({ ...v, now: s().now }).title).toBe('Released');
+  });
+
+  it('a contract of the wrong kind is named as such, not blamed on the connection', async () => {
+    await expect(readVault(fetchState, s().register.address)).rejects.toBeInstanceOf(WrongContractError);
+    await expect(readRegister(fetchState, s().chain.address)).rejects.toBeInstanceOf(WrongContractError);
   });
 
   it('knows an address when it sees one', () => {

@@ -82,6 +82,15 @@ describe('a public disclosure', () => {
     expect(s().activity[0].published).toHaveLength(3);
   });
 
+  it('a seal that could not run says so, and nothing is kept', async () => {
+    demo.stageDelayMs = 30;
+    const checkIn = demo.checkIn();
+    expect(await demo.sealMessage('everyone', DISCLOSURE)).toBe('Another transaction is still running. Try again when it has finished.');
+    await ok(checkIn);
+    expect(s().messages).toEqual([]);
+    expect(s().register.seals).toEqual([]);
+  });
+
   it('must go through the register', async () => {
     expect(await demo.sealMessage('everyone', DISCLOSURE, 'hand')).toMatch(/goes through the register/);
     expect(s().messages).toEqual([]);

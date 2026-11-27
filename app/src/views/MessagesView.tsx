@@ -12,7 +12,7 @@
 // disclosure always goes through the register. The encryption, the key
 // splitting and the contract calls here are real.
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Phase } from '@codicil/contracts/vault';
 import { HashChip, Icon, ICONS, Segmented } from '../components/ui.js';
 import { messageStage, type MessageStage } from '../demo/guide.js';
@@ -206,7 +206,7 @@ function Editor({ to, start, startVia, onDone }: { to: MessageTo; start: string;
       <label className="field-label">
         {open ? 'Your disclosure, for everyone' : `Your message for ${name}`}
         <textarea
-          className="field msg-text" value={text} rows={8} aria-invalid={over || undefined}
+          className="field msg-text" value={text} rows={8} aria-invalid={over || undefined} autoFocus
           placeholder={open ? 'Write what should come out if you can no longer say it yourself.' : `Write to ${name}. Only ${name} will ever read this.`}
           onChange={(e) => { setText(e.target.value); setProblem(undefined); }}
         />
@@ -304,11 +304,13 @@ function OwnerRow({ s, to, title, relation, editing, setEditing, setProblem }: {
   );
 }
 
-function OwnerMessages({ s, focus }: { s: Snapshot; focus?: Focus }) {
+function OwnerMessages({ s, focus, onFocused }: { s: Snapshot; focus?: Focus; onFocused?: () => void }) {
   // A story that is about the disclosure opens its editor straight away, once.
   const [editing, setEditing] = useState<MessageTo | undefined>(() => (focus === 'everyone' && !everyone(s) && s.phase !== Phase.released ? 'everyone' : undefined));
   const [problem, setProblem] = useState<string>();
   const released = s.phase === Phase.released;
+  // Tell the shell the story's opening move has been made, so coming back here does not repeat it.
+  useEffect(() => { if (focus === 'everyone') onFocused?.(); }, [focus, onFocused]);
   return (
     <div className="messages">
       <div className="owner-head">
@@ -361,6 +363,8 @@ function Disclosure({ s }: { s: Snapshot }) {
   const [problem, setProblem] = useState<string>();
   const [busy, setBusy] = useState(false);
   const m = everyone(s);
+  // What was refused a moment ago may be allowed now: drop the old answer when the facts change.
+  useEffect(() => setProblem(undefined), [s.phase, m?.handed.length]);
   if (!m) return null;
   const stage = messageStage(s, m);
   const waiting = m.holders.filter((g) => !m.handed.includes(g));
@@ -417,7 +421,8 @@ function CheckCopy({ s }: { s: Snapshot }) {
   const m = everyone(s);
   const [text, setText] = useState('');
   const [copied, setCopied] = useState(false);
-  const result = text.trim() ? demo.checkSealedCopy(text) : undefined;
+  // The demo's clock redraws this every second; the check only runs again when its inputs change.
+  const result = useMemo(() => (text.trim() ? demo.checkSealedCopy(text) : undefined), [text, s.register.seals]);
   if (s.register.seals.length === 0) return null;
   const copy = async () => {
     if (!m) return;
@@ -466,6 +471,7 @@ function RecipientMessage({ s, id }: { s: Snapshot; id: HeirProfile['id'] }) {
   const [busy, setBusy] = useState(false);
   const me = personById(id);
   const m = s.messages.find((x) => x.to === id);
+  useEffect(() => setProblem(undefined), [s.phase, m?.handed.length]);
   if (!m) {
     return (
       <div className="messages">
@@ -567,6 +573,7 @@ function GuardianPieces({ s, id }: { s: Snapshot; id: number }) {
   const [problem, setProblem] = useState<string>();
   const me = guardianById(id);
   const mine = s.messages.filter((m) => m.holders.includes(id));
+  useEffect(() => setProblem(undefined), [s.phase]);
   if (mine.length === 0) {
     return (
       <div className="narrow stack-18">
@@ -703,9 +710,9 @@ function StrangerMessages({ s }: { s: Snapshot }) {
 /** What the story the visitor picked is about, so the owner's screen can start there. */
 export type Focus = 'everyone' | 'statement';
 
-export function MessagesView({ s, focus }: { s: Snapshot; focus?: Focus }) {
+export function MessagesView({ s, focus, onFocused }: { s: Snapshot; focus?: Focus; onFocused?: () => void }) {
   // Each person's screen keeps its own state, so switching people starts it fresh.
-  if (s.actor.kind === 'owner') return <OwnerMessages s={s} focus={focus} />;
+  if (s.actor.kind === 'owner') return <OwnerMessages s={s} focus={focus} onFocused={onFocused} />;
   if (s.actor.kind === 'heir') return <RecipientMessage key={s.actor.id} s={s} id={s.actor.id} />;
   if (s.actor.kind === 'guardian') return <GuardianPieces key={s.actor.id} s={s} id={s.actor.id} />;
   return <StrangerMessages s={s} />;

@@ -48,6 +48,14 @@ export interface RegisterReading {
 
 export type FetchState = (address: string) => Promise<ContractState | undefined>;
 
+/** There is a contract at the address, but its state is not the kind that was asked for. */
+export class WrongContractError extends Error {
+  override name = 'WrongContractError';
+  constructor(readonly wanted: 'vault' | 'register') {
+    super(`the contract at that address is not a Codicil ${wanted === 'vault' ? 'vault' : 'seal register'}`);
+  }
+}
+
 /** Fetches a contract's current state from an indexer. */
 export function indexerReader(indexer: Indexer = PREVIEW): FetchState {
   const data = indexerPublicDataProvider(indexer);
@@ -61,26 +69,36 @@ export async function readVault(fetchState: FetchState, address: string): Promis
   const id = cleanAddress(address);
   const state = await fetchState(id);
   if (!state) return undefined;
-  const l = vaultLedger(state.data);
-  return {
-    address: id, phase: l.phase, deadline: Number(l.deadline), switchOpensAt: Number(timeoutOpensAt(l)),
-    pendingUntil: Number(l.pendingUntil), releasedAt: Number(l.releasedAt),
-  };
+  try {
+    const l = vaultLedger(state.data);
+    const reading = {
+      address: id, phase: l.phase, deadline: Number(l.deadline), switchOpensAt: Number(timeoutOpensAt(l)),
+      pendingUntil: Number(l.pendingUntil), releasedAt: Number(l.releasedAt),
+    };
+    if (![reading.deadline, reading.switchOpensAt, reading.pendingUntil, reading.releasedAt].every(Number.isFinite) || typeof l.willRoot !== 'bigint') throw new Error('not a vault');
+    return reading;
+  } catch {
+    throw new WrongContractError('vault');
+  }
 }
 
 export async function readRegister(fetchState: FetchState, address: string): Promise<RegisterReading | undefined> {
   const id = cleanAddress(address);
   const state = await fetchState(id);
   if (!state) return undefined;
-  const l = sealsLedger(state.data);
-  const seals = [...l.seals].map(([fp, seal]) => ({ fingerprint: hex(fp), needed: Number(seal.needed), pieces: Number(seal.pieces), sealedBefore: Number(seal.sealedBefore) }));
-  return {
-    address: id,
-    vault: hex(l.vault.bytes),
-    seals,
-    handedOver: [...l.handedOver].map(([, p]) => ({ seal: hex(p.seal), piece: { x: Number(p.x), y: p.y } })),
-    statementFingerprint: hex(l.statement),
-  };
+  try {
+    const l = sealsLedger(state.data);
+    const seals = [...l.seals].map(([fp, seal]) => ({ fingerprint: hex(fp), needed: Number(seal.needed), pieces: Number(seal.pieces), sealedBefore: Number(seal.sealedBefore) }));
+    return {
+      address: id,
+      vault: hex(l.vault.bytes),
+      seals,
+      handedOver: [...l.handedOver].map(([, p]) => ({ seal: hex(p.seal), piece: { x: Number(p.x), y: p.y } })),
+      statementFingerprint: hex(l.statement),
+    };
+  } catch {
+    throw new WrongContractError('register');
+  }
 }
 
 export type CopyCheck =

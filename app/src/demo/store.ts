@@ -1269,11 +1269,15 @@ class DemoStore {
   private async resealMessages(w: World): Promise<number> {
     for (const [to, m] of w.messages) {
       const next = await this.sealFor(w, m.text, m.via);
+      // The new seal goes on before the old one comes off, so a failure
+      // between the two leaves the register holding what this device holds.
       if (m.via === 'register') {
-        await this.unregisterSeal(w, m);
         await this.registerSeal(w, next);
+        w.messages.set(to, next);
+        await this.unregisterSeal(w, m);
+      } else {
+        w.messages.set(to, next);
       }
-      w.messages.set(to, next);
     }
     return w.messages.size;
   }
@@ -1282,9 +1286,10 @@ class DemoStore {
   private async placeSeal(w: World, to: MessageTo, body: string, via: MessageVia): Promise<string> {
     const old = w.messages.get(to);
     const next = await this.sealFor(w, body, via);
-    if (old?.via === 'register') await this.unregisterSeal(w, old);
+    // New seal first, old seal off second: see resealMessages.
     if (via === 'register') await this.registerSeal(w, next);
     w.messages.set(to, next);
+    if (old?.via === 'register') await this.unregisterSeal(w, old);
     const name = recipientName(to);
     const n = w.setup.guardians.length;
     const k = w.setup.threshold;
@@ -1341,17 +1346,19 @@ class DemoStore {
       this.emit();
       return undefined;
     }
-    await this.run(to === 'everyone' ? 'Sealing a public disclosure' : `Sealing a message for ${name}`, ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
+    const title = via === 'hand' ? `Taking the message for ${name} off the register` : to === 'everyone' ? 'Sealing a public disclosure' : `Sealing a message for ${name}`;
+    const went = await this.run(title, ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
       await stage('circuit');
       return this.placeSeal(w, to, body, via);
     }, {
       stages: {
         prepare: { label: 'Sealing it on this device', detail: 'The message is encrypted here, and the guardians\' half of its key is cut into pieces. The plain text goes nowhere.' },
-        circuit: { label: 'Running the seal register, which calls the vault', detail: 'The register asks the vault that it has not released, then records a fingerprint of the sealed text and a commitment to each piece of its key.' },
+        circuit: via === 'hand' ? REGISTER_STAGES!.circuit : { label: 'Running the seal register, which calls the vault', detail: 'The register asks the vault that it has not released, then records a fingerprint of the sealed text and a commitment to each piece of its key.' },
         proof: REGISTER_STAGES!.proof,
       },
     });
-    return undefined;
+    // Nothing was sealed if the transaction did not go through; the caller keeps what was typed.
+    return went ? undefined : (this.tx?.status === 'error' ? this.tx.message : undefined) ?? 'Another transaction is still running. Try again when it has finished.';
   }
 
   /** Take a sealed message back. Returns what went wrong, if anything. */
@@ -1371,7 +1378,7 @@ class DemoStore {
         ], ['What it said', to === 'everyone' ? 'Why' : 'Who it was for']);
         return 'The register no longer holds its seal, so no piece of its key can be handed over there. Copies of the sealed text that exist stay shut.';
       }, { stages: REGISTER_STAGES });
-      return undefined;
+      return w.messages.has(to) && this.tx?.status !== 'error' ? 'Another transaction is still running. Try again when it has finished.' : undefined;
     }
     w.messages.delete(to);
     this.log(OWNER_NAME, `Sealed message for ${name} removed`, 'plain', [], ['That a message existed, and who it was for']);
@@ -1432,7 +1439,7 @@ class DemoStore {
         ], [`That it was ${guardianById(id).name}`, 'Who the message is for', 'The message']);
         return mine.length === 1
           ? 'The register checked your piece and published it. The vault confirmed the release in the same transaction.'
-          : `The register checked your ${mine.length} pieces and published them. The vault confirmed the release in the same transaction.`;
+          : `The register checked your ${mine.length} pieces and published them, one transaction each. The vault confirmed the release every time.`;
       } catch (e) {
         w.register.lastAttempt = { ...attempt, ok: false, code: contractErrorCode(e) };
         throw e;
