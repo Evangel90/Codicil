@@ -16,7 +16,9 @@ const T = 1_800_000_000;
 describe('Shielded payout from a contract-held coin [V11]', () => {
   let sim: Simulator<object>;
   const color = encodeRawTokenType(sampleRawTokenType());
-  const coin = { nonce: randomBytes(32), color, value: 1_000n };
+  // The transcript drops trailing zero bytes of a value, so a nonce that ends in
+  // one cannot be found by the byte search below (one run in 256). Keep the last byte odd.
+  const coin = { nonce: Uint8Array.from(randomBytes(32), (b, i) => (i === 31 ? b | 1 : b)), color, value: 1_000n };
   const heir = { bytes: randomBytes(32) };   // the heir's ZswapCoinPublicKey
 
   beforeEach(async () => {
