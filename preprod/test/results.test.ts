@@ -55,8 +55,10 @@ function state(): RunState {
       heirs: [{ sk: 99n, keySalt: SECRET_SK, shareBps: 6000n }],
       leaves: [],
       escrowSecret: SECRET_SK,
+      seals: { keeper: SECRET_SK, sealedText: `{"recipientHalf":"${SECRET_HEX}"}`, pieces: [{ x: 1, y: SECRET_SK }], text: 'the words that were sealed' },
     },
     vault: { address: 'cc'.repeat(32), deployedAt: 1_800_000_000, firstDeadline: 1n, maxPeriod: 1n, challengeWindow: 1n, claimWindow: 1n, depositAmount: 10_000_000n },
+    seals: { address: 'ee'.repeat(32), fingerprint: 'f0'.repeat(32) },
     steps: { deploy, deposit: recovered, checkInPasskey: checkIn },
     releaseEvent: { id: 42, eventType: 'Misc', name: 'codicil:released:v1', payloadVersion: 1, protocolVersion: 2_001_100 },
   };
@@ -94,6 +96,24 @@ describe('results', () => {
     expect(json).not.toContain(SECRET_HEX);
     expect(json).not.toContain('actors');
     expect(resultsMarkdown(results)).not.toContain(SECRET_HEX);
+    expect(json).not.toContain('the words that were sealed');
+  });
+
+  it('names the seal register and the fingerprint of what was sealed in it', () => {
+    expect(results.sealsAddress).toBe('ee'.repeat(32));
+    expect(results.sealsFingerprint).toBe('f0'.repeat(32));
+    const md = resultsMarkdown(results);
+    expect(md).toContain(`- Seal register: \`${'ee'.repeat(32)}\``);
+    expect(md).toContain(`- Sealed text fingerprint on the register: \`${'f0'.repeat(32)}\``);
+    const plain = buildResults({ ...state(), seals: undefined }, { remaining: [] });
+    expect(resultsMarkdown(plain)).not.toContain('Seal register');
+  });
+
+  it('lists register steps where the run performs them: between the check-ins, and after the release', () => {
+    const at = (step: StepRecord['step']): StepRecord => ({ ...recovered, step });
+    const s = state();
+    s.steps = { ...s.steps, sealsOpen: at('sealsOpen'), sealsSeal: at('sealsSeal'), checkInEd25519: at('checkInEd25519'), escrowDeploy: at('escrowDeploy') };
+    expect(buildResults(s, { remaining: [] }).steps.map((r) => r.step)).toEqual(['deploy', 'deposit', 'checkInPasskey', 'sealsSeal', 'checkInEd25519', 'escrowDeploy', 'sealsOpen']);
   });
 
   it('prints one table row per step with times, block and fee', () => {

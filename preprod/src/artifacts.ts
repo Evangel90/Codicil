@@ -23,9 +23,16 @@ export const EXPECTED_RUNTIME_VERSION = '0.21.0';
 
 /** Vault circuits the run proves, in order. */
 export const VAULT_RUN_CIRCUITS = ['deposit', 'checkInPasskey', 'checkInEd25519', 'triggerTimeout', 'finalizeRelease', 'claim'] as const;
-/** The vault circuit the escrow calls into; proven inside the escrow's withdrawal. */
+/** The vault circuit other contracts call into; proven inside the escrow's withdrawal and the register's hand-over. */
 export const VAULT_ESCROW_CIRCUITS = ['isReleasedForContract'] as const;
 export const ESCROW_RUN_CIRCUITS = ['deposit', 'withdrawToBeneficiary'] as const;
+/** Seal register circuits the run proves; each carries a second proof, of the vault's hook. */
+export const SEALS_RUN_CIRCUITS = ['seal', 'handOver'] as const;
+
+/** Vault circuits a run proves, given which contracts beside the vault it exercises. */
+export function vaultCircuitsFor(plan: { escrow?: boolean; seals?: boolean }): string[] {
+  return [...VAULT_RUN_CIRCUITS, ...(plan.escrow || plan.seals ? VAULT_ESCROW_CIRCUITS : [])];
+}
 
 export interface ArtifactReport {
   contract: string;

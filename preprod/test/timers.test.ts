@@ -88,6 +88,13 @@ describe('run estimate', () => {
     expect(e.totalS).toBeGreaterThan(e.waitS);
     expect(e.totalS).toBeLessThan(30 * 60);
     expect(estimateRun(DEFAULT_TIMERS, { escrow: true }).totalS).toBe(e.totalS + 180);
+    // The seal register: a deploy, a seal and two hand-overs. Its refused calls send nothing.
+    const withSeals = estimateRun(DEFAULT_TIMERS, { seals: true });
+    expect(withSeals.totalS).toBe(e.totalS + 240);
+    expect(withSeals.waitS).toBe(e.waitS);
+    expect(withSeals.lines.join('\n')).toMatch(/seal register is 4 of those transactions/);
+    expect(e.lines.join('\n')).not.toMatch(/seal register/);
+    expect(estimateRun(DEFAULT_TIMERS, { escrow: true, seals: true }).totalS).toBe(e.totalS + 420);
   });
 
   it('formats durations for people', () => {

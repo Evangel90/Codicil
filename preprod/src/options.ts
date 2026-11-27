@@ -13,6 +13,8 @@ export interface CliOptions {
   command: Command;
   /** `run`, `check`, `dryrun`: include the example escrow (gate V12). */
   escrow: boolean;
+  /** `run`, `check`, `dryrun`: include the seal register (release-gated key pieces). */
+  seals: boolean;
   /** `run`: set the saved run aside and deploy a new vault. */
   fresh: boolean;
   /** Ignore saved wallet sync state and sync from the start. */
@@ -36,6 +38,8 @@ export const USAGE = `Codicil gate V14: the vault end to end on a real Midnight 
 
 Flags (after \`--\`, for example \`npm run preprod:run -- --escrow\`):
   --escrow             also deploy the example escrow and do the cross-contract withdrawal (gate V12)
+  --seals              also deploy the seal register: seal a text, be refused before the release, hand over
+                       two pieces after it and open the text from the ledger
   --fresh              run: set the saved run aside and start a new vault
   --fresh-sync         ignore saved wallet sync state
   --no-wallet          check: skip the wallet sync and balances
@@ -46,7 +50,7 @@ Network: MIDNIGHT_NETWORK=preprod (default, needs BLOCKFROST_PROJECT_ID), previe
 See docs/PREPROD.md.`;
 
 export function parseArgs(argv: readonly string[]): CliOptions {
-  const out: CliOptions = { command: 'help', escrow: false, fresh: false, freshSync: false, noWallet: false, prove: false };
+  const out: CliOptions = { command: 'help', escrow: false, seals: false, fresh: false, freshSync: false, noWallet: false, prove: false };
   let sawCommand = false;
   for (const arg of argv) {
     if (arg === '--') continue;
@@ -55,6 +59,7 @@ export function parseArgs(argv: readonly string[]): CliOptions {
       return out;
     }
     if (arg === '--escrow') out.escrow = true;
+    else if (arg === '--seals') out.seals = true;
     else if (arg === '--fresh') out.fresh = true;
     else if (arg === '--fresh-sync') out.freshSync = true;
     else if (arg === '--no-wallet') out.noWallet = true;

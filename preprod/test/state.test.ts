@@ -16,6 +16,10 @@ import {
   saveState,
   stateProblems,
   STATE_VERSION,
+  SEALS_AFTER_STEPS,
+  SEALS_BEFORE_STEPS,
+  SEALS_STEPS,
+  stepsFor,
   VAULT_STEPS,
   type RunState,
   type Step,
@@ -75,6 +79,31 @@ describe('resume logic', () => {
     expect(nextStep(withSteps(...ALL_STEPS), { escrow: true })).toBeUndefined();
   });
 
+  it('puts the seal register on both sides of the release: sealed while armed, opened after', () => {
+    const steps = stepsFor({ escrow: false, seals: true });
+    expect(steps).toEqual([
+      'deploy', 'deposit', 'checkInPasskey',
+      'sealsDeploy', 'sealsSeal', 'sealsRefused',
+      'checkInEd25519', 'triggerTimeout', 'finalizeRelease', 'claim', 'readEvents',
+      'sealsHandOver1', 'sealsHandOver2', 'sealsOpen',
+    ]);
+    // Everything before the release comes before the step that lets the deadline pass.
+    for (const s of SEALS_BEFORE_STEPS) expect(steps.indexOf(s)).toBeLessThan(steps.indexOf('checkInEd25519'));
+    for (const s of SEALS_AFTER_STEPS) expect(steps.indexOf(s)).toBeGreaterThan(steps.indexOf('finalizeRelease'));
+    expect(nextStep(withSteps('deploy', 'deposit', 'checkInPasskey'), { escrow: false, seals: true })).toBe('sealsDeploy');
+    expect(nextStep(withSteps('deploy', 'deposit', 'checkInPasskey'), { escrow: false })).toBe('checkInEd25519');
+  });
+
+  it('leaves a run without the register exactly as it was, and combines with the escrow', () => {
+    expect(stepsFor({ escrow: false })).toEqual([...VAULT_STEPS]);
+    expect(stepsFor({ escrow: true })).toEqual([...VAULT_STEPS, 'escrowDeploy', 'escrowDeposit', 'escrowWithdraw']);
+    const both = stepsFor({ escrow: true, seals: true });
+    expect(both).toEqual([...ALL_STEPS]);
+    expect(both.indexOf('escrowWithdraw')).toBeLessThan(both.indexOf('sealsHandOver1'));
+    expect(nextStep(withSteps(...ALL_STEPS), { escrow: true, seals: true })).toBeUndefined();
+    expect(new Set(ALL_STEPS).size).toBe(VAULT_STEPS.length + 3 + SEALS_STEPS.length);
+  });
+
   it('does not change the state it was given', () => {
     const before = fresh();
     const after = recordStep(before, done('deploy'));
@@ -95,6 +124,20 @@ describe('refusing a state that cannot be resumed', () => {
   it('refuses steps recorded out of order', () => {
     const s = { ...withSteps('deploy', 'checkInPasskey'), vault: vaultInfo() };
     expect(stateProblems(s, 'preprod').join(' ')).toMatch(/"checkInPasskey" is recorded but the earlier step "deposit" is not/);
+  });
+
+  it('refuses register steps out of order, or a register with no address or no sealed text', () => {
+    const vault = vaultInfo();
+    const gap = { ...withSteps('deploy', 'sealsDeploy', 'sealsRefused'), vault, seals: { address: 'ee'.repeat(32), fingerprint: 'ff'.repeat(32) } };
+    const problems = stateProblems(gap, 'preprod').join(' ');
+    expect(problems).toMatch(/"sealsRefused" is recorded but the earlier step "sealsSeal" is not/);
+    expect(problems).toMatch(/the sealed text and its key pieces are missing/);
+    expect(stateProblems({ ...withSteps('deploy', 'sealsDeploy'), vault }, 'preprod').join(' ')).toMatch(/seal register address is missing/);
+    const whole: RunState = { ...withSteps('deploy', 'sealsDeploy', 'sealsSeal'), vault, seals: { address: 'ee'.repeat(32), fingerprint: 'ff'.repeat(32) } };
+    whole.actors = { ...whole.actors, seals: { keeper: new Uint8Array(32).fill(3), sealedText: '{"codicil":"sealed"}', pieces: [{ x: 1, y: new Uint8Array(32).fill(4) }], text: 'words' } };
+    expect(stateProblems(whole, 'preprod')).toEqual([]);
+    // The sealed text and its pieces survive the state file, bytes and all.
+    expect(decodeJson<RunState>(encodeJson(whole)).actors.seals).toEqual(whole.actors.seals);
   });
 
   it('refuses a deploy record with no address, and an unknown version', () => {

@@ -10,6 +10,9 @@ describe('command line', () => {
     expect(parseArgs(['run', '--escrow', '--fresh'])).toMatchObject({ command: 'run', escrow: true, fresh: true, freshSync: false });
     expect(parseArgs(['check', '--no-wallet', '--sync-timeout=600'])).toMatchObject({ command: 'check', noWallet: true, syncTimeoutS: 600 });
     expect(parseArgs(['dryrun', '--', '--prove'])).toMatchObject({ command: 'dryrun', prove: true });
+    expect(parseArgs(['run', '--seals'])).toMatchObject({ command: 'run', seals: true, escrow: false });
+    expect(parseArgs(['dryrun', '--escrow', '--seals', '--prove'])).toMatchObject({ escrow: true, seals: true, prove: true });
+    expect(parseArgs(['run'])).toMatchObject({ seals: false });
   });
 
   it('shows help for no command or --help', () => {

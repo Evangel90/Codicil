@@ -8,12 +8,18 @@
 //   release event back from the indexer (gate V13)
 //   and, with --escrow: deploy the example escrow → deposit → cross-contract
 //   withdrawal that asks the vault whether it is released (gate V12).
+//   and, with --seals: deploy the seal register and seal a text while the
+//   vault is armed, see a genuine key piece refused; after the release hand
+//   two pieces over (each a cross-contract call into the vault), open the
+//   text from the register's public ledger, and see a made-up piece and a
+//   late seal refused.
 //
 // Every finished step is saved, so a rerun continues where the last one
 // stopped. Before each step the script also asks the chain whether the step
 // has in fact already happened (a crash between submitting and saving), and
 // records it as recovered instead of doing it twice.
 
+import { randomBytes } from 'node:crypto';
 import {
   ContractState,
   encodeContractAddress,
@@ -27,18 +33,30 @@ import type { PublicDataProvider } from '@midnight-ntwrk/midnight-js/types';
 import * as Rx from 'rxjs';
 import { ledger as vaultLedger, Phase, pureCircuits as vaultPure, type Ledger as VaultLedger, type VaultConfig } from '@codicil/contracts/vault';
 import { ledger as escrowLedger, pureCircuits as escrowPure } from '@codicil/contracts/escrow';
+import { ledger as sealsLedger } from '@codicil/contracts/seals';
 import {
   checkInDigest,
   claimPackage,
+  contractErrorCode,
+  handOverArgs,
   heirKeyFromScalar,
+  keeperCommitment,
   MerkleTree,
   newEdKey,
   newHeirKey,
   newP256Key,
   newSalt,
   buildWill,
+  openMessageText,
   payoutFor,
+  piecesHandedOver,
   rpIdHash,
+  sealArgs,
+  sealedFingerprint,
+  sealedFromText,
+  sealedToText,
+  sealMessage,
+  sealOn,
   softwareSigners,
   VAULT_OPTIONS_OFF,
   vaultId,
@@ -59,11 +77,15 @@ import {
   escrowProviders,
   inMemoryPrivateStateProvider,
   makePublicDataProvider,
+  SEALS_PRIVATE_STATE_ID,
+  sealsContract,
+  sealsProviders,
   VAULT_PRIVATE_STATE_ID,
   vaultContract,
   vaultProviders,
   type EscrowPrivateState,
   type ProofTimings,
+  type SealsPrivateState,
   type ProviderParts,
 } from './providers.js';
 import { buildResults, formatDust, formatNight, resultsMarkdown, summaryTable } from './results.js';
@@ -439,6 +461,10 @@ export async function runAll(opts: RunOptions): Promise<RunState> {
     return { kind: 'tx', tx: r.public, circuits: r.calls.map((c) => String(c.circuitId)), notes };
   });
 
+  // ── the seal register, while the vault is armed and the deadline is far off ──
+  const seals = plan.seals ? await setupSeals(opts, parts, vaultAddress, readVault, step, () => state!, (s) => { state = s; }) : undefined;
+  await seals?.beforeRelease();
+
   // ── check in with the wallet key; this sets the deadline the run waits out ──
   await step('checkInEd25519', true, async () => {
     let l = await readVault();
@@ -551,6 +577,7 @@ export async function runAll(opts: RunOptions): Promise<RunState> {
   });
 
   if (plan.escrow) await runEscrow(opts, parts, timings, vaultAddress, recipient, step, () => state!, (s) => { state = s; });
+  await seals?.afterRelease();
 
   log('');
   log(summaryTable(stepsFor(plan).map((s) => state!.steps[s]).filter((r): r is StepRecord => r !== undefined)));
@@ -639,6 +666,210 @@ async function runEscrow(
       ],
     };
   });
+}
+
+// ─── The seal register: key pieces are handed over only after the release ───
+
+/** What the run seals. It is public once the run ends; nothing rides on it. */
+export const SEALS_TEXT = 'Codicil seal register, network run: these words open only after the vault has released.';
+/** How many pieces the key is cut into, and how many rebuild it. */
+export const SEALS_PIECES = 3;
+export const SEALS_NEEDED = 2;
+
+/** Every message in an error and its causes, joined: a contract's assert text can sit a few levels down. */
+export function errorChain(e: unknown): string {
+  const out: string[] = [];
+  for (let cur: unknown = e, depth = 0; cur !== undefined && cur !== null && depth < 8; depth++) {
+    out.push(cur instanceof Error ? cur.message : String(cur));
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return out.join(' | ');
+}
+
+/**
+ * Make a call the register must refuse, and return the contract's own words.
+ * A refused call fails while the circuit runs on this machine, so nothing is
+ * proven or sent. Anything else (it went through, or it failed differently)
+ * is an error.
+ */
+export async function expectRefusal(call: () => Promise<unknown>, want: string): Promise<string> {
+  try {
+    await call();
+  } catch (e) {
+    const text = errorChain(e);
+    if (contractErrorCode(new Error(text)) === want || text.includes(want)) return want;
+    throw new Error(`expected the register to refuse with "${want}", but the call failed with: ${text}`);
+  }
+  throw new Error(`the register accepted a call it should have refused with "${want}"`);
+}
+
+interface SealsRun {
+  /** Deploy, seal, and see a genuine piece refused: all while the vault is armed. */
+  beforeRelease(): Promise<void>;
+  /** Hand two pieces over, open the text from the ledger, and see a made-up piece and a late seal refused. */
+  afterRelease(): Promise<void>;
+}
+
+async function setupSeals(
+  opts: RunOptions,
+  parts: ProviderParts,
+  vaultAddress: string,
+  readVault: () => Promise<VaultLedger>,
+  step: (name: Step, needsWallet: boolean, body: () => Promise<StepOutcome>) => Promise<void>,
+  getState: () => RunState,
+  setState: (s: RunState) => void,
+): Promise<SealsRun> {
+  const { log } = opts;
+  if (!getState().actors.seals) {
+    // Sealed here, on this machine: the plain text and the key go nowhere.
+    const { sealed, pieces } = await sealMessage({ vault: vaultAddress.toLowerCase(), message: SEALS_TEXT, pieces: SEALS_PIECES, needed: SEALS_NEEDED });
+    const s = getState();
+    const next = {
+      ...s,
+      actors: { ...s.actors, seals: { keeper: newSalt(), sealedText: sealedToText(sealed), pieces: pieces.map((p) => ({ x: p.x, y: p.y })), text: SEALS_TEXT } },
+    };
+    setState(next);
+    saveState(opts.statePath, next);
+  }
+  const kit = getState().actors.seals!;
+  const sealed = sealedFromText(kit.sealedText);
+  const fingerprint = sealedFingerprint(sealed);
+  const fingerprintHex = hex(fingerprint);
+  const keeper: SealsPrivateState = { keeperSecret: kit.keeper };
+  const sealsPrivate = inMemoryPrivateStateProvider<SealsPrivateState>();
+  const sProviders = await sealsProviders(parts, sealsPrivate, vaultAddress);
+
+  const attach = async () => {
+    const register = getState().seals;
+    if (!register) throw new Error('no seal register address after deploy');
+    const handle = await findDeployedContract(sProviders, {
+      compiledContract: sealsContract,
+      contractAddress: register.address,
+      privateStateId: SEALS_PRIVATE_STATE_ID,
+      initialPrivateState: keeper,
+    });
+    const read = async () => {
+      const got = await parts.publicDataProvider.queryContractState(register.address);
+      if (!got) throw new Error(`the indexer has no contract at ${register.address}`);
+      return sealsLedger(got.contractState.deserialize({ v9: ContractState }).data);
+    };
+    /** Act as the owner's device (holds the keeper secret) or as anyone else's (holds nothing). */
+    const actAs = (who: 'keeper' | 'guardian') => sealsPrivate.forContract(register.address).set(SEALS_PRIVATE_STATE_ID, who === 'keeper' ? keeper : {});
+    return { address: register.address, handle, read, actAs };
+  };
+  let attached: Awaited<ReturnType<typeof attach>> | undefined;
+  const register = async () => (attached ??= await attach());
+
+  const handOver = (name: Step, index: number) => step(name, true, async () => {
+    const r = await register();
+    const piece = kit.pieces[index];
+    const before = piecesHandedOver(await r.read(), fingerprint);
+    if (before.some((p) => p.x === piece.x)) return { kind: 'recovered', notes: [`piece ${piece.x} is already on the register's ledger; transaction hash not recorded`] };
+    const v = await readVault();
+    if (v.phase !== Phase.released) throw new Error(`the vault is ${Phase[v.phase]}, not released`);
+    await r.actAs('guardian');
+    const tx = await r.handle.callTx.handOver(...handOverArgs(fingerprint, piece));
+    const circuits = tx.calls.map((c) => `${String(c.contractAddress).slice(0, 8)}…:${String(c.circuitId)}`);
+    const after = piecesHandedOver(await r.read(), fingerprint);
+    return {
+      kind: 'tx',
+      tx: tx.public,
+      circuits,
+      notes: [
+        `${tx.calls.length} proofs in one transaction, callee first: ${circuits.join(', ')}`,
+        `piece ${piece.x} of ${SEALS_PIECES} was checked against its commitment and written to the register's public ledger, by a caller holding no keeper secret`,
+        `pieces on the ledger for this text: ${after.map((p) => p.x).join(', ')} (${SEALS_NEEDED} needed)`,
+      ],
+    };
+  });
+
+  return {
+    async beforeRelease() {
+      await step('sealsDeploy', true, async () => {
+        log('deploying the seal register, pointing at the vault');
+        const deployed = await deployContract(sProviders, {
+          compiledContract: sealsContract,
+          privateStateId: SEALS_PRIVATE_STATE_ID,
+          initialPrivateState: keeper,
+          args: [{ bytes: encodeContractAddress(vaultAddress) }, keeperCommitment(kit.keeper)],
+        });
+        const pub = deployed.deployTxData.public;
+        setState({ ...getState(), seals: { address: pub.contractAddress, fingerprint: fingerprintHex } });
+        return { kind: 'tx', tx: pub, notes: [`seal register address ${pub.contractAddress}, vault ${vaultAddress}`] };
+      });
+
+      await step('sealsSeal', true, async () => {
+        const r = await register();
+        if (sealOn(await r.read(), fingerprint)) return { kind: 'recovered', notes: [`the register already holds the seal ${fingerprintHex}; transaction hash not recorded`] };
+        await r.actAs('keeper');
+        // Sealing asks the vault as well: the register takes no new text once the vault has released.
+        const tx = await r.handle.callTx.seal(...sealArgs(sealed, kit.pieces, nowS()));
+        const circuits = tx.calls.map((c) => `${String(c.contractAddress).slice(0, 8)}…:${String(c.circuitId)}`);
+        const l = await r.read();
+        const seal = sealOn(l, fingerprint);
+        if (!seal) throw new Error('the seal transaction is final but the register does not hold the fingerprint');
+        return {
+          kind: 'tx',
+          tx: tx.public,
+          circuits,
+          notes: [
+            `${tx.calls.length} proofs in one transaction, callee first: ${circuits.join(', ')}`,
+            `sealed ${kit.text.length} characters on this machine; the key's guardian half is cut into ${seal.pieces} pieces, ${seal.needed} needed`,
+            `fingerprint ${fingerprintHex}, recorded as sealed before ${new Date(Number(seal.sealedBefore) * 1000).toISOString()}`,
+            `the register's ledger holds ${l.pieceChecks.size()} piece commitments and ${l.handedOver.size()} pieces: no text, no key`,
+          ],
+        };
+      });
+
+      await step('sealsRefused', false, async () => {
+        const r = await register();
+        const v = await readVault();
+        if (v.phase === Phase.released) {
+          return { kind: 'read', notes: ['the vault had already released when this step ran, so the refusal before the release could not be shown on this run'] };
+        }
+        await r.actAs('guardian');
+        const said = await expectRefusal(() => r.handle.callTx.handOver(...handOverArgs(fingerprint, kit.pieces[0])), 'vault not released');
+        const l = await r.read();
+        return {
+          kind: 'read',
+          notes: [
+            `a genuine piece was refused while the vault is ${Phase[v.phase]}: the register asked the vault and stopped with "${said}"`,
+            `the call failed on this machine against the chain's state, so nothing was proven or sent; pieces on the ledger: ${l.handedOver.size()}`,
+          ],
+        };
+      });
+    },
+
+    async afterRelease() {
+      // Any two of the three pieces: the last and the first.
+      await handOver('sealsHandOver1', SEALS_PIECES - 1);
+      await handOver('sealsHandOver2', 0);
+
+      await step('sealsOpen', false, async () => {
+        const r = await register();
+        const onLedger = piecesHandedOver(await r.read(), fingerprint);
+        const opened = await openMessageText(sealed, onLedger);
+        if (opened !== kit.text) throw new Error('the text opened from the ledger is not the text that was sealed');
+        await r.actAs('guardian');
+        const said = await expectRefusal(
+          () => r.handle.callTx.handOver(...handOverArgs(fingerprint, { x: 2, y: new Uint8Array(randomBytes(32)) })),
+          'not a genuine piece',
+        );
+        // The owner's device comes back after the release and tries to seal something else.
+        const late = await sealMessage({ vault: vaultAddress.toLowerCase(), message: `${SEALS_TEXT} (late)`, pieces: SEALS_PIECES, needed: SEALS_NEEDED });
+        await r.actAs('keeper');
+        const closed = await expectRefusal(() => r.handle.callTx.seal(...sealArgs(late.sealed, late.pieces, nowS())), 'vault released');
+        return {
+          kind: 'read',
+          notes: [
+            `read pieces ${onLedger.map((p) => p.x).join(' and ')} from the register's public ledger, rebuilt the key and opened the sealed text: it is the ${opened.length} characters that were sealed`,
+            `a made-up piece was refused after the release too: "${said}" (nothing was proven or sent)`,
+            `the keeper could not seal another text after the release: "${closed}" (nothing was proven or sent)`,
+          ],
+        };
+      });
+    },
+  };
 }
 
 export { errorText };

@@ -51,6 +51,10 @@ export interface Results {
   remaining: Step[];
   vaultAddress?: string;
   escrowAddress?: string;
+  /** The seal register, when the run exercised it. */
+  sealsAddress?: string;
+  /** Fingerprint of the sealed text the register recorded. */
+  sealsFingerprint?: string;
   walletAddress?: string;
   timers: Timers;
   versions: Record<string, string>;
@@ -82,6 +86,8 @@ export function buildResults(
     remaining: extra.remaining,
     vaultAddress: state.vault?.address,
     escrowAddress: state.escrow?.address,
+    sealsAddress: state.seals?.address,
+    sealsFingerprint: state.seals?.fingerprint,
     walletAddress: extra.walletAddress,
     timers: state.timers,
     versions: extra.versions ?? {},
@@ -131,6 +137,8 @@ export function resultsMarkdown(r: Results): string {
   out.push(`- Generated: ${r.generatedAt}`);
   if (r.vaultAddress) out.push(`- Vault contract: \`${r.vaultAddress}\``);
   if (r.escrowAddress) out.push(`- Escrow contract: \`${r.escrowAddress}\``);
+  if (r.sealsAddress) out.push(`- Seal register: \`${r.sealsAddress}\``);
+  if (r.sealsFingerprint) out.push(`- Sealed text fingerprint on the register: \`${r.sealsFingerprint}\``);
   if (r.walletAddress) out.push(`- Test wallet: \`${r.walletAddress}\``);
   out.push(
     `- Timers: first deadline ${r.timers.firstDeadlineS} s, max period ${r.timers.maxPeriodS} s, `

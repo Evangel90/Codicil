@@ -20,6 +20,11 @@
 //   B  deadline in the past, 1 s challenge window
 //                          deposit, triggerTimeout, finalizeRelease, claim,
 //                          and (with --escrow) the cross-contract withdrawal
+// With --seals, a seal register is attached to each, and sealed into while
+// its vault is armed (sealing asks the vault too). The one on A then refuses
+// a genuine piece. The one on B, once B is released, takes two pieces, each a
+// cross-contract call into the vault; the sealed text is opened from what its
+// ledger then holds; a made-up piece and a late seal are refused.
 
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -55,12 +60,33 @@ import {
 import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
 import * as vaultModule from '@codicil/contracts/vault';
 import { ledger as escrowLedger, pureCircuits as escrowPure } from '@codicil/contracts/escrow';
-import { checkInDigest, newSalt, softwareSigners, withPasskeyApproval, withWalletApproval, type CodicilPrivateState } from '@codicil/sdk';
-import { checkArtifacts, circuitK, ESCROW_RUN_CIRCUITS, VAULT_ESCROW_CIRCUITS, VAULT_RUN_CIRCUITS } from './artifacts.js';
-import { ESCROW_DIR, REPO_ROOT, VAULT_DIR } from './paths.js';
-import { escrowContract, makeProofProvider, TTL_SECONDS, vaultContract, WASM_MAX_K, type EscrowPrivateState, type ProofTimings } from './providers.js';
+import { ledger as sealsLedger } from '@codicil/contracts/seals';
+import {
+  checkInDigest,
+  handOverArgs,
+  keeperCommitment,
+  newSalt,
+  openMessageText,
+  piecesHandedOver,
+  sealArgs,
+  sealedFingerprint,
+  sealedFromText,
+  sealedToText,
+  sealMessage,
+  sealOn,
+  softwareSigners,
+  withPasskeyApproval,
+  withWalletApproval,
+  type CodicilPrivateState,
+} from '@codicil/sdk';
+import { checkArtifacts, circuitK, ESCROW_RUN_CIRCUITS, SEALS_RUN_CIRCUITS, vaultCircuitsFor } from './artifacts.js';
+import { ESCROW_DIR, REPO_ROOT, SEALS_DIR, VAULT_DIR } from './paths.js';
+import {
+  escrowContract, makeProofProvider, sealsContract, TTL_SECONDS, vaultContract, WASM_MAX_K,
+  type EscrowPrivateState, type ProofTimings, type SealsPrivateState,
+} from './providers.js';
 import { formatNight } from './results.js';
-import { castFrom, newActors, RELEASE_EVENT_NAME, VAULT_DEFER_ORDER, vaultConfigFor } from './run.js';
+import { castFrom, expectRefusal, newActors, RELEASE_EVENT_NAME, SEALS_NEEDED, SEALS_PIECES, SEALS_TEXT, VAULT_DEFER_ORDER, vaultConfigFor } from './run.js';
 import { planDeploy, type DeployPlan } from './staged-deploy.js';
 import { DEFAULT_TIMERS, extendedDeadline, finalDeadline, type Timers } from './timers.js';
 import { deriveIdentity, newSeedHex } from './wallet.js';
@@ -89,6 +115,8 @@ export interface DryRunReport {
 
 export interface DryRunOptions {
   escrow: boolean;
+  /** Also build the seal register's transactions. */
+  seals?: boolean;
   prove: boolean;
   /** `stub` forces the stand-in keys even when the real ones exist (tests). */
   artifacts?: 'auto' | 'stub';
@@ -149,15 +177,17 @@ const nowS = (): number => Math.floor(Date.now() / 1000);
 /** Build everything. Throws only on a programming error; a step that fails is reported. */
 export async function buildAll(opts: DryRunOptions): Promise<DryRunReport> {
   const log = opts.log ?? (() => {});
-  const vaultCircuits = [...VAULT_RUN_CIRCUITS, ...(opts.escrow ? VAULT_ESCROW_CIRCUITS : [])];
+  const vaultCircuits = vaultCircuitsFor(opts);
   const real = opts.artifacts !== 'stub'
     && checkArtifacts('codicil_vault', VAULT_DIR, vaultCircuits).ok
-    && (!opts.escrow || checkArtifacts('inheritable_escrow', ESCROW_DIR, ESCROW_RUN_CIRCUITS).ok);
+    && (!opts.escrow || checkArtifacts('inheritable_escrow', ESCROW_DIR, ESCROW_RUN_CIRCUITS).ok)
+    && (!opts.seals || checkArtifacts('codicil_seals', SEALS_DIR, SEALS_RUN_CIRCUITS).ok);
   if (opts.prove && !real) throw new Error('--prove needs the proving keys: run `npm run compile:full` first');
   if (!existsSync(join(VAULT_DIR, 'contract', 'index.js'))) throw new Error('contracts are not compiled: run `npm run compile`');
 
   const vaultZk: ZKConfigProvider<string> = real ? new NodeZkConfigProvider<string>(VAULT_DIR) : new StubZkConfigProvider(VAULT_DIR);
   const escrowZk: ZKConfigProvider<string> = real ? new NodeZkConfigProvider<string>(ESCROW_DIR) : new StubZkConfigProvider(ESCROW_DIR);
+  const sealsZk: ZKConfigProvider<string> = real ? new NodeZkConfigProvider<string>(SEALS_DIR) : new StubZkConfigProvider(SEALS_DIR);
   const config = { networkId: 'undeployed', ttlSeconds: TTL_SECONDS };
   const identity = deriveIdentity(newSeedHex(), config.networkId);
   const walletProvider = createLedger9WalletProvider({
@@ -172,7 +202,7 @@ export async function buildAll(opts: DryRunOptions): Promise<DryRunReport> {
 
   const timings: ProofTimings = {};
   const prover = opts.prove
-    ? makeProofProvider({ proofServer: '' }, new ZKConfigRegistry([vaultZk, escrowZk]), 'wasm', timings, 0)
+    ? makeProofProvider({ proofServer: '' }, new ZKConfigRegistry([vaultZk, escrowZk, ...(opts.seals ? [sealsZk] : [])]), 'wasm', timings, 0)
     : undefined;
 
   const steps: DryRunStep[] = [];
@@ -205,6 +235,27 @@ export async function buildAll(opts: DryRunOptions): Promise<DryRunReport> {
     steps.push(step);
     log(`  ${step.ok ? 'ok  ' : 'FAIL'}  ${name.padEnd(24)} ${String(step.txBytes).padStart(6)} bytes  ${step.detail}`);
   };
+
+  /** A step that sends nothing: a call the contract refuses, or a read. */
+  const note = (name: string, ok: boolean, detail: string): void => {
+    steps.push({ name, ok, detail });
+    log(`  ${ok ? 'ok  ' : 'FAIL'}  ${name.padEnd(24)} ${'-'.padStart(6)}        ${detail}`);
+  };
+
+  // A contract that calls into the vault needs the vault's compiled module.
+  // With stand-in keys the module must expect the stand-in keys, as a full compile would expect the real ones.
+  const calleeModule: Module = real
+    ? (vaultModule as unknown as Module)
+    : ({ ...vaultModule, expectedVk: Object.fromEntries(vaultModule.circuitSignatures && Object.keys(vaultModule.circuitSignatures).map((c) => [c, sha256Hex((vaultZk as StubZkConfigProvider).keyFor(c))])) } as unknown as Module);
+  /** What a cross-contract call needs to reach the vault at `address`, whose state is whatever `stateOf` returns now. */
+  const intoVault = (address: string, stateOf: () => SerializedContractState) => ({
+    publicDataProvider: {
+      queryZSwapAndContractState: async (asked: string) =>
+        asked.toLowerCase() === address.toLowerCase() ? { contractState: stateOf(), zswapChainState: zswap, ledgerParameters: params } : null,
+    } as unknown as PublicDataProvider,
+    blockHash: '00'.repeat(32),
+    moduleProvider: { resolve: (asked: string) => (asked.toLowerCase() === address.toLowerCase() ? () => Promise.resolve(calleeModule) : undefined) },
+  });
 
   const actors = newActors();
   const cast = castFrom(actors);
@@ -242,6 +293,59 @@ export async function buildAll(opts: DryRunOptions): Promise<DryRunReport> {
     const next = SerializedContractState.fromBytes('v9', cs.serialize());
     return { built, next, ledger: vaultLedger(cs.data) };
   };
+
+  // ── The seal register, for --seals ──
+  const keeper: SealsPrivateState = { keeperSecret: newSalt() };
+  const guardian: SealsPrivateState = {};
+
+  /** Deploy a register bound to one vault and seal the run's text into it. */
+  const makeRegister = async (vaultAddress: string, vaultState: () => SerializedContractState) => {
+    const made = await sealMessage({ vault: vaultAddress.toLowerCase(), message: SEALS_TEXT, pieces: SEALS_PIECES, needed: SEALS_NEEDED });
+    // The reader gets the sealed text as text; read it back the same way.
+    const sealed = sealedFromText(sealedToText(made.sealed));
+    const fingerprint = sealedFingerprint(sealed);
+    const deployed = await createUnprovenDeployTx(
+      { zkConfigProvider: sealsZk as never, walletProvider, config },
+      { compiledContract: sealsContract, args: [{ bytes: encodeContractAddress(vaultAddress) }, keeperCommitment(keeper.keeperSecret!)], initialPrivateState: keeper, signingKey: sampleSigningKey() },
+    );
+    const address = deployed.public.contractAddress;
+    let state = deployed.public.initialContractState as SerializedContractState;
+    /** Call a register circuit. The register's state moves on only if the call goes through. */
+    const call = async (circuitId: string, args: unknown[], privateState: SealsPrivateState, crossContract: boolean) => {
+      const built = (await createUnprovenCallTxFromInitialStates(
+        sealsZk as never,
+        {
+          compiledContract: sealsContract,
+          circuitId,
+          contractAddress: address,
+          args,
+          coinPublicKey: identity.coinPublicKey,
+          initialContractState: state,
+          initialZswapChainState: zswap,
+          ledgerParameters: params,
+          config,
+          initialPrivateState: privateState,
+        } as never,
+        identity.encryptionPublicKey,
+        crossContract ? intoVault(vaultAddress, vaultState) : undefined,
+      )) as unknown as BuiltCall;
+      const cs = state.deserialize({ v9: ContractState });
+      cs.data = new ChargedState(built.public.nextContractState);
+      state = SerializedContractState.fromBytes('v9', cs.serialize());
+      return built;
+    };
+    const ledger = () => sealsLedger(state.deserialize({ v9: ContractState }).data);
+    // `seal` asks the vault too: a text cannot be sealed once the vault has released.
+    const seal = () => call('seal', sealArgs(sealed, made.pieces, nowS()), keeper, true);
+    /** Seal a second, different text: what an owner would try if she came back after the release. */
+    const sealAnother = async () => {
+      const late = await sealMessage({ vault: vaultAddress.toLowerCase(), message: `${SEALS_TEXT} (late)`, pieces: SEALS_PIECES, needed: SEALS_NEEDED });
+      return call('seal', sealArgs(late.sealed, late.pieces, nowS()), keeper, true);
+    };
+    const handOver = (piece: { x: number; y: Uint8Array }) => call('handOver', handOverArgs(fingerprint, piece), guardian, true);
+    return { address, deployTx: deployed.private.unprovenTx, sealed, pieces: made.pieces, fingerprint, ledger, seal, sealAnother, handOver };
+  };
+  const fp = (b: Uint8Array): string => `${Buffer.from(b).toString('hex').slice(0, 12)}…`;
 
   // ── Vault A: armed, deadline ahead ──
   log('vault A (armed, deadline ahead):');
@@ -292,6 +396,9 @@ export async function buildAll(opts: DryRunOptions): Promise<DryRunReport> {
     sB = r.next;
     lB = r.ledger;
   }
+  // A text can only be sealed while the vault is armed, so the register on B gets its seal now.
+  const rb = opts.seals ? await makeRegister(b.address, () => sB) : undefined;
+  if (rb) await rb.seal();
   {
     const r = await callVault(b.address, sB, cast.base, 'triggerTimeout', []);
     sB = r.next;
@@ -334,15 +441,6 @@ export async function buildAll(opts: DryRunOptions): Promise<DryRunReport> {
     let sE = deployed.public.initialContractState as SerializedContractState;
     await record('escrowDeploy', deployed.private.unprovenTx, `escrow ${escrowAddress.slice(0, 12)}… → vault ${b.address.slice(0, 12)}…`, true);
 
-    // With stand-in keys the vault module must expect the stand-in keys, as a full compile would expect the real ones.
-    const calleeModule: Module = real
-      ? (vaultModule as unknown as Module)
-      : ({ ...vaultModule, expectedVk: Object.fromEntries(vaultModule.circuitSignatures && Object.keys(vaultModule.circuitSignatures).map((c) => [c, sha256Hex((vaultZk as StubZkConfigProvider).keyFor(c))])) } as unknown as Module);
-    const chain = {
-      queryZSwapAndContractState: async (address: string) =>
-        address.toLowerCase() === b.address.toLowerCase() ? { contractState: sB, zswapChainState: zswap, ledgerParameters: params } : null,
-    } as unknown as PublicDataProvider;
-
     const callEscrow = async (circuitId: string, args: unknown[], crossContract: boolean) => {
       const built = (await createUnprovenCallTxFromInitialStates(
         escrowZk as never,
@@ -359,9 +457,7 @@ export async function buildAll(opts: DryRunOptions): Promise<DryRunReport> {
           initialPrivateState: escrowPrivate,
         } as never,
         identity.encryptionPublicKey,
-        crossContract
-          ? { publicDataProvider: chain, blockHash: '00'.repeat(32), moduleProvider: { resolve: (addr: string) => (addr.toLowerCase() === b.address.toLowerCase() ? () => Promise.resolve(calleeModule) : undefined) } }
-          : undefined,
+        crossContract ? intoVault(b.address, () => sB) : undefined,
       )) as unknown as BuiltCall;
       const cs = sE.deserialize({ v9: ContractState });
       cs.data = new ChargedState(built.public.nextContractState);
@@ -385,6 +481,62 @@ export async function buildAll(opts: DryRunOptions): Promise<DryRunReport> {
     }
   }
 
+  // ── Seal register: refused on armed vault A, accepted on released vault B ──
+  if (opts.seals) {
+    log('seal register (key pieces handed over only after the release):');
+    // Register on vault A, which is armed.
+    const ra = await makeRegister(a.address, () => sA);
+    await record('sealsDeploy', ra.deployTx, `register ${ra.address.slice(0, 12)}… → vault ${a.address.slice(0, 12)}…`, true);
+    {
+      const built = await ra.seal();
+      const circuits = built.calls.map((c) => String(c.circuitId));
+      const l = ra.ledger();
+      const seal = sealOn(l, ra.fingerprint);
+      await record(
+        'sealsSeal',
+        built.private.unprovenTx,
+        `${circuits.length} calls in one transaction: ${circuits.join(' then ')}; fingerprint ${fp(ra.fingerprint)}, ${seal?.needed} of ${seal?.pieces} pieces needed, ${l.pieceChecks.size()} commitments, ${l.handedOver.size()} pieces on the ledger`,
+        seal !== undefined && seal.needed === BigInt(SEALS_NEEDED) && seal.pieces === BigInt(SEALS_PIECES) && l.pieceChecks.size() === BigInt(SEALS_PIECES) && l.handedOver.isEmpty()
+          && circuits.length === 2 && circuits[0] === 'isReleasedForContract' && circuits[1] === 'seal',
+        [[VAULT_DIR, 'isReleasedForContract'], [SEALS_DIR, 'seal']],
+      );
+    }
+    try {
+      const said = await expectRefusal(() => ra.handOver(ra.pieces[0]), 'vault not released');
+      note('sealsRefused', ra.ledger().handedOver.isEmpty(), `a genuine piece was refused while vault A is ${Phase[lA.phase]}: "${said}"; nothing to prove or send`);
+    } catch (e) {
+      note('sealsRefused', false, e instanceof Error ? e.message : String(e));
+    }
+
+    // Register on vault B, sealed into while B was armed; B is released now.
+    if (!rb) throw new Error('the register on vault B was not set up');
+    for (const [name, index] of [['sealsHandOver1', SEALS_PIECES - 1], ['sealsHandOver2', 0]] as const) {
+      const built = await rb.handOver(rb.pieces[index]);
+      const circuits = built.calls.map((c) => String(c.circuitId));
+      const onLedger = piecesHandedOver(rb.ledger(), rb.fingerprint).map((p) => p.x);
+      await record(
+        name,
+        built.private.unprovenTx,
+        `${circuits.length} calls in one transaction: ${circuits.join(' then ')}; piece ${rb.pieces[index].x} published, on the ledger: ${onLedger.join(', ')}`,
+        circuits.length === 2 && circuits[0] === 'isReleasedForContract' && circuits[1] === 'handOver' && onLedger.includes(rb.pieces[index].x),
+        [[VAULT_DIR, 'isReleasedForContract'], [SEALS_DIR, 'handOver']],
+      );
+    }
+    try {
+      const onLedger = piecesHandedOver(rb.ledger(), rb.fingerprint);
+      const opened = await openMessageText(rb.sealed, onLedger);
+      const said = await expectRefusal(() => rb.handOver({ x: 2, y: newSalt() }), 'not a genuine piece');
+      const late = await expectRefusal(() => rb.sealAnother(), 'vault released');
+      note(
+        'sealsOpen',
+        opened === SEALS_TEXT && onLedger.length === SEALS_NEEDED && rb.ledger().seals.size() === 1n,
+        `opened the sealed text from pieces ${onLedger.map((p) => p.x).join(' and ')} on the ledger: ${opened === SEALS_TEXT ? 'it is the text that was sealed' : 'IT DIFFERS'}; a made-up piece was refused: "${said}"; sealing another text after the release was refused: "${late}"`,
+      );
+    } catch (e) {
+      note('sealsOpen', false, e instanceof Error ? e.message : String(e));
+    }
+  }
+
   return { artifacts: real ? 'real' : 'stub', steps, ok: steps.every((s) => s.ok), deployPlan };
 }
 
@@ -397,7 +549,7 @@ export async function dryRun(opts: DryRunOptions): Promise<boolean> {
     ? 'Built with the real verifier keys from the full compile.'
     : 'Built with stand-in verifier keys (no full compile found): this checks the wiring, not the keys.');
   log(report.ok
-    ? `All ${report.steps.length} transactions built${opts.prove ? `; ${report.steps.reduce((n, s) => n + (s.proofs ?? 0), 0)} circuit proofs made in this process` : ''}.`
+    ? `All ${report.steps.filter((s) => s.txBytes !== undefined).length} transactions built${opts.prove ? `; ${report.steps.reduce((n, s) => n + (s.proofs ?? 0), 0)} circuit proofs made in this process` : ''}.`
     : `FAILED: ${report.steps.filter((s) => !s.ok).map((s) => s.name).join(', ')}`);
   log(opts.prove
     ? 'Not covered: the passkey check-in proof, fee balancing, submission, the indexer. Those need the real run.'

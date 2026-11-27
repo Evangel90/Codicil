@@ -14,6 +14,7 @@ export const ENV_PATH = join(REPO_ROOT, '.env');
 export const RESULTS_DIR = join(REPO_ROOT, 'preprod', 'results');
 export const VAULT_DIR = join(REPO_ROOT, 'contracts', 'managed', 'codicil_vault');
 export const ESCROW_DIR = join(REPO_ROOT, 'contracts', 'managed', 'inheritable_escrow');
+export const SEALS_DIR = join(REPO_ROOT, 'contracts', 'managed', 'codicil_seals');
 /** Public proving parameters downloaded for in-process proving (`dryrun --prove`). */
 export const PARAMS_CACHE_DIR = join(REPO_ROOT, '.midnight', 'srs');
 

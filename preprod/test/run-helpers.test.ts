@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { pureCircuits as pure } from '@codicil/contracts/vault';
 import { checkInDigest, rootFromPath, softwareSigners, verifyCip30Signature, verifyWebAuthnAssertion } from '@codicil/sdk';
 import { networkPaths } from '../src/paths.js';
-import { castFrom, eventNameHex, matchesEventName, newActors, RELEASE_EVENT_NAME, vaultConfigFor } from '../src/run.js';
+import { castFrom, errorChain, eventNameHex, expectRefusal, matchesEventName, newActors, RELEASE_EVENT_NAME, vaultConfigFor } from '../src/run.js';
 import { decodeJson, encodeJson, type Actors } from '../src/state.js';
 import { DEFAULT_TIMERS } from '../src/timers.js';
 import { acquireLock, deriveIdentity, errorText, newSeedHex } from '../src/wallet.js';
@@ -119,5 +119,27 @@ describe('test wallet', () => {
     expect(errorText(new Error('outer', { cause: new Error('inner') }))).toBe('outer (caused by: inner)');
     expect(errorText({ _tag: 'Wallet.Sync', message: 'lost' })).toBe('Wallet.Sync: lost');
     expect(errorText('plain')).toBe('plain');
+  });
+});
+
+describe('a call the seal register must refuse', () => {
+  const failing = (message: string, cause?: unknown) => async (): Promise<never> => { throw new Error(message, { cause }); };
+
+  it('returns the contract\'s own words, wherever in the error they sit', async () => {
+    expect(await expectRefusal(failing('failed assert: vault not released'), 'vault not released')).toBe('vault not released');
+    const nested = failing('Unexpected error executing scoped transaction', new Error('call failed', { cause: new Error('failed assert: not a genuine piece') }));
+    expect(await expectRefusal(nested, 'not a genuine piece')).toBe('not a genuine piece');
+    expect(errorChain(new Error('outer', { cause: new Error('inner', { cause: 'deepest' }) }))).toBe('outer | inner | deepest');
+  });
+
+  it('is an error when the call goes through', async () => {
+    await expect(expectRefusal(async () => 'sent', 'vault not released')).rejects.toThrow(/accepted a call it should have refused with "vault not released"/);
+  });
+
+  it('is an error when the call fails for another reason, and says which', async () => {
+    await expect(expectRefusal(failing('failed assert: no such seal'), 'vault not released')).rejects.toThrow(/expected the register to refuse with "vault not released", but the call failed with: failed assert: no such seal/);
+    await expect(expectRefusal(failing('connect ECONNREFUSED 127.0.0.1:6300'), 'not a genuine piece')).rejects.toThrow(/ECONNREFUSED/);
+    // "vault released" and "vault not released" are different refusals.
+    await expect(expectRefusal(failing('failed assert: vault not released'), 'vault released')).rejects.toThrow(/but the call failed with/);
   });
 });

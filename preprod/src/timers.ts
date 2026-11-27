@@ -151,10 +151,11 @@ export interface RunEstimate {
  * exact; the per-transaction figure is an assumption until gate V14 has
  * measured it (see docs/PREPROD.md).
  */
-export function estimateRun(t: Timers, opts: { escrow?: boolean; perTxS?: number; heavyProofS?: number } = {}): RunEstimate {
+export function estimateRun(t: Timers, opts: { escrow?: boolean; seals?: boolean; perTxS?: number; heavyProofS?: number } = {}): RunEstimate {
   const perTx = opts.perTxS ?? 60;
   const heavy = opts.heavyProofS ?? 90;
-  const txs = 7 + (opts.escrow ? 3 : 0);
+  // The seal register adds a deploy, a seal and two hand-overs; its two refused calls send nothing.
+  const txs = 7 + (opts.escrow ? 3 : 0) + (opts.seals ? 4 : 0);
   const transactionsS = txs * perTx + 3 * heavy;
   // The final check-in is part of finalPeriodS; triggerTimeout is part of the challenge window.
   const waitS = t.finalPeriodS + t.challengeWindowS;
@@ -169,6 +170,7 @@ export function estimateRun(t: Timers, opts: { escrow?: boolean; perTxS?: number
       `3 heavy proofs (two check-ins and the claim) at about ${heavy} s each`,
       `${t.finalPeriodS} s until the last check-in's deadline passes`,
       `${t.challengeWindowS} s challenge window before finalizeRelease`,
+      ...(opts.seals ? ['the seal register is 4 of those transactions; its two refused calls fail on this machine and send nothing'] : []),
     ],
   };
 }

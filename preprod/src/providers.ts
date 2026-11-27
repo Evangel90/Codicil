@@ -33,9 +33,10 @@ import { WasmProver } from '@midnightntwrk/wallet-sdk/prover-client/effect';
 import { provingProvider } from '@midnightntwrk/zkir-v3';
 import { Contract as VaultContract } from '@codicil/contracts/vault';
 import { Contract as EscrowContract, type Witnesses as EscrowWitnesses } from '@codicil/contracts/escrow';
+import { Contract as SealsContract, type Witnesses as SealsWitnesses } from '@codicil/contracts/seals';
 import { createWitnesses, type CodicilPrivateState } from '@codicil/sdk';
 import type { NetworkConfig } from './env.js';
-import { ESCROW_DIR, PARAMS_CACHE_DIR, VAULT_DIR } from './paths.js';
+import { ESCROW_DIR, PARAMS_CACHE_DIR, SEALS_DIR, VAULT_DIR } from './paths.js';
 
 
 /** How long a built transaction stays valid. One hour, as Midnight's own test kit uses. */
@@ -43,6 +44,7 @@ export const TTL_SECONDS = 3600;
 
 export const VAULT_PRIVATE_STATE_ID = 'codicil-vault';
 export const ESCROW_PRIVATE_STATE_ID = 'codicil-escrow';
+export const SEALS_PRIVATE_STATE_ID = 'codicil-seals';
 
 // ─── Compiled contracts ─────────────────────────────────────────────────────
 
@@ -69,6 +71,26 @@ export type Escrow = EscrowContract<EscrowPrivateState>;
 export const escrowContract = CompiledContract.make('inheritable-escrow', EscrowContract<EscrowPrivateState>).pipe(
   CompiledContract.withWitnesses(escrowWitnesses),
   CompiledContract.withCompiledFileAssets(ESCROW_DIR),
+);
+
+/**
+ * Only the owner's device holds the keeper secret. A guardian handing over a
+ * piece has none, and needs none: `handOver` asks for no witness.
+ */
+export interface SealsPrivateState { keeperSecret?: Uint8Array }
+
+const sealsRegisterWitnesses: SealsWitnesses<SealsPrivateState> = {
+  keeperSecret: ({ privateState }) => {
+    if (!privateState.keeperSecret) throw new Error('this device has no keeper secret for this seal register');
+    return [privateState, privateState.keeperSecret];
+  },
+};
+
+export type Seals = SealsContract<SealsPrivateState>;
+
+export const sealsContract = CompiledContract.make('codicil-seals', SealsContract<SealsPrivateState>).pipe(
+  CompiledContract.withWitnesses(sealsRegisterWitnesses),
+  CompiledContract.withCompiledFileAssets(SEALS_DIR),
 );
 
 // ─── Private state ──────────────────────────────────────────────────────────
@@ -199,6 +221,7 @@ export function makePublicDataProvider(cfg: Pick<NetworkConfig, 'indexerHttp' | 
 type CircuitsOf<P> = P extends MidnightProviders<infer K, string, unknown> ? K : never;
 export type VaultProviders = Ledger9ContractProviders<Vault>;
 export type EscrowProviders = Ledger9ContractProviders<Escrow>;
+export type SealsProviders = Ledger9ContractProviders<Seals>;
 
 /** Providers for the vault: its own artifacts, one proof per transaction. */
 export function vaultProviders(parts: ProviderParts, privateStateProvider: PrivateStateProvider<string, CodicilPrivateState>): VaultProviders {
@@ -226,6 +249,33 @@ export async function escrowProviders(
   vaultAddress: string,
 ): Promise<EscrowProviders> {
   const zkConfigProvider = new NodeZkConfigProvider<CircuitsOf<EscrowProviders>>(ESCROW_DIR);
+  const registry = new ZKConfigRegistry([zkConfigProvider, new NodeZkConfigProvider<string>(VAULT_DIR)]);
+  const vaultModule = await import('@codicil/contracts/vault');
+  return {
+    privateStateProvider,
+    publicDataProvider: parts.publicDataProvider,
+    zkConfigProvider,
+    proofProvider: makeProofProvider(parts.config, registry, 'server', parts.proofTimings, parts.proofTimeoutMs),
+    walletProvider: parts.walletProvider,
+    midnightProvider: parts.midnightProvider,
+    config: { networkId: parts.config.networkId, ttlSeconds: TTL_SECONDS },
+    contractModuleProvider: {
+      resolve: (address: string) => (address.toLowerCase() === vaultAddress.toLowerCase() ? () => Promise.resolve(vaultModule) : undefined),
+    },
+  };
+}
+
+/**
+ * Providers for the seal register. `handOver` and `unseal` call into the
+ * vault, so, as for the escrow, the proof provider resolves artifacts for both
+ * contracts and the module provider names the contract at the vault's address.
+ */
+export async function sealsProviders(
+  parts: ProviderParts,
+  privateStateProvider: PrivateStateProvider<string, SealsPrivateState>,
+  vaultAddress: string,
+): Promise<SealsProviders> {
+  const zkConfigProvider = new NodeZkConfigProvider<CircuitsOf<SealsProviders>>(SEALS_DIR);
   const registry = new ZKConfigRegistry([zkConfigProvider, new NodeZkConfigProvider<string>(VAULT_DIR)]);
   const vaultModule = await import('@codicil/contracts/vault');
   return {

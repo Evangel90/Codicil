@@ -14,7 +14,7 @@ import { ENV_KEYS, mergeEnv, parseDotEnv, parseNetworkName, redact, resolveNetwo
 import { planInit } from './init.js';
 import { createNoiseFilter } from './noise.js';
 import { parseArgs, settingsFromEnv, USAGE, type CliOptions, type Settings } from './options.js';
-import { ENV_PATH, ESCROW_DIR, networkPaths, REPO_ROOT, RESULTS_DIR, VAULT_DIR } from './paths.js';
+import { ENV_PATH, ESCROW_DIR, networkPaths, REPO_ROOT, RESULTS_DIR, SEALS_DIR, VAULT_DIR } from './paths.js';
 import { buildResults, formatDust, formatNight, resultsMarkdown, summaryTable } from './results.js';
 import { loadState, nextStep, stepsFor, type StepRecord } from './state.js';
 import { estimateRun, formatDuration, timersFromEnv } from './timers.js';
@@ -113,6 +113,8 @@ async function check(options: CliOptions): Promise<number> {
     vaultDir: VAULT_DIR,
     escrowDir: ESCROW_DIR,
     escrow: options.escrow,
+    sealsDir: SEALS_DIR,
+    seals: options.seals,
   });
   for (const l of pre.lines) say(formatLine(l));
   for (const m of extraMissing) say(formatLine({ level: 'fail', text: m }));
@@ -130,8 +132,9 @@ async function check(options: CliOptions): Promise<number> {
   say('');
   say(formatMissing(missing));
   if (missing.length === 0) {
-    const est = estimateRun(timersFromEnv(env), { escrow: options.escrow });
-    say(`Ready. \`npm run preprod:run${options.escrow ? ' -- --escrow' : ''}\` should take about ${formatDuration(est.totalS)}.`);
+    const est = estimateRun(timersFromEnv(env), { escrow: options.escrow, seals: options.seals });
+    const flags = [options.escrow ? '--escrow' : '', options.seals ? '--seals' : ''].filter(Boolean).join(' ');
+    say(`Ready. \`npm run preprod:run${flags ? ` -- ${flags}` : ''}\` should take about ${formatDuration(est.totalS)}.`);
   }
   return missing.length === 0 ? 0 : 1;
 }
@@ -294,11 +297,11 @@ async function run(options: CliOptions): Promise<number> {
   const cfg = requireNetwork(env);
   const settings = settingsFromEnv(env);
   const timers = timersFromEnv(env);
-  const plan = { escrow: options.escrow };
+  const plan = { escrow: options.escrow, seals: options.seals };
   const paths = networkPaths(cfg.name);
 
   // Everything that can be checked without the wallet is checked first.
-  const pre = await preflight({ env, vaultDir: VAULT_DIR, escrowDir: ESCROW_DIR, escrow: options.escrow });
+  const pre = await preflight({ env, vaultDir: VAULT_DIR, escrowDir: ESCROW_DIR, escrow: options.escrow, sealsDir: SEALS_DIR, seals: options.seals });
   for (const l of pre.lines) say(formatLine(l));
   if (pre.missing.length > 0) {
     say('');
@@ -385,11 +388,12 @@ function status(options: CliOptions): number {
     say(`No run recorded for ${name} (${paths.state} does not exist).`);
     return 0;
   }
-  const plan = { escrow: options.escrow || state.steps.escrowDeploy !== undefined };
+  const plan = { escrow: options.escrow || state.steps.escrowDeploy !== undefined, seals: options.seals || state.steps.sealsDeploy !== undefined };
   const remaining = stepsFor(plan).filter((s) => state.steps[s] === undefined);
   say(`Run on ${name}, started ${state.createdAt}`);
   if (state.vault) say(`Vault: ${state.vault.address}`);
   if (state.escrow) say(`Escrow: ${state.escrow.address}`);
+  if (state.seals) say(`Seal register: ${state.seals.address} (sealed text fingerprint ${state.seals.fingerprint})`);
   say('');
   say(summaryTable(stepsFor(plan).map((s) => state.steps[s]).filter((r): r is StepRecord => r !== undefined)));
   say('');
@@ -416,7 +420,7 @@ async function main(): Promise<number> {
     case 'status': return status(options);
     case 'dryrun': {
       const { dryRun } = await import('./dryrun.js');
-      const ok = await dryRun({ escrow: options.escrow, prove: options.prove, log: say });
+      const ok = await dryRun({ escrow: options.escrow, seals: options.seals, prove: options.prove, log: say });
       return ok ? 0 : 1;
     }
     default:

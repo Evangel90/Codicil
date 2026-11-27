@@ -108,6 +108,28 @@ describe('preflight', () => {
     expect(net.urls.some((u) => u.includes(`project_id=${TOKEN}`))).toBe(true);
   });
 
+  it('checks the seal register only when asked, and with it the vault circuit it calls', async () => {
+    const net = fakeNetwork();
+    const base = { env: { BLOCKFROST_PROJECT_ID: TOKEN, WALLET_SEED: SEED }, escrowDir: fakeContract([]), escrow: false, fetch: net.fetch };
+    const ready = await preflight({ ...base, vaultDir: fakeContract(VAULT_CIRCUITS), sealsDir: fakeContract(['seal', 'unseal', 'handOver', 'state']), seals: true });
+    expect(ready.missing).toEqual([]);
+    expect(ready.artifacts.map((a) => a.contract)).toEqual(['codicil_vault', 'codicil_seals']);
+    expect(ready.lines.map(formatLine).join('\n')).toMatch(/codicil_seals: 4 verifier keys, 2 prover keys/);
+
+    // The register's keys are missing: said once, by name.
+    const noKeys = await preflight({ ...base, vaultDir: fakeContract(VAULT_CIRCUITS), sealsDir: fakeContract(['seal', 'unseal', 'handOver', 'state'], { keys: false }), seals: true });
+    expect(noKeys.missing.join(' ')).toMatch(/codicil_seals has no proving keys/);
+
+    // A vault built without the hook the register calls is not enough.
+    const noHook = await preflight({ ...base, vaultDir: fakeContract(VAULT_CIRCUITS.filter((c) => c !== 'isReleasedForContract')), sealsDir: fakeContract(['seal', 'handOver']), seals: true });
+    expect(noHook.missing.join(' ')).toMatch(/codicil_vault has no circuit "isReleasedForContract"/);
+
+    // Not asked for: the register is not looked at, even when its directory is given.
+    const off = await preflight({ ...base, vaultDir: fakeContract(VAULT_CIRCUITS.filter((c) => c !== 'isReleasedForContract')), sealsDir: '/nowhere' });
+    expect(off.missing).toEqual([]);
+    expect(off.artifacts.map((a) => a.contract)).toEqual(['codicil_vault']);
+  });
+
   it('says exactly what is missing on a fresh checkout', async () => {
     const pre = await preflight({
       env: {},

@@ -23,8 +23,8 @@ import {
   ESCROW_RUN_CIRCUITS,
   estimateProofMemoryGiB,
   estimateProofSeconds,
-  VAULT_ESCROW_CIRCUITS,
-  VAULT_RUN_CIRCUITS,
+  SEALS_RUN_CIRCUITS,
+  vaultCircuitsFor,
   type ArtifactReport,
 } from './artifacts.js';
 import { probeIndexer, probeNode, probeProofServer, type Fetch, type IndexerBlock, type NodeInfo, type ProofServerInfo } from './probes.js';
@@ -55,6 +55,9 @@ export interface PreflightInput {
   vaultDir: string;
   escrowDir: string;
   escrow: boolean;
+  /** The seal register's compiled directory; needed only with `seals`. */
+  sealsDir?: string;
+  seals?: boolean;
   fetch?: Fetch;
 }
 
@@ -120,13 +123,15 @@ export async function preflight(input: PreflightInput): Promise<Preflight> {
   }
 
   // 4. Compiled artifacts.
-  const vaultCircuits = [...VAULT_RUN_CIRCUITS, ...(input.escrow ? VAULT_ESCROW_CIRCUITS : [])];
+  const seals = input.seals === true && input.sealsDir !== undefined;
+  const vaultCircuits = vaultCircuitsFor({ escrow: input.escrow, seals });
   const reports = [checkArtifacts('codicil_vault', input.vaultDir, vaultCircuits)];
   if (input.escrow) reports.push(checkArtifacts('inheritable_escrow', input.escrowDir, ESCROW_RUN_CIRCUITS));
+  if (seals) reports.push(checkArtifacts('codicil_seals', input.sealsDir!, SEALS_RUN_CIRCUITS));
   out.artifacts = reports;
   for (const r of reports) {
     if (r.ok) {
-      const proven = r.contract === 'codicil_vault' ? vaultCircuits : ESCROW_RUN_CIRCUITS;
+      const proven = r.contract === 'codicil_vault' ? vaultCircuits : r.contract === 'codicil_seals' ? SEALS_RUN_CIRCUITS : ESCROW_RUN_CIRCUITS;
       const sizes = circuitSizes(r.dir, proven);
       out.maxK = Math.max(out.maxK ?? 0, sizes[0].k);
       line('ok', `${r.contract}: ${r.circuits.length} verifier keys, ${proven.length} prover keys (compiler ${r.compilerVersion}, runtime ${r.runtimeVersion})`);

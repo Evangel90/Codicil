@@ -30,7 +30,36 @@ export const VAULT_STEPS = [
 /** Optional escrow steps (gate V12), run after the vault is released. */
 export const ESCROW_STEPS = ['escrowDeploy', 'escrowDeposit', 'escrowWithdraw'] as const;
 
-export const ALL_STEPS = [...VAULT_STEPS, ...ESCROW_STEPS] as const;
+/**
+ * Optional seal register steps, in two parts, because the point is what the
+ * register does on each side of the release. The first part runs while the
+ * vault is armed, between the two check-ins: the first check-in has just
+ * pushed the deadline as far out as it goes, so there is room. The second
+ * part runs once the vault is released.
+ *
+ * `sealsSeal` and both hand-overs are cross-contract calls: the register asks
+ * the vault whether it has released. `sealsRefused` and `sealsOpen` send
+ * nothing: a call the register refuses fails on this machine, against the
+ * chain's state, before anything is proven.
+ */
+export const SEALS_BEFORE_STEPS = ['sealsDeploy', 'sealsSeal', 'sealsRefused'] as const;
+export const SEALS_AFTER_STEPS = ['sealsHandOver1', 'sealsHandOver2', 'sealsOpen'] as const;
+export const SEALS_STEPS = [...SEALS_BEFORE_STEPS, ...SEALS_AFTER_STEPS] as const;
+
+/** Every step, in the order a run with everything switched on performs them. */
+export const ALL_STEPS = [
+  'deploy',
+  'deposit',
+  'checkInPasskey',
+  ...SEALS_BEFORE_STEPS,
+  'checkInEd25519',
+  'triggerTimeout',
+  'finalizeRelease',
+  'claim',
+  'readEvents',
+  ...ESCROW_STEPS,
+  ...SEALS_AFTER_STEPS,
+] as const;
 export type Step = (typeof ALL_STEPS)[number];
 
 /** What one finished step left behind. Nothing here is secret. */
@@ -87,6 +116,12 @@ export interface Actors {
   leaves: { heirKeyCommit: Uint8Array; backupKeyCommit: Uint8Array; shareBps: bigint; unlockAt: bigint; salt: Uint8Array }[];
   /** Escrow beneficiary secret, when the escrow steps run. */
   escrowSecret?: Uint8Array;
+  /**
+   * What the seal register steps need across restarts: the keeper's secret,
+   * the sealed text (as `sealedToText` writes it), the pieces of its key, and
+   * the words that were sealed, to compare with what opens.
+   */
+  seals?: { keeper: Uint8Array; sealedText: string; pieces: { x: number; y: Uint8Array }[]; text: string };
 }
 
 export interface VaultInfo {
@@ -116,6 +151,8 @@ export interface RunState {
   actors: Actors;
   vault?: VaultInfo;
   escrow?: { address: string; amount: bigint };
+  /** The seal register and the fingerprint of the text sealed in it. Both are public. */
+  seals?: { address: string; fingerprint: string };
   releaseEvent?: ReleaseEvent;
   steps: Partial<Record<Step, StepRecord>>;
 }
@@ -123,10 +160,14 @@ export interface RunState {
 export interface StepPlan {
   /** Whether the escrow steps are part of this run. */
   escrow: boolean;
+  /** Whether the seal register steps are part of this run. */
+  seals?: boolean;
 }
 
 export function stepsFor(plan: StepPlan): readonly Step[] {
-  return plan.escrow ? ALL_STEPS : VAULT_STEPS;
+  const escrow: readonly string[] = ESCROW_STEPS;
+  const seals: readonly string[] = SEALS_STEPS;
+  return ALL_STEPS.filter((s) => (plan.escrow || !escrow.includes(s)) && (plan.seals === true || !seals.includes(s)));
 }
 
 /** The first step with no record, or undefined when the run is complete. */
@@ -148,7 +189,7 @@ export function stateProblems(state: RunState, network: NetworkName): string[] {
   if (state.version !== STATE_VERSION) problems.push(`state file version ${state.version} is not ${STATE_VERSION}`);
   if (state.network !== network) problems.push(`state file is for ${state.network}, but this run targets ${network}`);
   // Within each group the recorded steps must be a prefix: no step without the ones before it.
-  for (const group of [VAULT_STEPS, ESCROW_STEPS] as const) {
+  for (const group of [VAULT_STEPS, ESCROW_STEPS, SEALS_STEPS] as const) {
     let gap: Step | undefined;
     for (const s of group) {
       if (state.steps[s] === undefined) gap ??= s;
@@ -157,6 +198,8 @@ export function stateProblems(state: RunState, network: NetworkName): string[] {
   }
   if (state.steps.deploy !== undefined && state.vault === undefined) problems.push('deploy is recorded but the vault address is missing');
   if (state.steps.escrowDeploy !== undefined && state.escrow === undefined) problems.push('escrowDeploy is recorded but the escrow address is missing');
+  if (state.steps.sealsDeploy !== undefined && state.seals === undefined) problems.push('sealsDeploy is recorded but the seal register address is missing');
+  if (state.steps.sealsDeploy !== undefined && state.actors.seals === undefined) problems.push('sealsDeploy is recorded but the sealed text and its key pieces are missing');
   return problems;
 }
 

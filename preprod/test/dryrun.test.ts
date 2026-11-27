@@ -10,17 +10,20 @@
 // the real ones.
 
 import { describe, expect, it } from 'vitest';
-import { checkArtifacts, ESCROW_RUN_CIRCUITS, VAULT_ESCROW_CIRCUITS, VAULT_RUN_CIRCUITS } from '../src/artifacts.js';
+import { checkArtifacts, ESCROW_RUN_CIRCUITS, SEALS_RUN_CIRCUITS, VAULT_ESCROW_CIRCUITS, VAULT_RUN_CIRCUITS, vaultCircuitsFor } from '../src/artifacts.js';
 import { buildAll } from '../src/dryrun.js';
 import { VAULT_DEFER_ORDER } from '../src/run.js';
 import { WRITE_BUDGET } from '../src/staged-deploy.js';
-import { ESCROW_DIR, VAULT_DIR } from '../src/paths.js';
+import { ESCROW_DIR, SEALS_DIR, VAULT_DIR } from '../src/paths.js';
 
 const STEPS = ['deploy', 'deposit', 'checkInPasskey', 'checkInEd25519', 'triggerTimeout', 'finalizeRelease', 'claim'];
 const ESCROW = ['escrowDeploy', 'escrowDeposit', 'escrowWithdraw'];
+const SEALS = ['sealsDeploy', 'sealsSeal', 'sealsRefused', 'sealsHandOver1', 'sealsHandOver2', 'sealsOpen'];
 
 const haveKeys = checkArtifacts('codicil_vault', VAULT_DIR, [...VAULT_RUN_CIRCUITS, ...VAULT_ESCROW_CIRCUITS]).ok
   && checkArtifacts('inheritable_escrow', ESCROW_DIR, ESCROW_RUN_CIRCUITS).ok;
+const haveSealsKeys = checkArtifacts('codicil_vault', VAULT_DIR, vaultCircuitsFor({ seals: true })).ok
+  && checkArtifacts('codicil_seals', SEALS_DIR, SEALS_RUN_CIRCUITS).ok;
 
 describe('dry run through Midnight.js', () => {
   it('builds every vault transaction with stand-in keys', async () => {
@@ -38,6 +41,39 @@ describe('dry run through Midnight.js', () => {
     expect(report.steps.filter((s) => !s.ok)).toEqual([]);
     const withdraw = report.steps.find((s) => s.name === 'escrowWithdraw');
     expect(withdraw?.detail).toContain('2 calls in one transaction: isReleasedForContract then withdrawToBeneficiary');
+  });
+
+  it('builds the seal register: refused while the vault is armed, opened from the ledger after the release', async () => {
+    const report = await buildAll({ escrow: false, seals: true, prove: false, artifacts: 'stub' });
+    expect(report.steps.map((s) => s.name)).toEqual([...STEPS, ...SEALS]);
+    expect(report.steps.filter((s) => !s.ok)).toEqual([]);
+    const detail = (name: string): string => report.steps.find((s) => s.name === name)?.detail ?? '';
+    // Sealing and handing over each ask the vault, in the same transaction.
+    expect(detail('sealsSeal')).toMatch(/^2 calls in one transaction: isReleasedForContract then seal; fingerprint [0-9a-f]{12}…, 2 of 3 pieces needed, 3 commitments, 0 pieces on the ledger$/);
+    expect(detail('sealsRefused')).toBe('a genuine piece was refused while vault A is armed: "vault not released"; nothing to prove or send');
+    expect(detail('sealsHandOver1')).toBe('2 calls in one transaction: isReleasedForContract then handOver; piece 3 published, on the ledger: 3');
+    expect(detail('sealsHandOver2')).toBe('2 calls in one transaction: isReleasedForContract then handOver; piece 1 published, on the ledger: 1, 3');
+    expect(detail('sealsOpen')).toBe(
+      'opened the sealed text from pieces 1 and 3 on the ledger: it is the text that was sealed; '
+      + 'a made-up piece was refused: "not a genuine piece"; sealing another text after the release was refused: "vault released"',
+    );
+    // The refused calls and the read send nothing; the other four are transactions.
+    const sent = report.steps.filter((s) => SEALS.includes(s.name) && s.txBytes !== undefined).map((s) => s.name);
+    expect(sent).toEqual(['sealsDeploy', 'sealsSeal', 'sealsHandOver1', 'sealsHandOver2']);
+  });
+
+  it('builds the escrow and the seal register against the same released vault', async () => {
+    const report = await buildAll({ escrow: true, seals: true, prove: false, artifacts: 'stub' });
+    expect(report.steps.map((s) => s.name)).toEqual([...STEPS, ...ESCROW, ...SEALS]);
+    expect(report.steps.filter((s) => !s.ok)).toEqual([]);
+  });
+
+  it.skipIf(!haveSealsKeys)('builds the seal register with the real keys from the full compile', async () => {
+    const report = await buildAll({ escrow: false, seals: true, prove: false });
+    expect(report.artifacts).toBe('real');
+    expect(report.steps.filter((s) => !s.ok)).toEqual([]);
+    // The register is small: its deploy carries four verifier keys and fits a block as it is.
+    expect(report.steps.find((s) => s.name === 'sealsDeploy')?.txBytes).toBeGreaterThan(8_000);
   });
 
   it('reports what each step did to the vault', async () => {
