@@ -88,6 +88,12 @@ class Session {
     }
   }
 
+  /** Signs a message with the connected wallet, when it can: what a wallet key slot needs. */
+  walletSigner(): ((message: string) => Promise<Uint8Array>) | undefined {
+    const wallet = this.wallet;
+    return wallet?.canSign ? (message) => wallet.signData(message) : undefined;
+  }
+
   disconnect() {
     if (this.poll) clearInterval(this.poll);
     this.poll = undefined;

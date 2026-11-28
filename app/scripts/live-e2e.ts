@@ -39,7 +39,9 @@ import type { CallOutcome, VaultChain, VaultHost } from '../src/chain/types.js';
 import { approveWithPasskey, createDemoPasskey } from '../src/demo/passkey.js';
 import { LiveHost } from '../src/live/live-chain.js';
 import { describeProblem } from '../src/live/problems.js';
-import { decodeRecords, type OwnerRecord, type RecordStorage } from '../src/live/records.js';
+import { newRecoveryCode, recoveryCodeToText } from '@codicil/sdk';
+import { readWithCode } from '../src/live/keyring.js';
+import type { OwnerRecord, RecordStorage } from '../src/live/records.js';
 import { CLOCK_MARGIN, LiveStore, MINUTE, type HeirView, type LiveSnapshot, type OwnerView } from '../src/live/store.js';
 import { formatDust, formatNight, STAR_PER_NIGHT } from '../src/live/wallet.js';
 import { hasProvingKeys, serveArtifacts, VAULT_ARTIFACTS_DIR, ZK_ROUTE } from '../zk-server.js';
@@ -72,6 +74,28 @@ function fileStorage(path: string): RecordStorage {
     // Holds the throwaway vault's keys: gitignored, and readable by this user only.
     save: (text) => writeFileAtomic(path, text),
   };
+}
+
+/**
+ * Open a store's records with the recovery code kept beside its file, or set
+ * the store up with a new code the first time. A person would print the code;
+ * this run keeps it next to the throwaway vault's records.
+ */
+async function openStore(store: LiveStore, codeFile: string): Promise<string> {
+  const state = store.getSnapshot().access.state;
+  if (state === 'locked') {
+    const code = readFileSync(codeFile, 'utf8').trim();
+    await store.unlock('recovery-code', code);
+    return code;
+  }
+  if (state === 'new') {
+    const bytes = newRecoveryCode();
+    const code = recoveryCodeToText(bytes);
+    writeFileAtomic(codeFile, code);
+    await store.setUp({ code: bytes });
+    return code;
+  }
+  return readFileSync(codeFile, 'utf8').trim();
 }
 
 // ─── Every transaction the stores make, written down ────────────────────────
@@ -182,6 +206,7 @@ async function main(): Promise<number> {
     // ── The owner's browser ──
     const owner = new LiveStore({ storage: fileStorage(files.owner), passkeys, rpId: 'localhost' });
     owner.walletName = wallet.name;
+    const ownerCode = await openStore(owner, files.owner.replace(/\.json$/, '.code'));
     await owner.attach(recording(live, rows, 'owner'));
     const ownerView = () => owner.getSnapshot().active as OwnerView | undefined;
 
@@ -201,7 +226,8 @@ async function main(): Promise<number> {
       log('── owner: continue the interrupted deployment ──');
       mustSucceed(await owner.resumeDeployment(), owner.getSnapshot(), 'finishing the vault');
     }
-    const record = decodeRecords(readFileSync(files.owner, 'utf8'))[0] as OwnerRecord;
+    await owner.saved();
+    const record = (await readWithCode(readFileSync(files.owner, 'utf8'), ownerCode)).records[0] as OwnerRecord;
     const deployment = record.deployment!;
     log(`vault ${deployment.address}: deploy tx ${deployment.deployTxHash ?? '(recovered)'}, ${deployment.inserted.length} circuits added afterwards`);
     log(`first deadline ${new Date((record.firstDeadline ?? 0) * 1000).toISOString()}`);
@@ -217,6 +243,7 @@ async function main(): Promise<number> {
     // ── A guardian's browser ──
     const guardian = new LiveStore({ storage: fileStorage(files.guardian), passkeys });
     guardian.walletName = wallet.name;
+    await openStore(guardian, files.guardian.replace(/\.json$/, '.code'));
     await guardian.attach(recording(live, rows, 'guardian'));
     if (!guardian.getSnapshot().active) await guardian.join(owner.guardianKit(ownerView()!.guardians[0].id));
     {
@@ -246,6 +273,7 @@ async function main(): Promise<number> {
     // ── An heir's browser ──
     const heir = new LiveStore({ storage: fileStorage(files.heir), passkeys });
     heir.walletName = wallet.name;
+    await openStore(heir, files.heir.replace(/\.json$/, '.code'));
     await heir.attach(recording(live, rows, 'heir'));
     if (!heir.getSnapshot().active) await heir.join(owner.heirKit(ownerView()!.heirs[0].id));
     const heirView = () => heir.getSnapshot().active as HeirView;
@@ -284,11 +312,11 @@ async function main(): Promise<number> {
     if (h.status !== 'claimed') throw new Error(`the run ended with the heir's share ${h.status}, not claimed`);
 
     // ── A backup of the owner's browser opens in a clean one ──
-    const backup = await owner.exportBackup('correct horse battery');
+    const backup = await owner.exportBackup();
     const restoredStorage: RecordStorage & { text: string | null } = { text: null, load() { return this.text; }, save(t) { this.text = t; } };
     const restored = new LiveStore({ storage: restoredStorage, passkeys });
     await restored.attach(live);
-    const merged = await restored.importBackup(backup, 'correct horse battery');
+    const merged = await restored.importBackup(backup, { kind: 'recovery-code', secret: ownerCode });
     const back = restored.getSnapshot().active as OwnerView;
     if (merged.added !== 1 || back.vault?.phase !== Phase.released) throw new Error('the restored backup did not open the released vault');
     log('');

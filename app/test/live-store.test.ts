@@ -4,6 +4,7 @@
 // The live store, on the in-memory chain. This is the same store the web app
 // runs on a Midnight network: only the host behind the chain boundary differs.
 // Three people are three stores with their own storage, as three browsers are.
+// Each sets up its own keyring first, as each person's browser does.
 
 import { describe, expect, it } from 'vitest';
 import { Phase, type VaultConfig } from '@codicil/contracts/vault';
@@ -11,7 +12,9 @@ import type { CreateVaultOptions, DeploymentRecord, VaultChain, VaultHost } from
 import { MemoryHost } from '../src/demo/chain.js';
 import { approveWithPasskey, createDemoPasskey } from '../src/demo/passkey.js';
 import { ProofServerDown } from '../src/live/problems.js';
-import { decodeRecords, memoryStorage, type OwnerRecord } from '../src/live/records.js';
+import { newRecoveryCode, recoveryCodeToText } from '@codicil/sdk';
+import { readWithCode } from '../src/live/keyring.js';
+import { memoryStorage, type OwnerRecord, type RecordStorage, type VaultRecord } from '../src/live/records.js';
 import {
   DAY, DEPLOY_ALLOWANCE, draftProblems, emptyDraft, LiveStore, MINUTE, TESTING_TIMERS,
   type GuardianView, type HeirView, type OwnerView, type VaultDraft,
@@ -33,24 +36,41 @@ const draft = (over: Partial<VaultDraft> = {}): VaultDraft => ({
   ...over,
 });
 
-function newStore(storage = memoryStorage()) {
-  return { store: new LiveStore({ storage, passkeys, rpId: 'localhost' }), storage };
+/** A browser: a store on its own storage, set up with its own recovery code. */
+async function newStore(storage = memoryStorage()) {
+  const store = new LiveStore({ storage, passkeys, rpId: 'localhost' });
+  const bytes = newRecoveryCode();
+  await store.setUp({ code: bytes });
+  return { store, storage, code: recoveryCodeToText(bytes) };
+}
+
+/** What a browser's storage holds, opened as its owner would open it. */
+async function recordsIn(store: LiveStore, storage: { text: string | null }, code: string): Promise<VaultRecord[]> {
+  await store.saved();
+  return (await readWithCode(storage.text!, code)).records;
+}
+
+/** The same browser, reloaded: a new store on the same storage, unlocked with the code. */
+async function reopened(storage: RecordStorage, code: string, rpId?: string) {
+  const again = new LiveStore({ storage, passkeys, ...(rpId ? { rpId } : {}) });
+  await again.unlock('recovery-code', code);
+  return again;
 }
 
 async function ownerWithVault(over: Partial<VaultDraft> = {}) {
   const host = new MemoryHost(T0);
-  const { store, storage } = newStore();
+  const { store, storage, code } = await newStore();
   await store.attach(host);
   expect(await store.createVault(draft(over), createDemoPasskey())).toBe(true);
   const view = () => store.getSnapshot().active as OwnerView;
-  return { host, store, storage, view };
+  return { host, store, storage, view, code };
 }
 
 async function joined(host: VaultHost, kit: string) {
-  const { store, storage } = newStore();
+  const { store, storage, code } = await newStore();
   await store.attach(host);
   await store.join(kit);
-  return { store, storage };
+  return { store, storage, code };
 }
 
 describe('creating a vault', () => {
@@ -91,14 +111,14 @@ describe('creating a vault', () => {
   });
 
   it('keeps every secret in the record, and nothing leaves through the snapshot', async () => {
-    const { storage, view } = await ownerWithVault();
-    const [record] = decodeRecords(storage.text) as OwnerRecord[];
+    const { store, storage, view, code } = await ownerWithVault();
+    const [record] = await recordsIn(store, storage, code) as OwnerRecord[];
     expect(record.heirs[0].sk).toBeTypeOf('bigint');
     expect(record.heirs[0].backup?.keySalt).toBeInstanceOf(Uint8Array);
     expect(record.guardians[0].secret).toHaveLength(32);
     expect(record.leaves).toHaveLength(2);
     expect(record.deployment?.complete).toBe(true);
-    expect(JSON.stringify(view(), (_k, v) => (typeof v === 'bigint' ? v.toString() : v))).not.toContain(record.heirs[0].sk.toString());
+    expect(JSON.stringify(view(), (_k, v) => (typeof v === 'bigint' ? v.toString() : v))).not.toContain(record.heirs[0].sk!.toString());
   });
 });
 
@@ -214,9 +234,13 @@ describe('the whole life of a vault, three people on three devices', () => {
 
 describe('what survives a reload', () => {
   it('a new store on the same storage finds the vault and reads it again', async () => {
-    const { host, storage, store } = await ownerWithVault();
+    const { host, storage, store, code } = await ownerWithVault();
     await store.deposit(3_000_000n);
-    const again = new LiveStore({ storage, passkeys, rpId: 'localhost' });
+    await store.saved();
+    const locked = new LiveStore({ storage, passkeys, rpId: 'localhost' });
+    expect(locked.getSnapshot().access.state).toBe('locked');
+    expect(locked.getSnapshot().records).toEqual([]);
+    const again = await reopened(storage, code, 'localhost');
     expect(again.getSnapshot().records).toHaveLength(1);
     expect(again.getSnapshot().active).toMatchObject({ role: 'owner', status: 'ready', vault: undefined });
     await again.attach(host);
@@ -227,9 +251,10 @@ describe('what survives a reload', () => {
   });
 
   it('refuses to read a vault from the wrong network, and says which one it is on', async () => {
-    const { storage } = await ownerWithVault();
+    const { store, storage, code } = await ownerWithVault();
+    await store.saved();
     const elsewhere: VaultHost = Object.assign(new MemoryHost(T0), { networkId: 'preview' });
-    const again = new LiveStore({ storage, passkeys });
+    const again = await reopened(storage, code);
     await again.attach(elsewhere);
     expect(again.getSnapshot().load).toMatchObject({ state: 'error', problem: { kind: 'wrong-network' } });
     expect(again.getSnapshot().load.problem).toMatchObject({ title: 'This vault is on Memory' });
@@ -241,7 +266,7 @@ describe('what survives a reload', () => {
     const heir = await joined(host, store.heirKit(view().heirs[1].id));
     heir.store.forget(heir.store.getSnapshot().activeId!);
     expect(heir.store.getSnapshot().records).toEqual([]);
-    expect(decodeRecords(heir.storage.text)).toEqual([]);
+    expect(await recordsIn(heir.store, heir.storage, heir.code)).toEqual([]);
     expect(view().vault?.phase).toBe(Phase.armed);
   });
 });
@@ -279,7 +304,7 @@ class InterruptedHost extends MemoryHost {
 describe('a deployment that is interrupted', () => {
   it('keeps what was typed, says what happened, and continues where it stopped', async () => {
     const host = new InterruptedHost(T0);
-    const { store, storage } = newStore();
+    const { store, storage, code } = await newStore();
     await store.attach(host);
     expect(await store.createVault(draft(), createDemoPasskey())).toBe(false);
 
@@ -287,14 +312,14 @@ describe('a deployment that is interrupted', () => {
     expect(stopped.active).toMatchObject({ role: 'owner', status: 'interrupted', vault: undefined });
     expect(stopped.deploy).toMatchObject({ running: false, done: 3, total: 8, problem: { kind: 'rejected' } });
     expect(stopped.deploy?.label).toBe('Adding the part for changing the will');
-    const [saved] = decodeRecords(storage.text) as OwnerRecord[];
+    const [saved] = await recordsIn(store, storage, code) as OwnerRecord[];
     expect(saved.deployment).toMatchObject({ complete: false, deployTxHash: 'f0'.repeat(32) });
     expect(saved.heirs.map((h) => h.name)).toEqual(['Tunde', 'Sade']);
     // No invitations from half a vault.
     expect(() => store.heirKit(saved.heirs[0].id)).toThrow(/finish creating the vault first/);
 
     // The tab is closed. Later, in a new one:
-    const later = new LiveStore({ storage, passkeys, rpId: 'localhost' });
+    const later = await reopened(storage, code, 'localhost');
     await later.attach(host);
     expect(later.getSnapshot().active).toMatchObject({ status: 'interrupted' });
     expect(await later.resumeDeployment()).toBe(true);
@@ -304,14 +329,14 @@ describe('a deployment that is interrupted', () => {
     expect(done.active).toMatchObject({ status: 'ready' });
     expect((done.active as OwnerView).vault?.phase).toBe(Phase.armed);
     // The deadline is the one the vault was deployed with, not a new one.
-    expect((decodeRecords(storage.text)[0] as OwnerRecord).firstDeadline).toBe(saved.firstDeadline);
+    expect(((await recordsIn(later, storage, code))[0] as OwnerRecord).firstDeadline).toBe(saved.firstDeadline);
     expect(later.heirKit(saved.heirs[0].id)).toMatch(/^codicil:heir-kit:v1:/);
   });
 
   it('stops before anything is sent when the proof server is not running', async () => {
     const host = new InterruptedHost(T0);
     host.failures = 0;
-    const { store } = newStore();
+    const { store } = await newStore();
     await store.attach(host);
     // Deployed on a plain host first, so there is a vault to act on.
     const plain = new MemoryHost(T0);
@@ -352,7 +377,7 @@ describe('invitations', () => {
   it('refuses an invitation for another network before saving anything', async () => {
     const { store, view } = await ownerWithVault();
     const kit = store.heirKit(view().heirs[0].id);
-    const elsewhere = newStore();
+    const elsewhere = await newStore();
     await elsewhere.store.attach(Object.assign(new MemoryHost(T0), { networkId: 'preprod' }));
     await expect(elsewhere.store.join(kit)).rejects.toThrow(/for a vault on Midnight Memory, and your wallet is on Preprod/);
     expect(elsewhere.store.getSnapshot().records).toEqual([]);

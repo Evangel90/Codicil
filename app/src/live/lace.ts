@@ -130,6 +130,24 @@ export class LaceWallet implements WalletAdapter {
     await this.api.submitTransaction(toHex(tx));
   }
 
+  /** Whether the wallet offers `signData` (connector 4.1.0 lists it; a wallet may still leave it out). */
+  get canSign(): boolean {
+    return typeof (this.api as Partial<ConnectedAPI>).signData === 'function';
+  }
+
+  /**
+   * The wallet's signature over `message` with its unshielded key, as 64
+   * bytes. The connector allows BIP-340 Schnorr (the default) and ECDSA over
+   * secp256k1. BIP-340 recommends fresh randomness in every signature, so the
+   * same message may sign differently each time; a key slot needs it not to
+   * (the store checks with two signatures before adding one).
+   */
+  async signData(message: string): Promise<Uint8Array> {
+    if (!this.canSign) throw new Error('this wallet cannot sign messages');
+    const signed = await this.api.signData(message, { encoding: 'text', keyType: 'unshielded' });
+    return fromHex(signed.signature);
+  }
+
   /** False once the wallet has been locked, or switched to another network. */
   async stillConnected(): Promise<boolean> {
     try {
