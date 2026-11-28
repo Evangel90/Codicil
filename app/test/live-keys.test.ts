@@ -354,3 +354,15 @@ describe('heirs and guardians make their own keys', () => {
     expect(people.sade.store.getSnapshot().active?.role).toBe('invited');
   });
 });
+
+describe('stored text this version cannot read', () => {
+  it('is set aside before anything is written over it', () => {
+    const kept: string[] = [];
+    const storage = { ...memoryStorage('{"format":2,"keyring":"damaged'), keepAside: (t: string) => { kept.push(t); } };
+    new LiveStore({ storage, passkeys, rpId: 'localhost' });
+    expect(kept).toEqual(['{"format":2,"keyring":"damaged']);
+    const empty = { ...memoryStorage(null), keepAside: (t: string) => { kept.push(t); } };
+    new LiveStore({ storage: empty, passkeys, rpId: 'localhost' });
+    expect(kept).toHaveLength(1);
+  });
+});

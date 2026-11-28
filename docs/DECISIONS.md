@@ -566,7 +566,10 @@ domain can ask those passkeys for signatures. Files (a PDF, a scan) could not be
      slow key stretching.
    - **wallet**: a hash of the wallet's signature over a fixed message. Ed25519 signatures are
      deterministic, so the same wallet gives the same secret; the slot is only added after two
-     signatures agree. Tied to the wallet, not to a website.
+     signatures agree. Tied to the wallet, not to a website. Lace's Midnight `signData` (DApp
+     connector 4.1.0) signs with BIP-340 Schnorr, which normally adds fresh randomness, so Lace is
+     expected to fail that check; the app then says so and offers the other slots. A Cardano wallet
+     signing with Ed25519 (CIP-30) passes it.
    Losing the domain closes the passkey slot and leaves the others. A copy of the app hosted
    anywhere else opens the same keyring through them.
 

@@ -188,6 +188,12 @@ export const recoveryLabel = (recordId: string, generation = 0): string =>
 export interface RecordStorage {
   load(): string | null;
   save(text: string): void;
+  /**
+   * Keep a copy of stored text this version cannot read, before anything new
+   * is written over it: damaged or from a newer version, it may still be
+   * someone's only copy of their keys.
+   */
+  keepAside?(text: string): void;
 }
 
 export const STORAGE_KEY = 'codicil.vaults.v1';
@@ -205,6 +211,7 @@ export function browserStorage(key = STORAGE_KEY): RecordStorage {
   return {
     load: () => { try { return localStorage.getItem(key); } catch { return null; } },
     save: (text) => { localStorage.setItem(key, text); },
+    keepAside: (text) => { try { localStorage.setItem(`${key}.unreadable.${Date.now()}`, text); } catch { /* storage full: nothing more to do */ } },
   };
 }
 

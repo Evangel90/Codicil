@@ -526,7 +526,10 @@ export class LiveStore {
   private derived = new Map<string, ReturnType<typeof inviteeKeys>>();
 
   constructor(private readonly deps: LiveDeps) {
-    const stored = readStored(deps.storage.load());
+    const text = deps.storage.load();
+    const stored = readStored(text);
+    // Text that is there but cannot be read is set aside, never written over.
+    if (stored.kind === 'empty' && text && text.trim()) deps.storage.keepAside?.(text);
     this.records = [];
     if (stored.kind === 'locked') {
       this.locked = stored.locked;
