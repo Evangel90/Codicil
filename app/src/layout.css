@@ -474,6 +474,11 @@
 .msg-via legend { font-size: 13px; color: var(--o-text-2); margin-bottom: 8px; }
 .msg-fp { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; }
 .msg-facts { display: flex; flex-direction: column; gap: 8px; max-width: 420px; }
+.msg-attach { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.msg-pick { cursor: pointer; }
+.msg-pick:focus-within { outline: 1.5px solid var(--o-signal); outline-offset: 3px; }
+.msg-pick[aria-disabled] { opacity: 0.6; pointer-events: none; }
+.msg-attached { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; overflow-wrap: anywhere; }
 .msg-facts > div { display: flex; justify-content: space-between; align-items: center; gap: 16px; font-size: 14px; }
 .msg-facts dt { color: var(--o-text-2); }
 
