@@ -11,11 +11,12 @@ import { createCircuitContext, createConstructorContext, sampleContractAddress }
 import { createProvingPayload, unshieldedToken } from '@midnight-ntwrk/midnight-js-protocol/v9';
 import { proofDataIntoSerializedPreimage } from '@midnightntwrk/onchain-runtime-v4';
 import { Contract, Phase } from '@codicil/contracts/vault';
-import { createWitnesses, VAULT_OPTIONS_OFF, rpIdHash } from '@codicil/sdk';
+import { createWitnesses, newRecoveryCode, recoveryCodeToText, VAULT_OPTIONS_OFF, rpIdHash } from '@codicil/sdk';
 import type { VaultChain, VaultHost } from '../src/chain/types.js';
 import { DemoChain, MemoryHost } from '../src/demo/chain.js';
 import { approveWithPasskey, createDemoPasskey } from '../src/demo/passkey.js';
 import { decodeJson, encodeJson, fromBase64Url, toBase64Url } from '../src/live/codec.js';
+import { readWithCode } from '../src/live/keyring.js';
 import { connectLace, findWallets, NIGHT_TOKEN, pickWallet } from '../src/live/lace.js';
 import {
   describeProblem, errorChain, InputProblem, nodeReason, NoWallet, OldWallet, ProofServerDown, walletReadiness, WrongNetwork,
@@ -129,33 +130,58 @@ async function vaultWithRecords() {
   const host = new MemoryHost(T0);
   const storage = memoryStorage();
   const store = new LiveStore({ storage, passkeys: { approve: approveWithPasskey }, rpId: 'localhost' });
+  const bytes = newRecoveryCode();
+  const code = recoveryCodeToText(bytes);
+  await store.setUp({ code: bytes });
   await store.attach(host);
   await store.createVault({
     ownerName: 'Ngozi', heirs: [{ name: 'Tunde', sharePct: 100, backupName: 'Funke' }], guardians: ['Dr. Bello'], threshold: 1,
     timers: { every: 600, window: 180, grace: 0, testing: true },
   }, createDemoPasskey());
   const view = store.getSnapshot().active as OwnerView;
-  return { host, store, storage, view, records: decodeRecords(storage.text) };
+  await store.saved();
+  return { host, store, storage, view, code, records: (await readWithCode(storage.text!, code)).records };
 }
 
+const cleanStore = () => new LiveStore({ storage: memoryStorage(), passkeys: { approve: approveWithPasskey }, rpId: 'localhost' });
+
 describe('backups', () => {
-  it('a backup opens with its passphrase in a clean browser, and the vault works again', async () => {
-    const { host, store, records } = await vaultWithRecords();
-    const file = await store.exportBackup('correct horse battery');
+  it('a backup opens with the printed recovery code in a clean browser, and the vault works again', async () => {
+    const { host, store, records, code } = await vaultWithRecords();
+    const file = await store.exportBackup();
     const parsed = JSON.parse(file) as Record<string, unknown>;
-    expect(parsed).toMatchObject({ format: 'codicil-backup', version: 1, vaults: 1 });
-    // Nothing readable without the passphrase: no names, no keys.
+    expect(parsed).toMatchObject({ format: 'codicil-backup', version: 2, vaults: 1 });
+    // Nothing readable without the code: no names, no keys.
     expect(file).not.toContain('Ngozi');
     expect(file).not.toContain('Tunde');
     expect(file).not.toContain(records[0].id);
 
-    const clean = new LiveStore({ storage: memoryStorage(), passkeys: { approve: approveWithPasskey }, rpId: 'localhost' });
+    const clean = cleanStore();
     await clean.attach(host);
-    expect(await clean.importBackup(file, 'correct horse battery')).toEqual({ added: 1, updated: 0 });
+    expect(clean.backupNeeds(file)).toMatchObject({ kind: 'keyring', code: true, passkeys: [] });
+    await expect(clean.importBackup(file, { kind: 'recovery-code', secret: recoveryCodeToText(newRecoveryCode()) })).rejects.toThrow(/does not open this/);
+    expect(await clean.importBackup(file, { kind: 'recovery-code', secret: code })).toEqual({ added: 1, updated: 0 });
+    // A clean browser takes the file's keyring as its own: the same code opens it from now on.
+    expect(clean.getSnapshot().access.state).toBe('open');
     expect(clean.getSnapshot().active).toMatchObject({ role: 'owner', status: 'ready', ownerName: 'Ngozi' });
     expect(await clean.checkIn()).toBe(true);
     // Restoring the same file again changes nothing.
-    expect(await clean.importBackup(file, 'correct horse battery')).toEqual({ added: 0, updated: 0 });
+    expect(await clean.importBackup(file, { kind: 'recovery-code', secret: code })).toEqual({ added: 0, updated: 0 });
+  });
+
+  it('an older backup, locked with a passphrase, still opens, and is locked with the keyring once the browser is set up', async () => {
+    const { host, records } = await vaultWithRecords();
+    const file = await exportBackup(records, 'correct horse battery');
+    const clean = cleanStore();
+    await clean.attach(host);
+    expect(clean.backupNeeds(file)).toEqual({ kind: 'passphrase' });
+    await expect(clean.importBackup(file, { kind: 'recovery-code', secret: 'x' })).rejects.toThrow(/locked with a passphrase/);
+    expect(await clean.importBackup(file, { passphrase: 'correct horse battery' })).toEqual({ added: 1, updated: 0 });
+    // Not set up yet: the vault waits, and is locked with everything else at set-up.
+    expect(clean.getSnapshot().access).toMatchObject({ state: 'new', legacy: 1 });
+    await clean.setUp({ code: newRecoveryCode() });
+    expect(clean.getSnapshot().active).toMatchObject({ role: 'owner', status: 'ready' });
+    expect(await clean.checkIn()).toBe(true);
   });
 
   it('refuses a wrong passphrase, a short one, and a file that is not a backup', async () => {

@@ -21,3 +21,11 @@
 .live-loading { min-height: 40vh; display: grid; place-content: center; gap: 16px; justify-items: center; }
 
 .err-body code.err-code { padding: 8px 10px; border: 1px solid var(--o-line); border-radius: var(--o-r-xs); background: var(--o-surface-2); color: var(--o-text-2); word-break: break-all; }
+
+/* The printed recovery code: large, in groups, easy to copy by hand. */
+.live-code { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 0; padding: 16px; border: 1px dashed var(--o-line); border-radius: var(--o-r-sm); background: var(--o-surface-2); font-size: clamp(18px, 4.6vw, 24px); letter-spacing: 0.06em; }
+.live-reply { min-height: 84px; }
+@media print {
+  .topbar, .demobar, .appfoot, .btn, .field-label, .lede, .eyebrow { display: none !important; }
+  .live-code { border: 1px solid #000; background: none; color: #000; }
+}

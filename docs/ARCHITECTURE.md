@@ -399,13 +399,33 @@ services to use, the person's address, their balances, "balance and sign this tr
   the wallet SDK, sharing its code with the Preprod script. `npm run live:e2e` uses it to drive the
   live store and the live chain end to end on a real network with nobody clicking.
 
-**What the browser keeps** ([`live/records.ts`](../app/src/live/records.ts)): one record per vault
-the person owns, inherits from or guards, in local storage, tagged with its network. An owner's
-record holds the will and its salts, the heirs' keys, the guardians' secrets and the vault's
-maintenance key. Invitations (one line of text, or a link whose fragment carries it) hand an heir or
-a guardian what they need to act from their own browser. A backup file holds every record,
-encrypted with a key derived from a passphrase (PBKDF2-SHA-256, AES-256-GCM). A device passkey is
-never in a record or a backup: it stays in the authenticator.
+**What the browser keeps** ([`live/records.ts`](../app/src/live/records.ts),
+[`live/keyring.ts`](../app/src/live/keyring.ts), [D22](DECISIONS.md)): one record per vault the
+person owns, inherits from or guards, tagged with its network, all encrypted (AES-256-GCM) under
+`recordsKeyFromRoot(root)`. The root is the person's identity root, made on first use and kept in a
+keyring beside the records. The keyring always has a **recovery-code** slot (26 characters and a
+check character, shown once and typed back) and, where the browser and passkey provider support the
+WebAuthn PRF extension, a **passkey** slot ([`live/prf.ts`](../app/src/live/prf.ts)); the owner's
+passkey is one credential that both opens the keyring and signs check-ins. Without PRF the code
+opens it each time. A **wallet** slot is offered only for a wallet whose `signData` gives the same
+signature twice. Until the keyring is opened the store holds no records; plain records from before
+are locked on first set-up.
+
+An owner's record holds the will and its salts and the vault's maintenance key. The vault's
+**recovery secret** is not stored: it is `deriveFromRoot(root, "vault-recovery:<record id>")`, and
+every live vault is created with its commitment, so the printed code (through the backup file on a
+new device) can replace a lost passkey after the recovery delay. Heirs and guardians **make their
+own keys**: the owner sends an invitation with no secret; the invitee's browser derives their heir
+key, salt, guardian secret and X25519 box key from their own root and the invitation id, and replies
+with the key commitment (or guardian leaf) and the box public key. After deployment the owner seals
+each person's heir letter or guardian path to that key (`sealTo`), so it can travel any way. The
+invitee's record holds no key that cannot be rebuilt from their root. The older kit flow, where the
+owner's device makes the keys and the invitation carries them, remains as "make their keys for them".
+
+A backup file is the keyring and the encrypted records: no passphrase, and whatever opens the
+keyring opens it. Older passphrase files (PBKDF2-SHA-256) still import. Restored into a browser
+with its own keyring, records keep the root they came with. A device passkey's private key is never
+in a record or a backup: it stays in the authenticator.
 
 **Creating a vault in stages.** The record, with every key, is saved before anything is sent. The
 vault's address and maintenance key are saved before the deploy transaction is sent (the address is

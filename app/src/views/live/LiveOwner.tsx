@@ -3,11 +3,12 @@
 //
 // The owner's screens in live mode: the vault being created (eight
 // transactions, resumable), and the vault itself with its check-in, its
-// estate and the invitations to send.
+// estate, the letters to send, and the recovery key.
 
 import { useState } from 'react';
 import { Phase } from '@codicil/contracts/vault';
 import { Countdown, duration, FACE_ID, HashChip, Icon, ICONS, Logo, PHASE } from '../../components/ui.js';
+import { createPasskeyWithPrf } from '../../live/prf.js';
 import { kitLink } from '../../live/records.js';
 import { walletReadiness } from '../../live/problems.js';
 import { live, session, type Connection } from '../../live/session.js';
@@ -74,54 +75,70 @@ export function LiveDeploy({ me, deploy, connection }: { me: OwnerView; deploy?:
         </div>
       )}
       <p className="small muted">
-        Closing this tab part-way is safe. Your will, your heirs' keys and the key that finishes the vault are saved in this
-        browser, and this page continues the next time you open it.
+        Closing this tab part-way is safe. Your will and the key that finishes the vault are saved in this browser, encrypted,
+        and this page continues the next time you open it.
       </p>
     </main>
   );
 }
 
+interface Person {
+  key: string;
+  name: string;
+  role: string;
+  /** Made their own key: they get a sealed letter, not a kit. */
+  ownKey: boolean;
+  text: () => Promise<string>;
+}
+
 function Invitations({ me }: { me: OwnerView }) {
-  const [open, setOpen] = useState<string>();
-  const people = [
+  const [open, setOpen] = useState<{ key: string; text?: string; error?: string }>();
+  const people: Person[] = [
     ...me.heirs.flatMap((h) => [
-      { key: h.id, name: h.name, role: `Heir · ${Number(h.shareBps) / 100}%${h.unlockAt ? ` · from ${new Date(h.unlockAt * 1000).toLocaleDateString('en-GB')}` : ''}`, kit: () => live.heirKit(h.id) },
-      ...(h.backupName ? [{ key: `${h.id}:backup`, name: h.backupName, role: `Backup for ${h.name}`, kit: () => live.heirKit(h.id, true) }] : []),
+      { key: h.id, name: h.name, ownKey: h.ownKey, role: `Heir · ${Number(h.shareBps) / 100}%${h.unlockAt ? ` · from ${new Date(h.unlockAt * 1000).toLocaleDateString('en-GB')}` : ''}`, text: () => (h.ownKey ? live.sealedLetter(h.id) : Promise.resolve(live.heirKit(h.id))) },
+      ...(h.backupName ? [{ key: `${h.id}:backup`, name: h.backupName, ownKey: !!h.backupOwnKey, role: `Backup for ${h.name}`, text: () => (h.backupOwnKey ? live.sealedLetter(h.id, true) : Promise.resolve(live.heirKit(h.id, true))) }] : []),
     ]),
-    ...me.guardians.map((g) => ({ key: g.id, name: g.name, role: 'Guardian', kit: () => live.guardianKit(g.id) })),
+    ...me.guardians.map((g) => ({ key: g.id, name: g.name, ownKey: g.ownKey, role: 'Guardian', text: () => (g.ownKey ? live.sealedLetter(g.id) : Promise.resolve(live.guardianKit(g.id))) })),
   ];
+  const anyKit = people.some((p) => !p.ownKey);
+  const show = (p: Person) => {
+    if (open?.key === p.key) return setOpen(undefined);
+    setOpen({ key: p.key });
+    p.text().then((text) => setOpen((o) => (o?.key === p.key ? { key: p.key, text } : o)), (e: unknown) => setOpen({ key: p.key, error: e instanceof Error ? e.message : String(e) }));
+  };
   return (
     <section className="stack-16" aria-labelledby="inv-h">
       <div className="stack-6">
-        <h2 id="inv-h" className="disp h-card">Invitations to send</h2>
+        <h2 id="inv-h" className="disp h-card">Letters to send</h2>
         <p className="muted">
-          Each person needs their invitation to act from their own browser: an heir to claim, a guardian to vote. Send each one
-          privately, to that person only. An heir's invitation holds the key to their share, so whoever has it can claim it once
-          the will is released.
+          Each person needs their letter to act from their own browser: an heir to claim, a guardian to vote. A sealed letter can
+          only be opened by the person it is for, so you can send it any way you like: email, a message, a QR code.
+          {anyKit && ' An invitation that carries keys this device made is different: whoever holds it can act as that person, so send it to them privately.'}
         </p>
       </div>
       <ul className="people">
         {people.map((p) => {
-          const kit = open === p.key ? p.kit() : undefined;
+          const shown = open?.key === p.key ? open : undefined;
           return (
             <li key={p.key}>
-              <span><span className="people-name">{p.name}</span> <span className="small muted">{p.role}</span></span>
-              <button type="button" className="btn btn-secondary btn-sm" aria-expanded={open === p.key} onClick={() => setOpen(open === p.key ? undefined : p.key)}>
-                {open === p.key ? 'Hide the invitation' : 'Show the invitation'}
+              <span><span className="people-name">{p.name}</span> <span className="small muted">{p.role}{p.ownKey ? ' · made their own key' : ' · this device made their key'}</span></span>
+              <button type="button" className="btn btn-secondary btn-sm" aria-expanded={!!shown} onClick={() => show(p)}>
+                {shown ? 'Hide' : p.ownKey ? 'Show their sealed letter' : 'Show the invitation'}
               </button>
-              {kit && (
+              {shown?.error && <p className="err-inline" role="alert">{shown.error}</p>}
+              {shown?.text && (
                 <div className="live-kit stack-12 fade-in">
-                  <CopyLine text={kitLink(window.location.origin, kit)} shown={`${window.location.origin}/#/app/join/${kit.slice(0, 40)}…`} label="Copy the link" />
+                  <CopyLine text={kitLink(window.location.origin, shown.text)} shown={`${window.location.origin}/#/app/join/${shown.text.slice(0, 40)}…`} label="Copy the link" />
                   <div className="btn-row">
                     <button
                       type="button" className="btn btn-ghost btn-sm"
-                      onClick={() => downloadText(`codicil-invitation-${p.name.replace(/[^\p{L}\p{N}]+/gu, '-').toLowerCase()}.txt`, [
-                        `Codicil invitation for ${p.name}, from ${me.ownerName}.`,
+                      onClick={() => downloadText(`codicil-${p.ownKey ? 'letter' : 'invitation'}-${p.name.replace(/[^\p{L}\p{N}]+/gu, '-').toLowerCase()}.txt`, [
+                        `Codicil ${p.ownKey ? 'letter' : 'invitation'} for ${p.name}, from ${me.ownerName}.`,
                         '',
-                        `Keep this file private. Open ${window.location.origin}/#/app in Chrome with the Lace wallet,`,
-                        'choose "I was given an invitation", and paste the line below.',
+                        p.ownKey ? 'Only you can open this. ' + `Open ${window.location.origin}/#/app in the browser you answered the invitation in,` : `Keep this file private. Open ${window.location.origin}/#/app in Chrome with the Lace wallet,`,
+                        p.ownKey ? 'and paste the line below where it asks for the letter.' : 'choose "I was given an invitation", and paste the line below.',
                         '',
-                        kit,
+                        shown.text,
                         '',
                       ].join('\n'))}
                     >
@@ -135,6 +152,98 @@ function Invitations({ me }: { me: OwnerView }) {
           );
         })}
       </ul>
+    </section>
+  );
+}
+
+/**
+ * The recovery key, plainly: the vault never depends on the passkey alone.
+ * The printed recovery code opens the owner's records anywhere, and the
+ * records rebuild the vault's recovery secret, which can replace a lost
+ * passkey after a public wait.
+ */
+function Recovery({ me, now, busy }: { me: OwnerView; now: number; busy: boolean }) {
+  const [error, setError] = useState<string>();
+  const [asking, setAsking] = useState(false);
+  const r = me.recovery;
+  const v = me.vault!;
+  if (!r) {
+    return (
+      <section className="card pad-24 stack-8" aria-label="Recovery">
+        <h2 className="disp h-card">No recovery key</h2>
+        <p className="muted">This vault was created before Codicil required one. If you lose your passkey, nobody can check in, and the will is released to your heirs when the timers run out.</p>
+      </section>
+    );
+  }
+  const start = async () => {
+    setError(undefined);
+    try {
+      const made = await createPasskeyWithPrf();
+      if (await live.startRecovery(made.passkey) && made.prf) await live.addPasskeySlot(made.prf, 'Passkey made during a recovery');
+      setAsking(false);
+    } catch (e) {
+      setError(e instanceof Error && e.name === 'NotAllowedError' ? 'The passkey was not created: the request was cancelled or timed out.' : e instanceof Error ? e.message : String(e));
+    }
+  };
+  const tooLate = now > r.lastStart;
+  if (r.state === 'waiting' || r.state === 'ready') {
+    return r.mine ? (
+      <section className="card pad-24 stack-12" aria-label="Recovery">
+        <h2 className="disp h-card">{r.state === 'ready' ? 'Your recovery can be finished' : 'Your recovery is under way'}</h2>
+        <p className="muted">
+          {r.state === 'ready'
+            ? 'The public wait is over. Finishing installs the passkey on this device as the vault\'s owner key, and the old one stops working.'
+            : `The passkey on this device takes over on ${fmtWhen(r.readyAt)}, when you finish the recovery from here. If your old passkey signs anything first, the recovery is cancelled.`}
+        </p>
+        <div className="btn-row">
+          <button type="button" className="btn btn-primary" disabled={busy || r.state !== 'ready'} onClick={() => void live.finishRecovery()}>Finish the recovery</button>
+        </div>
+      </section>
+    ) : (
+      <ProblemCard problem={{
+        kind: 'input', retry: false, title: 'Someone started a recovery of your vault',
+        body: `If it was you, on another device, finish it there after ${fmtWhen(r.readyAt)}. If it was not, check in now: one check-in cancels it, and the recovery key it used can never be used again.`,
+      }} />
+    );
+  }
+  return (
+    <section className="card pad-24 stack-12" aria-label="Recovery">
+      <h2 className="disp h-card">If you lose your passkey</h2>
+      {r.state === 'retired' ? (
+        <p className="muted">
+          A recovery was cancelled by a check-in, which retired the recovery key for good. This version cannot set a new one.
+          Your passkey still works as before.
+        </p>
+      ) : (
+        <>
+          <p className="muted">
+            Your vault never depends on your passkey alone. Your printed recovery code opens your records on any device, and they
+            hold what replaces a lost passkey: start a recovery with a new passkey, and it takes over after a public wait of{' '}
+            {span(r.delay)}. Anything your current passkey signs in that time cancels it, so nobody can take the vault while you
+            are checking in.
+          </p>
+          <p className="small muted">
+            {tooLate
+              ? `A recovery takes ${span(r.delay)}, and your next check-in is due on ${fmtWhen(v.deadline)}, so one started now could not finish in time.${me.timers.testing ? ' With testing timers this is always so: a recovery takes at least a day.' : ' Check in to make room for one.'}`
+              : `A recovery started now would finish before your deadline. The last moment to start one is ${fmtWhen(r.lastStart)}.`}
+          </p>
+          {!asking ? (
+            <div><button type="button" className="btn btn-ghost btn-sm" disabled={busy || tooLate || v.phase !== Phase.armed} onClick={() => setAsking(true)}>I lost my passkey</button></div>
+          ) : (
+            <div className="stack-8 fade-in">
+              <p className="small">
+                This makes a new passkey on this device and proposes it as the vault's owner key. Only do this if your old passkey
+                is gone: if you still have it, a check-in is all you need.
+              </p>
+              <div className="btn-row">
+                <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void start()}>Start a recovery with a new passkey</button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAsking(false)}>Cancel</button>
+              </div>
+            </div>
+          )}
+          {error && <p className="err-inline" role="alert">{error}</p>}
+        </>
+      )}
     </section>
   );
 }
@@ -251,6 +360,8 @@ export function LiveOwner({ me, now, busy, connection }: { me: OwnerView; now: n
 
             <Invitations me={me} />
 
+            <Recovery me={me} now={now} busy={blocked} />
+
             <section className="activity" aria-labelledby="act-h">
               <div className="activity-head"><h2 id="act-h" className="disp h-card">What has happened</h2></div>
               <ul className="people">
@@ -292,7 +403,8 @@ export function LiveOwner({ me, now, busy, connection }: { me: OwnerView; now: n
               <div><dt>Guardians</dt><dd>{me.guardians.length === 0 ? 'None' : `${v.guardianVotes} of ${v.guardianThreshold} votes this round`}</dd></div>
               <div><dt>Rhythm</dt><dd>Every {span(me.timers.every)} · {v.grace > 0 ? `${span(v.grace)} of grace · ` : ''}{span(v.window)} to cancel</dd></div>
               <div><dt>Check-ins so far</dt><dd>{v.nonce.toString()}</dd></div>
-              <div><dt>Signs with</dt><dd>{me.passkey === 'device' ? 'A passkey on this device' : 'A key stored in this browser'}</dd></div>
+              <div><dt>Signs with</dt><dd>{me.passkey === 'device' ? 'Your passkey' : 'A key stored in this browser'}</dd></div>
+              <div><dt>If it is lost</dt><dd>{me.recovery ? (me.recovery.state === 'retired' ? 'Recovery key retired' : `Your printed recovery code, after a ${span(me.recovery.delay)} public wait`) : 'No recovery key'}</dd></div>
             </dl>
           </aside>
         </div>
@@ -312,7 +424,8 @@ export function Sealed({ deadline, onDone }: { deadline: number; onDone: () => v
         <h2 className="disp">Your will is <em>sealed.</em></h2>
         <p className="muted">
           The vault is created. Your first check-in is due by {fmtWhen(deadline)}. Two things to do now: save a backup file, and
-          send each heir and guardian their invitation. Both are on the next screen.
+          send each heir and guardian their letter. Both are on the next screen. Keep your printed recovery code safe: with your
+          backup file, it replaces a lost passkey.
         </p>
         <button type="button" className="btn btn-primary" onClick={onDone} autoFocus>Go to my vault</button>
       </div>

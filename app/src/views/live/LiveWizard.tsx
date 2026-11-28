@@ -4,15 +4,24 @@
 // Create a real vault in five steps: you, your heirs, your guardians, your
 // timers, and a last look. The same screen as the demo's wizard, with the
 // owner's own people in place of the demo's cast.
+//
+// By default each heir and guardian makes their own key: the owner sends an
+// invitation, and pastes the reply that comes back (docs/DECISIONS.md D22).
+// The quicker way, where this device makes their keys, stays one click away.
 
 import { useEffect, useState } from 'react';
 import { FACE_ID, HashChip, Icon, ICONS, Segmented } from '../../components/ui.js';
-import { createDemoPasskey, createDevicePasskey, passkeySupport, type OwnerPasskey } from '../../demo/passkey.js';
+import { createDemoPasskey, passkeySupport, type OwnerPasskey } from '../../demo/passkey.js';
+import { createPasskeyWithPrf } from '../../live/prf.js';
+import { decodeReply, kitLink } from '../../live/records.js';
 import { walletReadiness } from '../../live/problems.js';
 import { live, session, type Connection } from '../../live/session.js';
-import { DAY, DEFAULT_TIMERS, DEPLOY_ALLOWANCE, draftProblems, emptyDraft, span, TESTING_TIMERS, type HeirDraft, type VaultDraft } from '../../live/store.js';
+import {
+  DAY, DEFAULT_TIMERS, DEPLOY_ALLOWANCE, draftProblems, emptyDraft, recoveryDelayFor, replyProblems, span, TESTING_TIMERS,
+  type HeirDraft, type VaultDraft,
+} from '../../live/store.js';
 import { networkName } from '../../live/wallet.js';
-import { ProblemCard, ProofServerNote } from './parts.js';
+import { CopyLine, ProblemCard, ProofServerNote } from './parts.js';
 
 const LABELS = ['You', 'Heirs', 'Guardians', 'Timers', 'Review'];
 const COPY: [string, string, string][] = [
@@ -24,16 +33,67 @@ const COPY: [string, string, string][] = [
 ];
 
 const toDate = (t: number) => new Date(t * 1000).toISOString().slice(0, 10);
+
+/**
+ * One person who makes their own key: the invitation to send them, and the
+ * box their reply goes in. The invitation holds no secret.
+ */
+function InviteBox({ role, name, ownerName, backup = false, reply, onReply }: {
+  role: 'heir' | 'guardian'; name: string; ownerName: string; backup?: boolean; reply?: string; onReply: (text: string) => void;
+}) {
+  const [invitation, setInvitation] = useState<string>();
+  const [error, setError] = useState<string>();
+  const who = name.trim() || (role === 'heir' ? 'this heir' : 'this guardian');
+  let status: { ok: boolean; text: string } | undefined;
+  if (reply && reply.trim() !== '') {
+    try {
+      const r = decodeReply(reply);
+      status = r.role !== role
+        ? { ok: false, text: `That reply answers ${r.role === 'heir' ? 'an heir' : 'a guardian'}'s invitation.` }
+        : { ok: true, text: `Reply from ${r.name} received. Their ${role === 'heir' ? 'key' : 'secret'} stays with them.` };
+    } catch (e) {
+      status = { ok: false, text: e instanceof Error ? e.message.charAt(0).toUpperCase() + e.message.slice(1) + '.' : String(e) };
+    }
+  }
+  const make = () => {
+    setError(undefined);
+    try {
+      setInvitation(live.makeInvitation(role, name, ownerName, backup));
+    } catch (e) {
+      setError(e instanceof Error ? e.message.charAt(0).toUpperCase() + e.message.slice(1) + '.' : String(e));
+    }
+  };
+  return (
+    <div className="stack-8">
+      {!invitation
+        ? <div><button type="button" className="btn btn-secondary btn-sm" disabled={name.trim() === ''} onClick={make}>Make {who}'s invitation</button></div>
+        : <CopyLine text={kitLink(window.location.origin, invitation)} shown={`${window.location.origin}/#/app/join/${invitation.slice(0, 32)}…`} label="Copy the invitation link" />}
+      {error && <p className="err-inline" role="alert">{error}</p>}
+      <label className="field-label">
+        {who}'s reply
+        <textarea className="field mono letter-input live-reply" spellCheck={false} placeholder="codicil:reply:v1:…" value={reply ?? ''} onChange={(e) => onReply(e.target.value)} />
+      </label>
+      {status && <p className={status.ok ? 'small' : 'err-inline'} role="status">{status.text}</p>}
+    </div>
+  );
+}
 const fromDate = (d: string) => Math.floor(Date.parse(`${d}T00:00:00Z`) / 1000);
 
 export function LiveWizard({ connection, onCancel }: { connection: Connection; onCancel?: () => void }) {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<VaultDraft>(emptyDraft);
-  const [passkey, setPasskey] = useState<OwnerPasskey>();
+  // The passkey this person made when they set up this browser signs check-ins too.
+  const [passkey, setPasskey] = useState<OwnerPasskey | undefined>(() => live.signer());
   const [deviceOk, setDeviceOk] = useState<boolean>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  useEffect(() => { void passkeySupport().then((s) => setDeviceOk(s.available)); }, []);
+  useEffect(() => {
+    void passkeySupport().then((s) => {
+      setDeviceOk(s.available);
+      // A device passkey only signs check-ins where the vault was compiled for it.
+      if (!s.available) setPasskey((p) => (p?.kind === 'device' ? undefined : p));
+    });
+  }, []);
 
   const patch = (p: Partial<VaultDraft>) => setDraft((d) => ({ ...d, ...p }));
   const setHeir = (i: number, p: Partial<HeirDraft>) => patch({ heirs: draft.heirs.map((h, k) => (k === i ? { ...h, ...p } : h)) });
@@ -41,10 +101,11 @@ export function LiveWizard({ connection, onCancel }: { connection: Connection; o
   const problems = draftProblems(draft);
   const network = connection.network ?? '';
   const readiness = connection.balances && walletReadiness(connection.balances, 'deployment', { network, wallet: connection.walletName, address: connection.address?.bech32 });
+  const theirs = draft.keys === 'theirs';
   const blockedHere = [
     !passkey || draft.ownerName.trim() === '',
-    problems.some((p) => /heir|share/i.test(p)),
-    problems.some((p) => /guardian/i.test(p)),
+    problems.some((p) => /heir|share/i.test(p)) || (theirs && replyProblems(draft, 'heirs').length > 0),
+    problems.some((p) => /guardian/i.test(p)) || (theirs && replyProblems(draft, 'guardians').length > 0),
     problems.some((p) => /period|window/i.test(p)),
     problems.length > 0,
   ][step];
@@ -53,7 +114,14 @@ export function LiveWizard({ connection, onCancel }: { connection: Connection; o
     setBusy(true);
     setError(undefined);
     try {
-      setPasskey(kind === 'device' ? await createDevicePasskey() : createDemoPasskey());
+      if (kind === 'browser') {
+        setPasskey(createDemoPasskey());
+      } else {
+        const made = await createPasskeyWithPrf();
+        setPasskey(made.passkey);
+        // Face ID can open the records too, if this browser had no passkey for them yet.
+        if (made.prf && live.getSnapshot().access.passkeys.length === 0) await live.addPasskeySlot(made.prf);
+      }
     } catch (e) {
       setError(e instanceof Error && e.name === 'NotAllowedError'
         ? 'The passkey was not created: the request was cancelled or timed out. Try again when you are ready.'
@@ -130,7 +198,7 @@ export function LiveWizard({ connection, onCancel }: { connection: Connection; o
                 <div className="wiz-ok fade-in">
                   <span className="ok-ring"><Icon d={ICONS.check} size={20} stroke={1.8} /></span>
                   <div>
-                    <strong>{passkey.kind === 'device' ? 'Passkey created on this device.' : 'Key created and stored in this browser.'}</strong>
+                    <strong>{passkey.kind === 'device' ? 'Your passkey is ready.' : 'Key created and stored in this browser.'}</strong>
                     <div className="small muted">Public key <HashChip value={passkey.pk.x.toString(16).padStart(64, '0')} tone="private" /></div>
                   </div>
                 </div>
@@ -138,14 +206,30 @@ export function LiveWizard({ connection, onCancel }: { connection: Connection; o
               {error && <p className="err-inline" role="alert">{error}</p>}
               <p className="small muted">
                 A passkey lives in your device and cannot be copied into a backup file. If it syncs through your Apple, Google or
-                Microsoft account, it follows you to a new device. If it does not and you lose this device, nobody can check in, and
-                the will is released to your heirs when the timers run out.
+                Microsoft account, it follows you to a new device. If you lose it anyway, your printed recovery code can replace it on
+                the vault after a public wait of {span(recoveryDelayFor(t))}. The vault never depends on the passkey alone.
               </p>
             </div>
           )}
 
           {step === 1 && (
             <div className="wiz-list">
+              <div className="card wiz-card">
+                <fieldset>
+                  <legend>Who makes your heirs' and guardians' keys?</legend>
+                  <Segmented<string>
+                    label="Who makes the keys"
+                    value={theirs ? 'theirs' : 'mine'}
+                    options={[{ value: 'theirs', label: 'Each person makes their own' }, { value: 'mine', label: 'Make their keys for them (faster, but you will know their keys)' }]}
+                    onChange={(v) => patch({ keys: v === 'theirs' ? 'theirs' : 'mine' })}
+                  />
+                  <span className="small muted">
+                    {theirs
+                      ? 'You send each person an invitation. Their browser makes their key and sends back a reply with only its fingerprint. You never hold their key, and nobody who copies your browser or your backup can claim as them.'
+                      : 'This browser makes every key now. It is quicker for trying Codicil alone, but you, your browser and your backup file hold every heir\'s key, and each invitation you send carries one.'}
+                  </span>
+                </fieldset>
+              </div>
               {draft.heirs.map((h, i) => (
                 <div key={i} className="card wiz-share">
                   <div className="live-row">
@@ -179,6 +263,10 @@ export function LiveWizard({ connection, onCancel }: { connection: Connection; o
                       <input className="field" aria-label="Backup heir's name" placeholder="Backup's name" value={h.backupName} onChange={(e) => setHeir(i, { backupName: e.target.value })} />
                     )}
                   </div>
+                  {theirs && <InviteBox role="heir" name={h.name} ownerName={draft.ownerName} reply={h.reply} onReply={(reply) => setHeir(i, { reply })} />}
+                  {theirs && h.backupName !== undefined && (
+                    <InviteBox role="heir" backup name={h.backupName} ownerName={draft.ownerName} reply={h.backupReply} onReply={(backupReply) => setHeir(i, { backupReply })} />
+                  )}
                   {draft.heirs.length > 1 && (
                     <div><button type="button" className="btn btn-ghost btn-sm" onClick={() => patch({ heirs: draft.heirs.filter((_, k) => k !== i) })}>Remove {h.name.trim() || 'this heir'}</button></div>
                   )}
@@ -191,8 +279,9 @@ export function LiveWizard({ connection, onCancel }: { connection: Connection; o
                 <span className="small">{total > 100 ? `That is ${Math.round((total - 100) * 100) / 100}% too much. Lower a share to continue.` : total === 100 ? 'Everything is allocated.' : `${Math.round((100 - total) * 100) / 100}% is not allocated. It stays in the vault and nobody can claim it.`}</span>
               </div>
               <p className="small muted">
-                This browser makes a key for each heir and puts it in their invitation, which you send them after the vault is
-                created. Whoever holds an invitation can claim that share once the will is released, so send each one privately.
+                {theirs
+                  ? 'Once the vault is created, you send each person a letter that only they can open. It tells their browser where their share is.'
+                  : 'This browser makes a key for each heir and puts it in their invitation, which you send them after the vault is created. Whoever holds an invitation can claim that share once the will is released, so send each one privately.'}
               </p>
             </div>
           )}
@@ -201,9 +290,26 @@ export function LiveWizard({ connection, onCancel }: { connection: Connection; o
             <div className="card wiz-card">
               {draft.guardians.length === 0 && <p className="muted">No guardians. The switch can then only start when you miss a check-in.</p>}
               {draft.guardians.map((g, i) => (
-                <div key={i} className="live-row">
-                  <input className="field" aria-label={`Guardian ${i + 1}'s name`} placeholder="Their name" value={g} onChange={(e) => patch({ guardians: draft.guardians.map((x, k) => (k === i ? e.target.value : x)) })} />
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => patch({ guardians: draft.guardians.filter((_, k) => k !== i), threshold: Math.max(1, Math.min(draft.threshold, draft.guardians.length - 1)) })}>Remove</button>
+                <div key={i} className="stack-8">
+                  <div className="live-row">
+                    <input className="field" aria-label={`Guardian ${i + 1}'s name`} placeholder="Their name" value={g} onChange={(e) => patch({ guardians: draft.guardians.map((x, k) => (k === i ? e.target.value : x)) })} />
+                    <button
+                      type="button" className="btn btn-ghost btn-sm"
+                      onClick={() => patch({
+                        guardians: draft.guardians.filter((_, k) => k !== i),
+                        guardianReplies: (draft.guardianReplies ?? []).filter((_, k) => k !== i),
+                        threshold: Math.max(1, Math.min(draft.threshold, draft.guardians.length - 1)),
+                      })}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  {theirs && (
+                    <InviteBox
+                      role="guardian" name={g} ownerName={draft.ownerName} reply={draft.guardianReplies?.[i]}
+                      onReply={(reply) => patch({ guardianReplies: draft.guardians.map((_, k) => (k === i ? reply : draft.guardianReplies?.[k])) })}
+                    />
+                  )}
                 </div>
               ))}
               <div><button type="button" className="btn btn-secondary" onClick={() => patch({ guardians: [...draft.guardians, ''] })}>Add a guardian</button></div>
@@ -288,6 +394,8 @@ export function LiveWizard({ connection, onCancel }: { connection: Connection; o
                   ['Owner', `${draft.ownerName.trim()} · ${passkey?.kind === 'device' ? 'passkey on this device' : 'key stored in this browser'}`, 0],
                   ['Heirs', draft.heirs.map((h) => `${h.name.trim()} ${h.sharePct}%${h.unlockAt ? `, from ${toDate(h.unlockAt)}` : ''}${h.backupName ? `, backup ${h.backupName.trim()}` : ''}`).join(' · '), 1],
                   ['Guardians', draft.guardians.length === 0 ? 'None' : `${draft.guardians.map((g) => g.trim()).join(', ')} · ${Math.min(draft.threshold, draft.guardians.length)} must agree`, 2],
+                  ['Their keys', theirs ? 'Each person made their own. You hold only fingerprints.' : 'Made by this browser. You hold every key.', 1],
+                  ['If you lose your passkey', `Your printed recovery code replaces it, after a public wait of ${span(recoveryDelayFor(t))}.${t.testing ? ' With testing timers the wait is longer than the time to your deadline, so a recovery cannot finish in time.' : ''}`, 4],
                   ['Timers', `Check in every ${span(t.every)} · ${t.grace > 0 ? `${span(t.grace)} of grace` : 'no grace period'} · ${span(t.window)} to cancel${t.testing ? ' · testing timers' : ''}`, 3],
                   ['First check-in due', new Date(firstDeadline * 1000).toLocaleString('en-GB', { dateStyle: 'long', timeStyle: 'short' }) + (t.testing ? ' (15 minutes are added so creating the vault does not use up the first period)' : ''), 3],
                   ['Network', `Midnight ${networkName(network)}, a test network. Its tokens have no value, and it can be reset.`, 4],
@@ -340,7 +448,7 @@ export function LiveWizard({ connection, onCancel }: { connection: Connection; o
               <div><dt>Your name</dt><dd>{draft.ownerName.trim() || '—'}</dd></div>
               <div><dt>Heirs and shares</dt><dd>{draft.heirs.filter((h) => h.name.trim()).map((h) => `${h.name.trim()} ${h.sharePct}%`).join(', ') || '—'}</dd></div>
               <div><dt>Guardians</dt><dd>{draft.guardians.filter((g) => g.trim()).join(', ') || 'None'}</dd></div>
-              <div><dt>Every key and secret</dt><dd>Kept here, and in the backup file you save</dd></div>
+              <div><dt>Every key and secret</dt><dd>{theirs ? 'Your own, kept here, encrypted. Each heir and guardian keeps theirs.' : 'Kept here, encrypted, and in the backup file you save'}</dd></div>
             </dl>
           </div>
           <div className="side-cross mono"><Icon d={ICONS.down} size={14} stroke={2} />only fingerprints cross</div>
@@ -348,6 +456,7 @@ export function LiveWizard({ connection, onCancel }: { connection: Connection; o
             <span className="eyebrow"><Icon d={ICONS.chain} size={14} stroke={2} />Published on Midnight {networkName(network)}</span>
             <dl>
               <div><dt>Owner key</dt><dd>A sealed fingerprint</dd></div>
+              <div><dt>Recovery key</dt><dd>A sealed fingerprint, and its {span(recoveryDelayFor(t))} wait</dd></div>
               <div><dt>The will</dt><dd>One number, for any number of heirs</dd></div>
               <div><dt>Guardians</dt><dd>{draft.guardians.length > 0 ? `One number, and "${Math.min(draft.threshold, draft.guardians.length)} must agree"` : 'None'}</dd></div>
               <div><dt>Timers</dt><dd className="mono">{t.every.toLocaleString('en-GB')} s · {t.window.toLocaleString('en-GB')} s</dd></div>

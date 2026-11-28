@@ -31,8 +31,13 @@ results are written down ([VALIDATION.md](VALIDATION.md), [DECISIONS.md](DECISIO
    Preprod, and a first run with the Lace extension by hand, with fixes for whatever they show.
 5. **Hosting.** Recompile the passkey module for the production origin (its lengths are module
    parameters, [D12](DECISIONS.md)) and deploy the static app.
-6. **Heirs create their own keys** on their own devices, and send the owner only a commitment.
-   Today the owner's device generates them, in the demo and in live mode.
+6. ~~**Heirs create their own keys** on their own devices, and send the owner only a commitment.~~
+   Done in live mode ([D22](DECISIONS.md)): heirs and guardians answer an invitation with a reply,
+   and the owner seals their letter to them. The guided demo still makes them on the owner's device.
+   Next: **keepers**, services that watch a vault and hand over guardians' pieces without being
+   asked, and a direct **switch off the passkey** circuit, which waits for the next contract change
+   so the vault is recompiled and redeployed once (today a recovery can replace the passkey with a
+   wallet key, after the delay).
 7. **Sealed messages, disclosures and the seal register in live mode.** The demo seals a message for
    one person or for everyone, and hands the key's pieces over by hand or through the seal register
    ([D20, D21](DECISIONS.md)). The register's circuits compile with full keys, and it has not been
@@ -59,13 +64,25 @@ Stated plainly, so nobody relies on it for more than it is.
   ([D12](DECISIONS.md)). On any other origin the app offers a key stored in the browser, which is
   weaker than a passkey.
 - **A sealed will cannot be changed.** The contract supports changing the will, the guardians and
-  the attestor, and a recovery key; the demo shows them. Live mode does not offer them yet, and
-  deploys with no recovery key and no release fee.
-- **The owner's device makes the heirs' keys** and puts them in the invitations. Whoever holds an
-  heir's invitation can claim that share after release, and the owner's browser (and backup file)
-  holds all of them.
-- **Secrets live in the browser's local storage**, unencrypted. The backup file is encrypted with a
-  passphrase; the copy in the browser is not. A passkey is never in either.
+  the attestor; the demo shows them. Live mode does not offer them yet, and deploys with no release
+  fee. Its records hold the will as key fingerprints, so a later will change works the same for
+  heirs who made their own keys.
+- ~~**No recovery key.**~~ Every live vault now has one, derived from the owner's root, so the
+  printed recovery code replaces a lost passkey after a public delay (a quarter of the check-in
+  period, one to seven days). With testing timers the delay (at least a day, the contract's floor)
+  is longer than the time to the deadline, so a recovery there cannot finish, and the app says so.
+- ~~**The owner's device makes the heirs' keys.**~~ By default each heir and guardian makes their
+  own and the owner holds only fingerprints. "Make their keys for them" remains for trying the app
+  alone; then whoever holds an heir's invitation can claim that share.
+- ~~**Secrets live in the browser's local storage, unencrypted.**~~ Records are encrypted under the
+  person's root; Face ID (where WebAuthn PRF is supported) or the printed recovery code opens them,
+  and the backup file needs no passphrase.
+- **Face ID unlock has not been tried with a real passkey provider.** It is tested with Chrome's
+  virtual authenticator. Browsers and providers without PRF fall back to the code, which then has to
+  be typed at each visit.
+- **Unlocking with Lace is likely unavailable.** The connector's `signData` signs with BIP-340
+  Schnorr by default, which normally adds fresh randomness, so the app refuses the wallet unless two
+  signatures agree. It has not been tried with Lace.
 - **The maintenance key is kept**, in the owner's record and backup. Whoever holds it could change
   the vault's rules ([D19](DECISIONS.md)). Giving it up after deployment is item 2 above.
 - **Deposits cannot be taken back out**, and a claim pays the wallet the heir is connected with, so

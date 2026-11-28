@@ -1,15 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Codicil Authors
 //
-// What a person's browser keeps about a vault, and the three ways it moves:
+// What a person's browser keeps about a vault, and the ways it moves:
 //
-//   records   one per vault this person owns, inherits from or guards. They
-//             hold every secret the chain never sees: the will, the salts,
-//             heirs' keys, guardians' secrets, the maintenance key.
-//   kits      what an owner hands an heir or a guardian so they can act from
-//             their own browser: one line of text, or a link.
-//   backups   all records in one file, locked with a passphrase, so a cleared
-//             browser is not a lost vault.
+//   records      one per vault this person owns, inherits from or guards. They
+//                hold what the chain never sees: the will, the salts, the
+//                maintenance key, and any key that cannot be rebuilt from the
+//                person's own root (keyring.ts).
+//   invitations  the owner asks an heir or a guardian to make their own keys.
+//                No secret is in it. The invitee answers with a reply:
+//                fingerprints of their keys and a public encryption key.
+//   letters      what the owner sends back once the vault exists (the heir
+//                letter, the guardian's proof), encrypted to that person.
+//   kits         the older way: the owner's device makes the person's keys and
+//                hands them over. Quicker, but the owner knows those keys.
+//   backups      all records in one file. Old files were locked with a
+//                passphrase; new ones with the keyring (keyring.ts).
 //
 // Nothing here talks to a network.
 
@@ -17,7 +23,7 @@ import type { HeirLeaf } from '@codicil/contracts/vault';
 import { decodeHeirLetter, type MerklePath } from '@codicil/sdk';
 import type { DeploymentRecord } from '../chain/types.js';
 import type { OwnerPasskey } from '../demo/passkey.js';
-import { decodeJson, encodeJson, fromBase64Url, toBase64Url } from './codec.js';
+import { decodeJson, encodeJson, fromBase64Url, toBase64Url, toHex } from './codec.js';
 import { InputProblem } from './problems.js';
 
 // ─── Records ────────────────────────────────────────────────────────────────
@@ -34,22 +40,40 @@ export interface LiveTimers {
   testing: boolean;
 }
 
+/**
+ * How the owner reaches a person who made their own keys: the invitation they
+ * answered, and the public key letters to them are encrypted to.
+ */
+export interface Invitee {
+  inviteId: string;
+  boxPublicKey: Uint8Array;
+}
+
+/**
+ * One person in the will. Either they made their own key and sent a reply
+ * (`invitee` is set, and the owner never sees their key), or the owner's
+ * device made it and hands it over in a kit (`sk` and `keySalt` are set).
+ */
 export interface HeirSecret {
   id: string;
   name: string;
   shareBps: bigint;
   /** Unix seconds before which this share cannot be claimed; 0 = at release. */
   unlockAt: bigint;
-  /** The heir's key, made on the owner's device and handed over in their kit. */
-  sk: bigint;
-  keySalt: Uint8Array;
-  backup?: { name: string; sk: bigint; keySalt: Uint8Array };
+  sk?: bigint;
+  keySalt?: Uint8Array;
+  invitee?: Invitee;
+  backup?: { name: string; sk?: bigint; keySalt?: Uint8Array; invitee?: Invitee };
 }
 
 export interface GuardianSecret {
   id: string;
   name: string;
-  secret: Uint8Array;
+  /** Kit flow: the secret, made on the owner's device. */
+  secret?: Uint8Array;
+  /** Reply flow: the fingerprint the guardian sent. Their secret stays with them. */
+  leaf?: Uint8Array;
+  invitee?: Invitee;
 }
 
 export interface ActivityEntry {
@@ -59,10 +83,27 @@ export interface ActivityEntry {
   txHash?: string;
 }
 
-export interface OwnerRecord {
-  role: 'owner';
+/** A recovery this device started: the new passkey that takes over when it finishes. */
+export interface PendingRecovery {
+  passkey: OwnerPasskey;
+  salt: Uint8Array;
+  /** Which recovery key the vault will hold afterwards (see `recoveryLabel`). */
+  generation: number;
+  startedAt: number;
+}
+
+interface RecordBase {
   id: string;
   network: string;
+  /**
+   * The root this record's keys come from, when it is not this browser's own:
+   * a record restored from another keyring keeps the root it was made with.
+   */
+  root?: Uint8Array;
+}
+
+export interface OwnerRecord extends RecordBase {
+  role: 'owner';
   createdAt: number;
   ownerName: string;
   passkey: OwnerPasskey;
@@ -79,20 +120,25 @@ export interface OwnerRecord {
   deployment?: DeploymentRecord;
   firstDeadline?: number;
   lastCheckIn?: number;
+  /** The public wait before a recovery takes effect, seconds. Absent on vaults made without a recovery key. */
+  recoveryDelay?: number;
+  /** How many recoveries have finished: picks which secret the vault's recovery key is now. */
+  recoveryGeneration?: number;
+  pendingRecovery?: PendingRecovery;
   activity: ActivityEntry[];
 }
 
-export interface HeirRecord {
+export interface HeirRecord extends RecordBase {
   role: 'heir';
-  id: string;
-  network: string;
   address: string;
   name: string;
   ownerName: string;
   /** The heir letter: the will entry and its Merkle path. */
   letter: string;
-  sk: bigint;
-  keySalt: Uint8Array;
+  /** Kit flow only. In the reply flow the key is rebuilt from the root and `inviteId`. */
+  sk?: bigint;
+  keySalt?: Uint8Array;
+  inviteId?: string;
   /** True when this person is the backup for the entry, not its first heir. */
   backup: boolean;
   claimed?: { at: number; amount: bigint; to: string; txHash?: string };
@@ -100,14 +146,14 @@ export interface HeirRecord {
   activity?: ActivityEntry[];
 }
 
-export interface GuardianRecord {
+export interface GuardianRecord extends RecordBase {
   role: 'guardian';
-  id: string;
-  network: string;
   address: string;
   name: string;
   ownerName: string;
-  secret: Uint8Array;
+  /** Kit flow only. In the reply flow the secret is rebuilt from the root and `inviteId`. */
+  secret?: Uint8Array;
+  inviteId?: string;
   path: MerklePath;
   /** The round this guardian last voted in. */
   votedRound?: bigint;
@@ -115,10 +161,26 @@ export interface GuardianRecord {
   activity?: ActivityEntry[];
 }
 
-export type VaultRecord = OwnerRecord | HeirRecord | GuardianRecord;
+/** An invitation this person answered, waiting for the owner's letter. */
+export interface InvitedRecord extends RecordBase {
+  role: 'invited';
+  inviteId: string;
+  invitedAs: 'heir' | 'guardian';
+  name: string;
+  ownerName: string;
+  backup: boolean;
+  activity?: ActivityEntry[];
+}
+
+export type VaultRecord = OwnerRecord | HeirRecord | GuardianRecord | InvitedRecord;
 
 /** The address of the vault a record is about, once it has one. */
-export const recordAddress = (r: VaultRecord): string | undefined => (r.role === 'owner' ? r.deployment?.address : r.address);
+export const recordAddress = (r: VaultRecord): string | undefined =>
+  (r.role === 'owner' ? r.deployment?.address : r.role === 'invited' ? undefined : r.address);
+
+/** The label a vault's recovery secret is derived with, from the owner's root. */
+export const recoveryLabel = (recordId: string, generation = 0): string =>
+  generation === 0 ? `vault-recovery:${recordId}` : `vault-recovery:${recordId}:${generation}`;
 
 // ─── Storage ────────────────────────────────────────────────────────────────
 
@@ -167,7 +229,7 @@ export function decodeRecords(text: string | null): VaultRecord[] {
 function isRecord(r: unknown): r is VaultRecord {
   if (r === null || typeof r !== 'object') return false;
   const o = r as Partial<VaultRecord>;
-  return typeof o.id === 'string' && typeof o.network === 'string' && (o.role === 'owner' || o.role === 'heir' || o.role === 'guardian');
+  return typeof o.id === 'string' && typeof o.network === 'string' && (o.role === 'owner' || o.role === 'heir' || o.role === 'guardian' || o.role === 'invited');
 }
 
 // ─── Kits ───────────────────────────────────────────────────────────────────
@@ -219,7 +281,9 @@ export function decodeKit(text: string): Kit {
   if (at < 0) {
     throw new InputProblem(t.startsWith('codicil:claim:')
       ? 'that is a bare heir letter, which is not enough to claim by itself. Ask the owner for the full invitation: it starts with "codicil:heir-kit"'
-      : 'that is not a Codicil invitation. It should start with "codicil:heir-kit" or "codicil:guardian-kit", or be the link the owner sent you');
+      : t.includes(REPLY_PREFIX)
+        ? 'that is a reply. It goes back to the person who invited you, who pastes it into their will'
+        : 'that is not a Codicil invitation. It should start with "codicil:invite", "codicil:letter", "codicil:heir-kit" or "codicil:guardian-kit", or be the link the owner sent you');
   }
   const body = t.slice(at).split(/[\s"'<>]/)[0];
   const heir = body.startsWith(HEIR_KIT_PREFIX);
@@ -252,6 +316,154 @@ export function decodeKit(text: string): Kit {
   const address = str('address');
   if (!/^[0-9a-f]{64}$/i.test(address)) throw new InputProblem('that invitation names a vault address that cannot be right. Ask the owner to send it again');
   return { kind: 'guardian', network: str('network'), address, name: str('name'), ownerName: str('ownerName'), secret: bytes('secret'), path };
+}
+
+// ─── Invitations, replies and letters ───────────────────────────────────────
+// The way that keeps each person's keys with them (docs/DECISIONS.md D22):
+//
+//   owner → invitee   an invitation: who is asking, for what. No secret.
+//   invitee → owner   a reply: fingerprints of the invitee's own keys, made
+//                     from their root, and their public encryption key.
+//   owner → invitee   once the vault exists, a letter (the heir letter or the
+//                     guardian's proof) encrypted to that key. Safe to send
+//                     any way at all: only the invitee can open it.
+
+export const INVITE_PREFIX = 'codicil:invite:v1:';
+export const REPLY_PREFIX = 'codicil:reply:v1:';
+export const LETTER_BOX_PREFIX = 'codicil:letter:v1:';
+
+export interface Invitation {
+  kind: 'invite';
+  /** Random. The invitee's keys for this vault are derived with it, so it is never reused. */
+  id: string;
+  network: string;
+  ownerName: string;
+  role: 'heir' | 'guardian';
+  /** The invitee's name as the owner wrote it. */
+  name: string;
+  /** An heir invited as the backup for someone else's share. */
+  backup: boolean;
+}
+
+export interface Reply {
+  kind: 'reply';
+  inviteId: string;
+  role: 'heir' | 'guardian';
+  /** The name from the invitation, so the owner can tell replies apart. */
+  name: string;
+  boxPublicKey: Uint8Array;
+  /** Heir: `edKeyCommitment(pk, salt)` of their own key. */
+  heirKeyCommit?: Uint8Array;
+  /** Guardian: `guardianLeaf(secret)` of their own secret. */
+  guardianLeaf?: Uint8Array;
+}
+
+/** A letter for one invitee, sealed to their encryption key. */
+export interface SealedLetter {
+  kind: 'letter';
+  inviteId: string;
+  box: Uint8Array;
+}
+
+/** What is inside a sealed letter. */
+export type LetterBody =
+  | { kind: 'heir'; network: string; ownerName: string; name: string; letter: string; backup: boolean }
+  | { kind: 'guardian'; network: string; ownerName: string; name: string; address: string; path: MerklePath };
+
+/** The context a letter is sealed in: a box made for one invitation does not open as another's. */
+export const letterContext = (inviteId: string): string => `codicil:letter:${inviteId}`;
+
+export function newInvitation(i: Omit<Invitation, 'kind' | 'id'>): Invitation {
+  return { kind: 'invite', id: toHex(crypto.getRandomValues(new Uint8Array(16))), ...i };
+}
+
+const strip = <T extends { kind: string }>(v: T): Omit<T, 'kind'> => {
+  const { kind: _kind, ...rest } = v;
+  return rest;
+};
+export const encodeInvitation = (i: Invitation): string => pack(INVITE_PREFIX, strip(i));
+export const encodeReply = (r: Reply): string => pack(REPLY_PREFIX, strip(r));
+export const encodeSealedLetter = (l: SealedLetter): string => pack(LETTER_BOX_PREFIX, strip(l));
+
+function unpack(text: string, prefix: string, what: string): Record<string, unknown> | undefined {
+  const t = text.trim();
+  const at = t.indexOf(prefix);
+  if (at < 0) return undefined;
+  const body = t.slice(at + prefix.length).split(/[\s"'<>]/)[0];
+  try {
+    return decodeJson<Record<string, unknown>>(new TextDecoder().decode(fromBase64Url(body)));
+  } catch {
+    throw new InputProblem(`that ${what} is incomplete or damaged. Copy it again, all of it`);
+  }
+}
+
+const missing = (what: string) => new InputProblem(`that ${what} is missing a part. Ask for it to be sent again`);
+const isBytes = (v: unknown, length?: number): v is Uint8Array => v instanceof Uint8Array && (length === undefined || v.length === length);
+
+/** An invitation, from its text or a link that carries it; undefined when the text is not one. */
+export function decodeInvitation(text: string): Invitation | undefined {
+  const raw = unpack(text, INVITE_PREFIX, 'invitation');
+  if (!raw) return undefined;
+  const { id, network, ownerName, role, name } = raw;
+  if (typeof id !== 'string' || !/^[0-9a-f]{32}$/.test(id) || typeof network !== 'string' || typeof ownerName !== 'string'
+    || (role !== 'heir' && role !== 'guardian') || typeof name !== 'string') throw missing('invitation');
+  return { kind: 'invite', id, network, ownerName, role, name, backup: raw.backup === true };
+}
+
+/** A reply an invitee sent back. Throws an `InputProblem` that can be shown as it is. */
+export function decodeReply(text: string): Reply {
+  const raw = unpack(text, REPLY_PREFIX, 'reply');
+  if (!raw) {
+    throw new InputProblem(text.includes(INVITE_PREFIX)
+      ? 'that is the invitation itself. Send it to them; their reply starts with "codicil:reply"'
+      : 'that is not a reply. It should start with "codicil:reply"');
+  }
+  const { inviteId, role, name, boxPublicKey, heirKeyCommit, guardianLeaf } = raw;
+  if (typeof inviteId !== 'string' || (role !== 'heir' && role !== 'guardian') || typeof name !== 'string' || !isBytes(boxPublicKey, 32)) throw missing('reply');
+  if (role === 'heir' && !isBytes(heirKeyCommit, 32)) throw missing('reply');
+  if (role === 'guardian' && !isBytes(guardianLeaf, 32)) throw missing('reply');
+  return {
+    kind: 'reply', inviteId, role, name, boxPublicKey,
+    ...(role === 'heir' ? { heirKeyCommit: heirKeyCommit as Uint8Array } : { guardianLeaf: guardianLeaf as Uint8Array }),
+  };
+}
+
+export function decodeSealedLetter(text: string): SealedLetter | undefined {
+  const raw = unpack(text, LETTER_BOX_PREFIX, 'letter');
+  if (!raw) return undefined;
+  if (typeof raw.inviteId !== 'string' || !isBytes(raw.box)) throw missing('letter');
+  return { kind: 'letter', inviteId: raw.inviteId, box: raw.box };
+}
+
+export function encodeLetterBody(body: LetterBody): Uint8Array {
+  return new TextEncoder().encode(encodeJson(body));
+}
+
+export function decodeLetterBody(bytes: Uint8Array): LetterBody {
+  let raw: Record<string, unknown>;
+  try {
+    raw = decodeJson<Record<string, unknown>>(new TextDecoder().decode(bytes));
+  } catch {
+    throw new InputProblem('that letter opened, but what is inside is damaged. Ask the owner to send it again');
+  }
+  const str = (k: string): string => {
+    if (typeof raw[k] !== 'string') throw missing('letter');
+    return raw[k] as string;
+  };
+  if (raw.kind === 'heir') {
+    const letter = str('letter');
+    try {
+      decodeHeirLetter(letter);
+    } catch (e) {
+      throw new InputProblem(e instanceof Error ? e.message : String(e));
+    }
+    return { kind: 'heir', network: str('network'), ownerName: str('ownerName'), name: str('name'), letter, backup: raw.backup === true };
+  }
+  const path = raw.path as MerklePath | undefined;
+  if (raw.kind !== 'guardian' || !path || !(path.leaf instanceof Uint8Array) || !Array.isArray(path.path)) throw missing('letter');
+  const address = str('address');
+  if (!/^[0-9a-f]{64}$/i.test(address)) throw missing('letter');
+  return { kind: 'guardian', network: str('network'), ownerName: str('ownerName'), name: str('name'), address, path };
 }
 
 // ─── Backups ────────────────────────────────────────────────────────────────
@@ -336,7 +548,9 @@ export function mergeRecords(current: readonly VaultRecord[], incoming: readonly
       continue;
     }
     const mine = out[at];
-    const further = mine.role === 'owner' && r.role === 'owner'
+    // A letter arrived on the other device: the invitation became an heir's or a guardian's record.
+    const answered = mine.role === 'invited' && r.role !== 'invited';
+    const further = answered || mine.role === 'owner' && r.role === 'owner'
       && (r.deployment?.complete === true && mine.deployment?.complete !== true
         || (r.deployment?.inserted.length ?? -1) > (mine.deployment?.inserted.length ?? -1)
         || r.activity.length > mine.activity.length);
