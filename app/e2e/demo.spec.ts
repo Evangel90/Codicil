@@ -6,6 +6,7 @@
 // vault's in-circuit P-256 / clientDataJSON verification, compiled to WASM.
 // The savings contract runs next to the vault and calls into it, also in WASM.
 
+import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 
 async function addVirtualPasskey(page: Page) {
@@ -489,14 +490,13 @@ test('a sealed message: shut until the release, then opened by the one person it
   await nextBar.getByRole('button', { name: /Release the will/ }).click();
   await finish(page, /The will is released/);
 
-  // Two guardians hand over their pieces; the first alone is not enough.
+  // A guardian's app opened after the release hands over by itself. The first piece alone is not enough.
+  await expect(page.locator('.toast')).toContainText('Your app handed over your piece by itself');
   await messages();
-  await expect(nextBar).toContainText('2 more are needed before Ada can open the message.');
-  await main.getByRole('button', { name: 'Hand over my piece' }).click();
   await expect(main).toContainText('Your piece is handed over.');
   await expect(nextBar).toContainText('One more is needed');
   await page.getByRole('group', { name: 'Which guardian' }).getByRole('button', { name: /Tomás/ }).click();
-  await main.getByRole('button', { name: 'Hand over my piece' }).click();
+  await expect(main).toContainText('Your piece is handed over.');
   await expect(nextBar).toContainText('Enough pieces have arrived. Ada can open the message now.');
 
   // Ada opens it on her own device, with real decryption in the browser.
@@ -566,17 +566,15 @@ test('a public disclosure: the register refuses every piece until the release, t
   await nextBar.getByRole('button', { name: /Release the will/ }).click();
   await finish(page, /The will is released/);
 
-  // Now the register asks the vault, hears yes, checks each piece and publishes it.
+  // Now the guardian's app hands over by itself: the register asks the vault, hears yes, checks the piece and publishes it.
+  await finish(page, /handed over by itself, without being asked\. The register checked your piece and published it/);
   await messages();
-  await expect(nextBar).toContainText('2 more are needed before anyone can open the disclosure.');
-  await main.getByRole('button', { name: 'Hand over through the register' }).click();
-  await finish(page, /The register checked your piece and published it/);
+  await expect(nextBar).toContainText('One more is needed before anyone can open the disclosure.');
   await expect(main.getByRole('heading', { name: /^Accepted on/ })).toBeVisible();
   await expect(main.locator('.calls')).toContainText('vault.isReleasedForContract');
   await expect(main.locator('.calls')).toContainText('register.handOver');
   await page.getByRole('group', { name: 'Which guardian' }).getByRole('button', { name: /Tomás/ }).click();
-  await main.getByRole('button', { name: 'Hand over through the register' }).click();
-  await finish(page, /The register checked your piece and published it/);
+  await finish(page, /handed over by itself, without being asked\. The register checked your piece and published it/);
   await expect(nextBar).toContainText('Enough pieces are on the register. Anyone can open the disclosure now.');
 
   // A stranger cannot plant a piece, and can open the text from what is on the ledger.
@@ -593,6 +591,73 @@ test('a public disclosure: the register refuses every piece until the release, t
   await nav.getByRole('button', { name: 'Privacy Lens' }).click();
   await expect(lens).toContainText('1 sealed · 3 commitments · 2 pieces');
   await expect(lens).not.toContainText('payment ledger');
+
+  expect(errors).toEqual([]);
+});
+
+/** A small PDF, made in the test. */
+function makePdf(): Buffer {
+  const body = '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj\n';
+  const noise = Array.from({ length: 4000 }, (_, i) => String.fromCharCode(32 + ((i * 7919) % 95))).join('');
+  return Buffer.from(`%PDF-1.4\n${body}% ${noise}\ntrailer << /Root 1 0 R >>\n%%EOF\n`, 'latin1');
+}
+
+test('a sealed file: attached to a disclosure, rebuilt by the app after the release, downloaded unchanged', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto('/#/demo');
+  await page.getByRole('button', { name: /Seal a disclosure/ }).click();
+  const nav = page.getByRole('navigation', { name: 'Sections' });
+  const main = page.getByRole('main');
+  const actAs = page.getByRole('group', { name: 'Act as' });
+  const nextBar = page.getByRole('status').filter({ hasText: /^Next/ });
+  const messages = () => nav.getByRole('button', { name: 'Messages' }).click();
+  await expect(main.getByRole('heading', { name: 'Sealed messages' })).toBeVisible({ timeout: 30_000 });
+
+  // Amara attaches a PDF and seals it, with no words. A file that is too large is refused in words.
+  const pdf = makePdf();
+  await main.getByLabel('Attach a file').setInputFiles({ name: 'empty.pdf', mimeType: 'application/pdf', buffer: Buffer.alloc(0) });
+  await expect(main.getByRole('alert')).toHaveText('That file is empty. Choose another one.');
+  await main.getByLabel('Attach a file').setInputFiles({ name: 'ledger.pdf', mimeType: 'application/pdf', buffer: pdf });
+  await expect(main).toContainText('ledger.pdf');
+  await expect(main).toContainText("on the test network's storage");
+  await main.getByRole('button', { name: 'Seal for everyone' }).click();
+  await finish(page, /Sealed for everyone\. The register now holds its fingerprint/);
+  await expect(main).toContainText("the file's fingerprint");
+
+  // The chain holds a fingerprint and commitments; the store holds an encrypted copy with no name.
+  await nav.getByRole('button', { name: 'Privacy Lens' }).click();
+  await expect(page.locator('.lens-public')).toContainText('1 sealed · 3 commitments · 0 pieces');
+  await expect(page.locator('.lens-public')).toContainText('1 encrypted');
+  await expect(page.locator('.lens-public')).not.toContainText('ledger.pdf');
+
+  // Before the release, anyone sees that it cannot be opened yet, and why.
+  await actAs.getByRole('button', { name: 'Anyone' }).click();
+  await messages();
+  await expect(main).toContainText('It cannot be opened yet. The vault has not released');
+  await expect(main).not.toContainText('ledger.pdf');
+
+  // Amara goes silent and the vault releases. Each guardian's app hands over by itself.
+  await actAs.getByRole('button', { name: 'Guardian' }).click();
+  await page.getByRole('button', { name: 'Skip to deadline' }).click();
+  await nav.getByRole('button', { name: 'Guardian' }).click();
+  await nextBar.getByRole('button', { name: /Start the switch/ }).click();
+  await finish(page, /switch has started|countdown/i);
+  await page.getByRole('button', { name: 'Skip challenge window' }).click();
+  await nextBar.getByRole('button', { name: /Release the will/ }).click();
+  await finish(page, /The will is released/);
+  await finish(page, /handed over by itself/);
+  await page.getByRole('group', { name: 'Which guardian' }).getByRole('button', { name: /Tomás/ }).click();
+  await finish(page, /handed over by itself/);
+
+  // Anyone opens the page: the app collects the pieces, fetches and checks the file, and offers it.
+  await actAs.getByRole('button', { name: 'Anyone' }).click();
+  await messages();
+  const download = main.getByRole('link', { name: 'Download ledger.pdf' });
+  await expect(download).toBeVisible({ timeout: 30_000 });
+  await expect(main.getByRole('list', { name: 'What the app did' })).toContainText("from the register's public ledger");
+  const [file] = await Promise.all([page.waitForEvent('download'), download.click()]);
+  expect(file.suggestedFilename()).toBe('ledger.pdf');
+  expect((await readFile((await file.path())!)).equals(pdf)).toBe(true);
 
   expect(errors).toEqual([]);
 });

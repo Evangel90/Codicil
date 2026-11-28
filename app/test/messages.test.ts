@@ -70,7 +70,7 @@ describe('sealing a message', () => {
   });
 
   it('refuses an empty message and one that is too long, in words', async () => {
-    expect(await demo.sealMessage('ada', '   \n ')).toBe('Write the message first.');
+    expect(await demo.sealMessage('ada', '   \n ')).toBe('Write the message or attach a file first.');
     expect(await demo.sealMessage('ada', 'x'.repeat(MESSAGE_MAX + 1))).toBe('That is 2,001 characters. The demo seals up to 2,000.');
     expect(s().messages).toEqual([]);
     expect(await demo.sealMessage('ada', 'x'.repeat(MESSAGE_MAX))).toBeUndefined();

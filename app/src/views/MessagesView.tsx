@@ -11,12 +11,19 @@
 // piece until the vault has released, checks it, and publishes it. A public
 // disclosure always goes through the register. The encryption, the key
 // splitting and the contract calls here are real.
+//
+// A message can carry a file, such as a PDF, or be only a file. The file is
+// sealed under its own key and its encrypted copy is kept in a store; the
+// reader holds a pointer to it. After the release the app rebuilds the file
+// by itself and offers it for download.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { PlainFile } from '@codicil/sdk';
 import { Phase } from '@codicil/contracts/vault';
 import { HashChip, Icon, ICONS, Segmented } from '../components/ui.js';
 import { messageStage, type MessageStage } from '../demo/guide.js';
 import { SignalCard, StatementEditor } from './Signal.js';
+import { fmtBytes, MAX_FILE_WORDS, readPicked } from '../demo/files.js';
 import {
   demo, fmtDate, guardianById, HEIRS, MESSAGE_MAX, OWNER_FIRST, recipientName,
   type HeirProfile, type MessageTo, type MessageVia, type MessageView, type RegisterAttempt, type Snapshot,
@@ -106,6 +113,9 @@ function LockPanel({ s, you }: { s: Snapshot; you: 'owner' | 'recipient' | 'guar
           <div><dt>The other half</dt><dd>{n === 1 ? 'With the one guardian' : `Cut into ${pieces(n)}`}</dd></div>
           <div><dt>Pieces needed</dt><dd>{k} of {n}</dd></div>
           <div><dt>Held by</dt><dd>{guardians}</dd></div>
+          {s.messages.some((m) => m.file) && (
+            <div><dt>A sealed file</dt><dd>Encrypted, in a store; {you === 'recipient' ? 'you hold' : 'the reader holds'} a pointer</dd></div>
+          )}
           {everyone(s) && <div><dt>The public disclosure</dt><dd>Posted for everyone, with its half</dd></div>}
         </dl>
         <p className="small">Guardians cannot read a message: they never get the recipient's half. The recipient cannot read it early: they never get the guardians' half until the vault releases.</p>
@@ -213,12 +223,115 @@ function LastAttempt({ a }: { a: RegisterAttempt }) {
   );
 }
 
+/** Where the encrypted copy of a file is kept, in words. */
+const KEPT = "kept in this page for the demo; in live mode, on the test network's storage";
+
+/**
+ * A sealed file, as its reader sees it. Once the vault has released and
+ * enough pieces are in, the app does every step itself and offers the file
+ * for download. Its name is inside the encrypted copy, so nobody sees it
+ * before then.
+ */
+function SealedFile({ s, m, reader }: { s: Snapshot; m: MessageView; reader: 'recipient' | 'anyone' }) {
+  const f = m.file!;
+  const [problem, setProblem] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const tried = useRef(false);
+  const released = s.phase === Phase.released;
+  const ready = m.handed.length >= m.needed;
+  const open = async () => {
+    setBusy(true);
+    setProblem(await demo.openFile(m.to));
+    setBusy(false);
+  };
+  // As soon as enough pieces are in, the app opens the file on its own, once.
+  useEffect(() => {
+    if (ready && !f.opened && !tried.current) {
+      tried.current = true;
+      void open();
+    }
+  }, [ready, f.opened]);
+  const opened = f.opened;
+  const url = useMemo(() => (opened ? URL.createObjectURL(new Blob([opened.bytes as BlobPart], { type: opened.type })) : undefined), [opened?.bytes]);
+  useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
+  const more = m.needed - Math.min(m.handed.length, m.needed);
+  if (opened && url) {
+    return (
+      <section className="card pad-24 stack-16" aria-labelledby={`file-${m.to}-h`}>
+        <div className="stack-6">
+          <span className="savings-label">{reader === 'anyone' ? 'The file in the disclosure' : `A file from ${OWNER_FIRST}`}</span>
+          <h2 id={`file-${m.to}-h`} className="disp h-card">{opened.name}</h2>
+          <span className="small muted">{fmtBytes(opened.bytes.length)} · opened on {fmtDate(opened.at)}, on this device</span>
+        </div>
+        <ol className="numbered" aria-label="What the app did">
+          {opened.steps.map((step, i) => <li key={step}><span className="mono">{i + 1}</span><span>{step}.</span></li>)}
+        </ol>
+        <div className="btn-row">
+          <a className="btn btn-primary btn-lg" href={url} download={opened.name}>
+            <Icon d={ICONS.down} size={16} stroke={2} />Download {opened.name}
+          </a>
+          <span className="small muted">Nothing was sent anywhere to open it.</span>
+        </div>
+      </section>
+    );
+  }
+  return (
+    <section className="card pad-24 stack-16" aria-labelledby={`file-${m.to}-h`}>
+      <div className="stack-6">
+        <h2 id={`file-${m.to}-h`} className="savings-label">{reader === 'anyone' ? 'A sealed file for everyone' : 'A sealed file'}</h2>
+        <span className="small muted">
+          {reader === 'anyone' ? 'Everyone holds a pointer to it' : 'You hold a pointer to it'} and half of its key. Its name and what is in it are inside the encrypted copy.
+        </span>
+      </div>
+      <dl className="msg-facts">
+        <div><dt>Encrypted copy</dt><dd>{fmtBytes(f.stored.length)}, {KEPT}</dd></div>
+        <div><dt>Its fingerprint</dt><dd><HashChip value={f.stored.sha256} /></dd></div>
+        {f.fingerprint && <div><dt>On the register</dt><dd><HashChip value={f.fingerprint} /></dd></div>}
+      </dl>
+      <p className="small muted">
+        {!released && 'It cannot be opened yet. The vault has not released, so the guardians still hold their pieces of its key, and without them the encrypted copy is noise.'}
+        {released && !ready && `The vault has released. The app opens the file by itself once ${more === 1 ? 'one more piece is' : `${more} more pieces are`} in.`}
+        {released && ready && (busy ? 'Opening it on this device…' : !problem && 'Enough pieces are in.')}
+      </p>
+      {problem && (
+        <>
+          <p className="err-inline" role="alert">{problem}</p>
+          <div><button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void open()}>Try again</button></div>
+        </>
+      )}
+    </section>
+  );
+}
+
+/** What a message holds, in a few words. */
+const contents = (m: MessageView) => [
+  m.text && `${m.text.length.toLocaleString()} characters`,
+  m.file && `${m.file.name}, ${fmtBytes(m.file.size)}`,
+].filter(Boolean).join(' · ');
+
 // ─── The owner ──────────────────────────────────────────────────────────────
-function Editor({ to, start, startVia, onDone }: { to: MessageTo; start: string; startVia: MessageVia; onDone: () => void }) {
+function Editor({ to, start, startVia, startFile, onDone }: {
+  to: MessageTo; start: string; startVia: MessageVia; startFile?: { name: string; size: number }; onDone: () => void;
+}) {
   const [text, setText] = useState(start);
   const [via, setVia] = useState<MessageVia>(startVia);
   const [problem, setProblem] = useState<string>();
   const [busy, setBusy] = useState(false);
+  // A file picked now; null when the one sealed before is dropped; left out to keep it.
+  const [file, setFile] = useState<PlainFile | null>();
+  const [reading, setReading] = useState(false);
+  const attached = file === undefined ? startFile : file ? { name: file.name, size: file.bytes.length } : undefined;
+  const pick = async (picked?: File) => {
+    if (!picked) return;
+    setProblem(undefined);
+    setReading(true);
+    try {
+      setFile(await readPicked(picked));
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e));
+    }
+    setReading(false);
+  };
   const length = text.trim().length;
   const over = length > MESSAGE_MAX;
   const open = to === 'everyone';
@@ -226,7 +339,7 @@ function Editor({ to, start, startVia, onDone }: { to: MessageTo; start: string;
   const examples = open ? DISCLOSURE_EXAMPLES.map((x) => ({ label: x.label, text: x.text })) : MESSAGE_EXAMPLES.map((x) => ({ label: x.label, text: x.text(name) }));
   const seal = async () => {
     setBusy(true);
-    const wrong = await demo.sealMessage(to, text, via);
+    const wrong = await demo.sealMessage(to, text, via, { file });
     setBusy(false);
     if (wrong) setProblem(wrong);
     else onDone();
@@ -253,6 +366,27 @@ function Editor({ to, start, startVia, onDone }: { to: MessageTo; start: string;
         </span>
         <span className={`small mono ${over ? 'msg-over' : 'muted'}`}>{length.toLocaleString()} / {MESSAGE_MAX.toLocaleString()}</span>
       </div>
+      <div className="msg-attach">
+        {attached ? (
+          <span className="msg-attached">
+            <Icon d={ICONS.letter} size={16} stroke={2} />
+            <span><strong>{attached.name}</strong> <span className="muted">· {fmtBytes(attached.size)}</span></span>
+            <button type="button" className="linkish" onClick={() => { setFile(null); setProblem(undefined); }}>Remove the file</button>
+          </span>
+        ) : (
+          <label className="btn btn-secondary btn-sm msg-pick" aria-disabled={reading || undefined}>
+            <input
+              type="file" className="sr-only" aria-label="Attach a file" disabled={reading}
+              onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ''; }}
+            />
+            {reading ? 'Reading the file…' : 'Attach a file'}
+          </label>
+        )}
+        <span className="small muted">
+          A PDF or any other file, up to {MAX_FILE_WORDS}, instead of words or with them. It is encrypted here under its own
+          key. The encrypted copy is {KEPT}, and {open ? 'everyone gets' : `${name} holds`} a pointer to it.
+        </span>
+      </div>
       {open ? (
         <p className="small muted">
           A disclosure goes through the seal register. Its fingerprint is recorded now, which later shows the text
@@ -270,7 +404,7 @@ function Editor({ to, start, startVia, onDone }: { to: MessageTo; start: string;
       )}
       {problem && <p className="err-inline" role="alert">{problem}</p>}
       <div className="btn-row">
-        <button type="button" className="btn btn-primary" disabled={busy || length === 0 || over} onClick={() => void seal()}>
+        <button type="button" className="btn btn-primary" disabled={busy || reading || (length === 0 && !attached) || over} onClick={() => void seal()}>
           Seal for {name}
         </button>
         <button type="button" className="btn btn-ghost" onClick={onDone}>Cancel</button>
@@ -299,7 +433,7 @@ function OwnerRow({ s, to, title, relation, editing, setEditing, setProblem }: {
           <span className="small muted">
             {!m ? 'Nothing sealed'
               : stage === 'opened' ? (open ? `Opened on ${fmtDate(m.opened!.at)}: it is public now` : `Opened by ${name} on ${fmtDate(m.opened!.at)}`)
-              : `Sealed on ${fmtDate(m.sealedAt)} · ${m.text.length.toLocaleString()} characters · ${STAGE_WORDS[stage!]}`}
+              : `Sealed on ${fmtDate(m.sealedAt)} · ${contents(m)} · ${STAGE_WORDS[stage!]}`}
           </span>
         </div>
         {!editing && !released && (
@@ -315,7 +449,12 @@ function OwnerRow({ s, to, title, relation, editing, setEditing, setProblem }: {
           </div>
         )}
       </div>
-      {editing && !released && <Editor to={to} start={m?.text ?? ''} startVia={m?.via ?? (open ? 'register' : 'hand')} onDone={() => setEditing(undefined)} />}
+      {editing && !released && (
+        <Editor
+          to={to} start={m?.text ?? ''} startVia={m?.via ?? (open ? 'register' : 'hand')}
+          startFile={m?.file && { name: m.file.name, size: m.file.size }} onDone={() => setEditing(undefined)}
+        />
+      )}
       {m && !editing && (
         <span className="small muted">
           {m.holders.length === 1
@@ -324,11 +463,16 @@ function OwnerRow({ s, to, title, relation, editing, setEditing, setProblem }: {
           {m.via === 'register' && !open && ' Their pieces go through the seal register, so none of them learns who it is for.'}
         </span>
       )}
-      {m?.fingerprint && !editing && (
+      {(m?.fingerprint || m?.file?.fingerprint) && !editing && (
         <span className="small muted msg-fp">
-          On the register: fingerprint <HashChip value={m.fingerprint} />
+          On the register: {m.fingerprint && <>fingerprint <HashChip value={m.fingerprint} /></>}
+          {m.fingerprint && m.file?.fingerprint && ' and '}
+          {m.file?.fingerprint && <>the file's fingerprint <HashChip value={m.file.fingerprint} /></>}
           {m.sealedBefore !== undefined && <> recorded before {fmtDate(m.sealedBefore)}</>}
         </span>
+      )}
+      {m?.file && !editing && (
+        <span className="small muted">The encrypted copy of {m.file.name} is {fmtBytes(m.file.stored.length)}, {KEPT}.</span>
       )}
     </li>
   );
@@ -404,31 +548,50 @@ function Disclosure({ s }: { s: Snapshot }) {
     setProblem(await demo.openMessage('everyone'));
     setBusy(false);
   };
-  if (m.opened) {
+  // Words, a file, or both. The file opens by itself once enough pieces are in.
+  const hasText = m.bytes > 0;
+  const file = m.file && <SealedFile s={s} m={m} reader="anyone" />;
+  if (m.opened && hasText) {
     return (
-      <article className="letter msg-letter" aria-label="The disclosure">
-        <header><span className="small muted">Sealed before {fmtDate(m.sealedBefore ?? m.sealedAt)} · opened on {fmtDate(m.opened.at)}</span></header>
-        <p className="msg-open">{m.opened.text}</p>
-      </article>
+      <>
+        <article className="letter msg-letter" aria-label="The disclosure">
+          <header><span className="small muted">Sealed before {fmtDate(m.sealedBefore ?? m.sealedAt)} · opened on {fmtDate(m.opened.at)}</span></header>
+          <p className="msg-open">{m.opened.text}</p>
+        </article>
+        {file}
+      </>
     );
   }
+  if (m.opened) return file ?? null;
   return (
+    <>
     <section className="card claim" aria-labelledby="disc-h">
       <div className="claim-top">
         <h2 id="disc-h" className="savings-label">A public disclosure</h2>
-        <code className="mono msg-noise">{m.sealedStart}…</code>
-        <span className="small muted">
-          {m.bytes.toLocaleString()} bytes of sealed text, posted where anyone can fetch it. Without its key it is noise.
-        </span>
+        {hasText ? (
+          <>
+            <code className="mono msg-noise">{m.sealedStart}…</code>
+            <span className="small muted">
+              {m.bytes.toLocaleString()} bytes of sealed text, posted where anyone can fetch it. Without its key it is noise.
+              {m.file && ' A sealed file comes with it.'}
+            </span>
+          </>
+        ) : (
+          <span className="small muted">A sealed file, posted where anyone can fetch it. Without its key it is noise.</span>
+        )}
       </div>
       <dl className="msg-facts">
-        <div><dt>Fingerprint on the register</dt><dd>{m.fingerprint && <HashChip value={m.fingerprint} />}</dd></div>
+        <div><dt>Fingerprint on the register</dt><dd>{(m.fingerprint ?? m.file?.fingerprint) && <HashChip value={(m.fingerprint ?? m.file?.fingerprint)!} />}</dd></div>
         <div><dt>Recorded before</dt><dd>{m.sealedBefore !== undefined ? fmtDate(m.sealedBefore) : 'unknown'}</dd></div>
       </dl>
       <OwnerProof s={s} />
       <PieceCount m={m} />
-      <button type="button" className="btn btn-primary btn-lg" disabled={busy} onClick={() => void open()}>Open the disclosure</button>
-      {problem && <p className="err-inline" role="alert">{problem}</p>}
+      {hasText && (
+        <>
+          <button type="button" className="btn btn-primary btn-lg" disabled={busy} onClick={() => void open()}>Open the disclosure</button>
+          {problem && <p className="err-inline" role="alert">{problem}</p>}
+        </>
+      )}
       <p className="small muted">
         {stage === 'sealed' && 'It will not open yet: no piece of its key is on the register, and the register takes none until the vault releases.'}
         {stage === 'collecting' && 'The vault has released. Each guardian can now hand a piece to the register, which checks it and publishes it.'}
@@ -445,6 +608,8 @@ function Disclosure({ s }: { s: Snapshot }) {
         ))}
       </div>
     </section>
+    {file}
+    </>
   );
 }
 
@@ -530,6 +695,8 @@ function RecipientMessage({ s, id }: { s: Snapshot; id: HeirProfile['id'] }) {
   const stage = messageStage(s, m);
   const waiting = m.holders.filter((g) => !m.handed.includes(g));
   const byRegister = m.via === 'register';
+  // Words, a file, or both.
+  const hasText = m.bytes > 0;
   const open = async () => {
     setBusy(true);
     setProblem(await demo.openMessage(id));
@@ -540,7 +707,7 @@ function RecipientMessage({ s, id }: { s: Snapshot; id: HeirProfile['id'] }) {
       <div className="owner-head">
         <div className="stack-12">
           <h1 className="disp h-sm">
-            {stage === 'opened' ? `${OWNER_FIRST}'s message to you.` : `${OWNER_FIRST} left you a sealed message.`}
+            {stage === 'opened' ? `${OWNER_FIRST}'s ${hasText ? 'message' : 'file'} to you.` : `${OWNER_FIRST} left you a sealed ${hasText ? 'message' : 'file'}.`}
           </h1>
           <p className="lede">
             {stage === 'sealed' && (byRegister
@@ -558,7 +725,7 @@ function RecipientMessage({ s, id }: { s: Snapshot; id: HeirProfile['id'] }) {
       </div>
       <div className="split">
         <div className="split-main msg-main">
-          {m.opened ? (
+          {m.opened && !hasText ? null : m.opened ? (
             <article className="letter msg-letter" aria-label={`Message from ${OWNER_FIRST}`}>
               <header><span className="small muted">From {OWNER_FIRST} · sealed on {fmtDate(m.sealedAt)}</span></header>
               <p className="msg-open">{m.opened.text}</p>
@@ -567,14 +734,24 @@ function RecipientMessage({ s, id }: { s: Snapshot; id: HeirProfile['id'] }) {
             <section className="card claim" aria-labelledby="msg-h">
               <div className="claim-top">
                 <h2 id="msg-h" className="savings-label">What you hold</h2>
-                <code className="mono msg-noise">{m.sealedStart}…</code>
-                <span className="small muted">{m.bytes.toLocaleString()} bytes of sealed text. Without the whole key it is noise.</span>
+                {hasText ? (
+                  <>
+                    <code className="mono msg-noise">{m.sealedStart}…</code>
+                    <span className="small muted">{m.bytes.toLocaleString()} bytes of sealed text{m.file && ', and a pointer to a sealed file'}. Without the whole key it is noise.</span>
+                  </>
+                ) : (
+                  <span className="small muted">A pointer to a sealed file, and half of its key. Without the whole key the file is noise.</span>
+                )}
               </div>
               <PieceCount m={m} />
-              <button type="button" className="btn btn-primary btn-lg" disabled={busy} onClick={() => void open()}>Open the message</button>
-              {problem && <p className="err-inline" role="alert">{problem}</p>}
+              {hasText && (
+                <>
+                  <button type="button" className="btn btn-primary btn-lg" disabled={busy} onClick={() => void open()}>Open the message</button>
+                  {problem && <p className="err-inline" role="alert">{problem}</p>}
+                </>
+              )}
               <p className="small muted">
-                {stage === 'sealed' && 'It will not open yet. Try it: your half of the key is not enough without the pieces.'}
+                {stage === 'sealed' && (hasText ? 'It will not open yet. Try it: your half of the key is not enough without the pieces.' : 'It will not open yet: your half of the key is not enough without the pieces.')}
                 {stage === 'collecting' && (byRegister
                   ? 'Pieces appear on the register as guardians hand them over. The register checks each one, so a wrong piece never lands.'
                   : 'Pieces arrive as guardians hand them over. Each one is checked on arrival, so a wrong piece is caught.')}
@@ -591,6 +768,7 @@ function RecipientMessage({ s, id }: { s: Snapshot; id: HeirProfile['id'] }) {
               )}
             </section>
           )}
+          {m.file && <SealedFile s={s} m={m} reader="recipient" />}
           <Disclosure s={s} />
           {s.register.lastAttempt && <LastAttempt a={s.register.lastAttempt} />}
         </div>
@@ -622,6 +800,10 @@ function GuardianPieces({ s, id }: { s: Snapshot; id: number }) {
   const byRegister = left.filter((m) => m.via === 'register');
   const sentByRegister = mine.some((m) => m.via === 'register');
   const sentByHand = mine.some((m) => m.via === 'hand');
+  // A message with words and a file has a key for each, so a piece for each.
+  const pieceCount = (ms: MessageView[]) => ms.reduce((n, m) => n + (m.bytes > 0 ? 1 : 0) + (m.file ? 1 : 0), 0);
+  const handCount = pieceCount(byHand);
+  const registerCount = pieceCount(byRegister);
   const released = s.phase === Phase.released;
   const busy = s.tx?.status === 'running';
   const k = Number(s.guardianThreshold);
@@ -659,10 +841,15 @@ function GuardianPieces({ s, id }: { s: Snapshot; id: number }) {
                   {s.phase === Phase.armed ? 'Armed' : released ? 'Released' : 'Pending'}
                 </span>
               </div>
+              <p className="small muted">
+                {released
+                  ? 'Your app hands over by itself when it is opened after the release. If it could not, use the buttons below.'
+                  : 'Your app keeps every piece until the vault says released. Then it hands them over by itself, the next time it is opened.'}
+              </p>
               {byHand.length > 0 && (
                 <>
                   <button type="button" className="btn btn-primary btn-lg" onClick={() => setProblem(demo.handOverPieces(id))}>
-                    {byHand.length === 1 ? 'Hand over my piece' : `Hand over my ${byHand.length} pieces`}
+                    {handCount === 1 ? 'Hand over my piece' : `Hand over my ${handCount} pieces`}
                   </button>
                   {problem && <p className="err-inline" role="alert">{problem}</p>}
                   <p className="small muted">
@@ -675,7 +862,7 @@ function GuardianPieces({ s, id }: { s: Snapshot; id: number }) {
               {byRegister.length > 0 && (
                 <>
                   <button type="button" className={`btn ${byHand.length > 0 ? 'btn-secondary' : 'btn-primary'} btn-lg`} disabled={busy} onClick={() => void demo.publishPieces(id)}>
-                    {byRegister.length === 1 ? 'Hand over through the register' : `Hand over ${byRegister.length} pieces through the register`}
+                    {registerCount === 1 ? 'Hand over through the register' : `Hand over ${registerCount} pieces through the register`}
                   </button>
                   <p className="small muted">
                     {released
@@ -691,7 +878,7 @@ function GuardianPieces({ s, id }: { s: Snapshot; id: number }) {
             <h2 className="disp h-card">What {OWNER_FIRST} asked of you</h2>
             <ol className="numbered">
               <li><span className="mono">1</span><span><strong>Keep the piece.</strong> It sits on this device. It is not a copy of the message and it is not the key.</span></li>
-              <li><span className="mono">2</span><span><strong>Wait for the vault.</strong> When it says released, hand the piece over. Until then, do nothing, whoever asks.</span></li>
+              <li><span className="mono">2</span><span><strong>Wait for the vault.</strong> When it says released, your app hands the piece over by itself. Until then, do nothing, whoever asks.</span></li>
               <li><span className="mono">3</span><span><strong>That is all.</strong> {k === 1 ? 'Your piece alone completes the guardians\' half of the key' : `It takes ${k} guardians' pieces to complete their half of the key`}. A private message still needs the half only its recipient holds.</span></li>
             </ol>
           </section>

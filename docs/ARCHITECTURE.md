@@ -313,6 +313,17 @@ run its circuits, and `handOver` and `unseal` run the vault's `isReleasedForCont
 The encryption and key splitting are real ([`sdk/src/sealed.ts`](../sdk/src/sealed.ts)). What the
 demo simulates is delivery between people: everyone's device is in one browser tab.
 
+A message can carry a file, or be only a file (D22). The file is sealed with
+[`sdk/src/sealed-file.ts`](../sdk/src/sealed-file.ts) under its own key, so a message with words and
+a file has two seals and two pieces per guardian. The encrypted body goes to a `memoryBlobStore` the
+demo store holds (in live mode, the test network's storage); the reader holds the pointer. Once
+enough pieces are in, the reader's view calls `openFile`, which collects them (from the register's
+ledger with `piecesHandedOver`, or the ones handed over by hand), fetches the body, checks its length
+and SHA-256, rebuilds the key, decrypts, and offers the file as a Blob URL download. A guardian's
+view opened after the release calls `autoHandOver`: it sends every piece that guardian still holds
+(by hand, or through the register in the transaction sheet), once per guardian, and nothing before
+the release. The manual buttons stay as a fallback.
+
 [`app/src/demo/store.ts`](../app/src/demo/store.ts) holds the world (chain, keys, will, letters held
 by heirs, the proof each guardian holds, the saved recovery key) and exposes it to React through
 `useSyncExternalStore`. Every action goes through a

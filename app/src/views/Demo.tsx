@@ -173,6 +173,14 @@ export function Demo() {
   // The Will and Settings tabs are the owner's alone.
   useEffect(() => { if (s.actor.kind !== 'owner' && (tab === 'will' || tab === 'settings')) setTab('vault'); }, [s.actor.kind, tab]);
 
+  // A guardian's app opened after the release hands over every piece it holds, by itself, once.
+  // It waits until no transaction sheet is open, so the one before stays readable.
+  const guardianId = s.actor.kind === 'guardian' ? s.actor.id : undefined;
+  const sheetOpen = !!s.tx;
+  useEffect(() => {
+    if (guardianId !== undefined && s.phase === Phase.released && !sheetOpen) void demo.autoHandOver(guardianId);
+  }, [guardianId, s.phase, sheetOpen]);
+
   // Each screen starts at the top.
   useEffect(() => { window.scrollTo(0, 0); }, [tab, sealed, story, s.actor.kind]);
 
