@@ -12,7 +12,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "e2e": "playwright test",
-    "live:e2e": "tsx scripts/live-e2e.ts"
+    "live:e2e": "tsx scripts/live-e2e.ts",
+    "arweave:smoke": "tsx scripts/arweave-smoke.ts"
   },
   "dependencies": {
     "@codicil/contracts": "0.1.0",

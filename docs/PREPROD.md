@@ -182,6 +182,32 @@ MIDNIGHT_NETWORK=preview npm run live:e2e
 
 Its timers are `CODICIL_LIVE_EVERY_S` (300) and `CODICIL_LIVE_WINDOW_S` (120).
 
+## Where sealed files are kept: the ar.io sandbox
+
+A sealed file's body is encrypted before it leaves the browser, then stored outside the chain
+([D22](DECISIONS.md)). Live mode keeps it on the [ar.io testnet sandbox](https://docs.ar.io/build/testnet/)
+(`app/src/live/arweave.ts`, store name `arweave-sandbox`). It needs no wallet and no funds.
+
+- **It is not permanent.** The sandbox never posts to real Arweave and deletes files after about three
+  days. A file read after that is "not found", and the app says why.
+- **5 MiB per file**, the sandbox's free tier, header and signature included (5,242,724 bytes of body).
+  The app refuses anything larger before uploading. Paid uploads are not set up.
+- **100 MiB in all per connection.** The free tier also counts per wallet and per IP range (a /24),
+  for good. Each upload is signed with a fresh key, so only the IP range limit applies.
+- Uploads go to `https://upload.services.ar-io.dev/v1/tx` as signed ANS-104 data items, and are
+  read from `https://ar-io.dev/raw/<id>`. A fresh upload is served at once.
+
+```bash
+npm run arweave:smoke -w app   # upload 2 KB, read it back, compare hashes
+```
+
+Measured on 2026-11-28: a 5,242,880-byte item uploaded free and one byte more was refused with 402;
+a 2 KB upload took about 1.5 seconds and was readable at once; an id the gateway does not have is
+answered with 504 after about 16 seconds, not 404.
+
+**Arweave mainnet is deferred.** It is the same store with mainnet endpoints, another name (so pointers
+say which network holds a file) and funding, which is not built.
+
 ## Without a network
 
 `npm run preprod:dryrun -- --escrow` builds every transaction of the run offline, through the same
