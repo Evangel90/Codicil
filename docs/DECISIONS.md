@@ -541,3 +541,83 @@ full keys (`npm run preprod:dryrun -- --seals --prove`), and the network script 
 deployment, when the network's wallet sync returned server errors, so the proof has not yet been
 recorded on a network. The register from the first run predates it, and the reader page says so:
 it reports that register as not proven.
+
+## D22: No single device, domain or company holds a secret alone (2026-11-28)
+
+**Problem.** Until now, each secret lived in one place. An owner's will, salts and guardians'
+secrets sat in one browser's local storage, guarded by a passphrase backup, which is a seed phrase
+by another name. A sealed message's recipient kept the sealed text and their half of the key on
+their own device, so losing that device lost the message. Heirs' keys were made on the owner's
+device, so the owner knew them. And a passkey only works on the website it was made on: if the
+domain lapses or changes hands, every passkey made there stops working, and whoever holds the
+domain can ask those passkeys for signatures. Files (a PDF, a scan) could not be sealed at all.
+
+**Decision.** Five parts.
+
+1. **One identity root per person, behind several key slots**
+   ([`sdk/src/slots.ts`](../sdk/src/slots.ts)). A root is 32 random bytes. Everything a person
+   holds for a vault (an heir's key, a guardian's secret, an encryption key, the key to their
+   records) is derived from it with HKDF and a label, so the root is the one thing to protect. The
+   root is stored encrypted in a keyring with one or more slots, any one of which opens it:
+   - **passkey**: the WebAuthn PRF extension returns the same 32 bytes from the same passkey on
+     every device it syncs to. Convenient, and tied to the website.
+   - **recovery code**: 128 random bits written as 26 characters with a check character, to print
+     or write down. Tied to nothing. It is random, not a passphrase a person chooses, so it needs no
+     slow key stretching.
+   - **wallet**: a hash of the wallet's signature over a fixed message. Ed25519 signatures are
+     deterministic, so the same wallet gives the same secret; the slot is only added after two
+     signatures agree. Tied to the wallet, not to a website.
+   Losing the domain closes the passkey slot and leaves the others. A copy of the app hosted
+   anywhere else opens the same keyring through them.
+
+2. **People make their own keys.** An heir or a guardian creates their root on their own device and
+   sends the owner a **reply**: commitments and a public encryption key only. The owner never
+   learns an heir's key or a guardian's secret. The older flow, where the owner's device makes the
+   keys and sends them in an invitation, stays for the guided demo and as a fallback.
+
+3. **Encrypting to a person** ([`sdk/src/box.ts`](../sdk/src/box.ts)). Every person has an X25519
+   key derived from their root. Anything meant for them (a recipient's half of a sealed key, a
+   guardian's piece, a fresh heir letter) is encrypted to that key with an ephemeral X25519 key,
+   HKDF-SHA-256 and AES-256-GCM, and can then be stored in public. Nobody has to keep it safe,
+   because only its recipient can open it.
+
+4. **Sealed files** ([`sdk/src/sealed-file.ts`](../sdk/src/sealed-file.ts)). A file is sealed as
+   a D20 message whose body is the file's name, type and bytes, padded to a Padmé size so the
+   stored size says little about the real one. The body is too large to carry in a letter, so it
+   goes to a blob store, and what people hold is a **pointer**: everything in the sealed text
+   except the body, plus where the body is stored, its length and its SHA-256. At release the app
+   does every step itself: it reads the pieces the guardians handed over from the seal register,
+   fetches the body, checks its hash, rebuilds the key, opens the file and offers it for download.
+   The fingerprint the register records is the fingerprint of the whole sealed text, so the
+   register's contract is unchanged. Files are capped at 25 MiB for now.
+
+5. **Where bodies are stored** ([`sdk/src/blobs.ts`](../sdk/src/blobs.ts)). A small interface,
+   `put(bytes) → id` and `get(id) → bytes`, with three implementations: in memory (tests and the
+   guided demo), the ar.io sandbox (live mode), and Arweave mainnet later, behind the same code.
+   **Arweave mainnet is deferred.** The sandbox never posts to real Arweave and purges uploads after
+   about three days, and the app says so beside every upload.
+
+**Where pointers travel.** A private file's pointer is encrypted to its recipient and handed over
+with the invitation, so the chain does not show that a file exists. A public disclosure's pointer is
+meant to be found and can be published next to the register.
+
+**Guardians hand over by themselves.** A guardian's app that is opened after the release sends
+every piece it holds to the register without being asked. Services that watch a vault and hand
+over automatically ("keepers") are on the roadmap, not in this change.
+
+**The domain, and the contract.** No contract change is in this decision. Live mode now requires a
+recovery key when a vault is created, so no vault depends on a passkey alone. The recovery key can
+already replace the owner's keys, for example with a wallet key and no passkey, which switches the
+passkey off after the recovery delay. A direct "switch off the passkey" circuit waits for the next contract
+change, so the vault is recompiled and redeployed once ([ROADMAP.md](ROADMAP.md)).
+
+**Why not a social login or an embedded wallet provider.** As of 28 November 2026, none of the
+providers that offer email, social or passkey sign-in for Midnight (Turnkey, Dynamic, Midnight
+Passport, Kuira) has a usable Midnight web SDK. Even once they do, they tie an email address to
+"has a Codicil vault", which is the link the rest of Codicil hides, and they ask an inheritance that
+may wait twenty years to depend on one company. One can be added later as another key slot.
+
+**What this does not fix.** The passkey slot still depends on the passkey provider (Apple, Google,
+a password manager), which syncs it end to end encrypted. PRF is not available on every browser and
+provider, so the recovery code is always offered. A sealed file still opens early if enough
+guardians and its recipient agree to, as in D20.

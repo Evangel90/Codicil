@@ -16,3 +16,7 @@ export * from './events.js';
 export * from './letter.js';
 export * from './sealed.js';
 export * from './seals.js';
+export * from './slots.js';
+export * from './box.js';
+export * from './blobs.js';
+export * from './sealed-file.js';
