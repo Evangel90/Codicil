@@ -34,7 +34,8 @@ import { ENV_PATH, networkPaths, REPO_ROOT } from '../../preprod/src/paths.js';
 import { writeFileAtomic } from '../../preprod/src/state.js';
 import { acquireLock, openWallet, readBalances, waitForSync, type WalletSession } from '../../preprod/src/wallet.js';
 import { HeadlessWallet } from '../scripts/headless-wallet.js';
-import { decodeRecords, type HeirRecord, type OwnerRecord } from '../src/live/records.js';
+import { readWithCode } from '../src/live/keyring.js';
+import type { HeirRecord, OwnerRecord } from '../src/live/records.js';
 import { formatDust, formatNight } from '../src/live/wallet.js';
 import { fromHex, toHex } from '../src/live/codec.js';
 
@@ -96,8 +97,25 @@ async function addVirtualPasskey(page: Page) {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('WebAuthn.enable');
   await cdp.send('WebAuthn.addVirtualAuthenticator', {
-    options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
+    options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true, hasPrf: true },
   });
+}
+
+/** First use: a passkey (or none) and the printed recovery code, typed back once. Returns the code. */
+async function setUpBrowser(page: Page, { passkey }: { passkey: boolean }): Promise<string> {
+  await expect(page.getByRole('heading', { name: 'Lock what this browser keeps.' })).toBeVisible({ timeout: 60_000 });
+  if (passkey) {
+    await page.getByRole('button', { name: 'Create a passkey' }).click();
+    await page.getByRole('button', { name: 'Continue' }).click();
+  } else {
+    await page.getByRole('button', { name: 'Skip, use only the recovery code' }).click();
+  }
+  const groups = await page.getByLabel('Your recovery code').locator('span').allTextContents();
+  const field = page.getByLabel(/type group \d of the code/);
+  const n = Number(/group (\d)/.exec((await page.locator('label', { has: field }).textContent()) ?? '')?.[1]);
+  await field.fill(groups[n - 1]);
+  await page.getByRole('button', { name: 'I have written it down' }).click();
+  return groups.join('-');
 }
 
 /** Wait for the progress sheet to finish, read what it says, and close it. */
@@ -112,7 +130,7 @@ async function finished(page: Page, pattern: RegExp, timeout: number): Promise<s
   return text;
 }
 
-const recordsOf = async (page: Page) => decodeRecords(await page.evaluate(() => localStorage.getItem('codicil.vaults.v1')));
+const recordsOf = async (page: Page, code: string) => (await readWithCode((await page.evaluate(() => localStorage.getItem('codicil.vaults.v1')))!, code)).records;
 
 test('an owner creates a vault and checks in; an heir starts the switch, releases the will and claims', async ({ browser }) => {
   test.setTimeout(45 * 60_000);
@@ -140,14 +158,16 @@ test('an owner creates a vault and checks in; an heir starts the switch, release
   await addVirtualPasskey(owner);
   await owner.goto('/#/app');
   await owner.getByRole('button', { name: 'Connect Lace' }).click();
+  const ownerCode = await setUpBrowser(owner, { passkey: true });
   await expect(owner.getByText('Midnight Preview. Tokens here have no value.')).toBeVisible();
   await expect(owner.getByText(`${formatNight(start.night, 0)} tNIGHT`)).toBeVisible({ timeout: 30_000 });
 
   await owner.getByRole('button', { name: 'Create your will' }).click();
   await owner.getByLabel('Your name').fill('Ngozi Adeyemi');
-  await owner.getByRole('button', { name: 'Create a passkey on this device' }).click();
-  await expect(owner.getByText('Passkey created on this device.')).toBeVisible();
+  await expect(owner.getByText('Your passkey is ready.')).toBeVisible();
   await owner.getByRole('button', { name: 'Continue' }).click();
+  // The kit flow, so one browser can hand the heir everything; the reply flow is covered in live.spec.ts.
+  await owner.getByRole('button', { name: 'Make their keys for them (faster, but you will know their keys)' }).click();
   await owner.getByLabel('Name', { exact: true }).fill('Tunde');
   await owner.getByLabel('Share, in percent').fill('60');
   await owner.getByRole('button', { name: 'Add another heir' }).click();
@@ -195,6 +215,7 @@ test('an owner creates a vault and checks in; an heir starts the switch, release
   await heir.goto(`/#/app/join/${invitation}`);
   await expect(heir.getByRole('heading', { name: 'Connect your wallet to open your invitation.' })).toBeVisible();
   await heir.getByRole('button', { name: 'Connect Lace' }).click();
+  const heirCode = await setUpBrowser(heir, { passkey: false });
   await expect(heir.getByRole('heading', { name: 'You are named in a will.' })).toBeVisible({ timeout: 60_000 });
   await expect(heir.getByText('For Tunde · from Ngozi Adeyemi')).toBeVisible();
   await expect(heir.getByText('Your share · 60%')).toBeVisible();
@@ -220,8 +241,8 @@ test('an owner creates a vault and checks in; an heir starts the switch, release
   expect(errors).toEqual([]);
 
   // What was sent, for the record.
-  const [ownerRecord] = await recordsOf(owner) as OwnerRecord[];
-  const [heirRecord] = await recordsOf(heir) as HeirRecord[];
+  const [ownerRecord] = await recordsOf(owner, ownerCode) as OwnerRecord[];
+  const [heirRecord] = await recordsOf(heir, heirCode) as HeirRecord[];
   const d = ownerRecord.deployment!;
   const end = readBalances(await waitForSync(session, { timeoutMs: 10 * 60_000 }));
   const out = join(REPO_ROOT, 'preprod', 'results', `live-browser-${cfg.name}.md`);
