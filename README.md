@@ -47,7 +47,10 @@ Wave 3, in progress. Test networks only, and unaudited.
   register on Preview has not made the proof and the reader page says so.
 - **Live mode** (`#/app`): a person creates and uses their own vault on Preview or Preprod through
   the Lace wallet ([how to try it](#try-it-on-a-test-network)). Its store and chain code ran the
-  whole story on Preview with a wallet built from a seed.
+  whole story on Preview with a wallet built from a seed. Nothing in it depends on one device: what
+  the browser keeps is encrypted, Face ID or a printed recovery code opens it, the same code
+  replaces a lost passkey on the vault, and heirs and guardians make their own keys
+  ([D22](docs/DECISIONS.md)).
 - **Not done yet:** live mode has not been run with the Lace extension itself, and a check-in from
   a browser is not yet proven on a network. Sealed messages, disclosures and the canary are created
   in the guided demo only, not in live mode.
@@ -189,18 +192,27 @@ npm run dev                               # then open http://localhost:5173/#/ap
 ```
 
 1. **Connect Lace.** The bar under the header names the network and shows your tNIGHT and DUST.
-2. **Create your will**: your name, a passkey, your heirs and their shares, guardians if you want
-   them, and the timers. To see the whole life of a vault in one sitting, choose **Trying it out, in
-   minutes** on the timers step.
-3. **Seal the will.** Lace asks you to approve **eight transactions** over about three minutes: the
+2. **Lock this browser**: make a passkey (Face ID will then unlock it on any of your devices, where
+   the browser supports it) and write down the **recovery code** it shows once. Either one opens
+   what this browser keeps.
+3. **Create your will**: your name, your heirs and their shares, guardians if you want them, and
+   the timers. By default each heir and guardian makes their own key: send them their invitation,
+   and paste the reply they send back. To try it alone, choose **Make their keys for them** (faster,
+   but you will know their keys). To see the whole life of a vault in one sitting, choose **Trying
+   it out, in minutes** on the timers step.
+4. **Seal the will.** Lace asks you to approve **eight transactions** over about three minutes: the
    vault is too large for one block, so it is created with the rules it needs first and the rest are
    added one at a time ([D19](docs/DECISIONS.md)). If you close the tab part-way, the page continues
    from where it stopped.
-4. **Save a backup file** (the Backup button). Everything private is kept only in your browser.
-5. **Add tNIGHT** to the vault, and check in with **I'm alive**.
-6. Under **Invitations to send**, copy an heir's link. Open it in another browser profile that has
-   Lace (the same wallet will do for a test). That browser now knows only what the invitation holds.
-7. Let the check-in deadline pass. In the heir's browser: **Start the switch**, wait out the
+5. **Save a backup file** (the Backup button). It needs no passphrase: your passkey or your
+   recovery code opens it. With the code, it also brings the vault back on a new device, where
+   **I lost my passkey** starts a recovery that hands the vault to a new passkey after a public wait.
+6. **Add tNIGHT** to the vault, and check in with **I'm alive**.
+7. Under **Letters to send**, copy an heir's link. Open it in another browser profile that has
+   Lace (the same wallet will do for a test). An heir who made their own key gets a sealed letter,
+   which opens only in the browser that sent the reply; one whose key you made gets an invitation
+   that carries it.
+8. Let the check-in deadline pass. In the heir's browser: **Start the switch**, wait out the
    challenge window, **Release the will**, then **Claim** to that wallet.
 
 **What has and has not been run** ([docs/VALIDATION.md](docs/VALIDATION.md#live-mode-on-a-network-2026-11-26)):
