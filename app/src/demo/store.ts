@@ -24,6 +24,7 @@ import * as escrowModule from '@codicil/contracts/escrow';
 import * as sealsModule from '@codicil/contracts/seals';
 import {
   attestationDigest,
+  BlobError,
   buildGuardianSet,
   buildWill,
   checkHeirLetter,
@@ -47,8 +48,10 @@ import {
   newRecoverySecret,
   newSalt,
   openMessageText,
+  openSealedFile,
   payoutFor,
   pieceCommitment,
+  pointerToText,
   piecesHandedOver,
   recoveryCommitment,
   recoveryConfig,
@@ -61,6 +64,7 @@ import {
   sealedToText,
   sealMessage as sealForRecipient,
   SealedError,
+  sealFile,
   sealsWitnesses,
   settingsDigest,
   signAttestation,
@@ -76,7 +80,9 @@ import {
   type HeirKey,
   type KeyPiece,
   type P256Key,
+  type PlainFile,
   type RecoveryStatus,
+  type SealedFilePointer,
   type SealedMessage,
   type SealsLedger,
   type VaultEventName,
@@ -85,6 +91,7 @@ import {
 import { DemoChain, type CallOutcome } from './chain.js';
 import { approveWithPasskey, createDemoPasskey, createDevicePasskey, type OwnerPasskey } from './passkey.js';
 import { decodeRecoveryKey, encodeRecoveryKey } from './recoveryKey.js';
+import { demoBlobStore, fileProblem, fmtBytes, type DemoBlobStore } from './files.js';
 
 export const DAY = 86_400;
 export const CHECK_IN_EVERY = 30 * DAY;
@@ -386,9 +393,9 @@ export interface MessageView {
   /** Through the register only: the chain accepted the seal before this time. */
   sealedBefore?: number;
   sealedAt: number;
-  /** What the owner wrote, as the owner's own device keeps it. */
+  /** What the owner wrote, as the owner's own device keeps it. Empty when only a file was sealed. */
   text: string;
-  /** Size of the sealed text the recipient holds, in bytes. */
+  /** Size of the sealed text the recipient holds, in bytes; 0 when only a file was sealed. */
   bytes: number;
   /** The start of the sealed text, hex: what it looks like without its key. */
   sealedStart: string;
@@ -402,6 +409,31 @@ export interface MessageView {
   handed: number[];
   /** What the recipient read, once it was opened on their device. */
   opened?: { at: number; text: string };
+  /** A file sealed with it, or instead of words. */
+  file?: FileView;
+}
+
+/**
+ * A sealed file (D22), as the demo cast holds it. It is sealed like a
+ * message, under its own key. Its encrypted body is kept in a store; the
+ * recipient holds a pointer to it.
+ */
+export interface FileView {
+  name: string;
+  type: string;
+  /** The real size of the file, in bytes, as the owner's device knows it. */
+  size: number;
+  /** Where the encrypted body is kept, and for how long. */
+  store: string;
+  lasts: string;
+  /** The encrypted body, as the pointer describes it: its id in the store, its padded size and its SHA-256. */
+  stored: { id: string; length: number; sha256: string };
+  /** Through the register only: the fingerprint the chain records for this file. */
+  fingerprint?: string;
+  /** The pointer as one line, the way it would be sent or posted. Useless without the key. */
+  pointerText: string;
+  /** The file, once the app rebuilt it on the reader's device, and the steps it took. */
+  opened?: { at: number; name: string; type: string; bytes: Uint8Array; steps: string[] };
 }
 
 export interface RecoveryView {
@@ -575,22 +607,42 @@ const POSITION_REFUSALS: Record<PositionRefusal, string> = {
   'already withdrawn': `${POSITION.name} has already paid out. There is nothing left to withdraw.`,
 };
 
-/** One sealed message and where each part of it is. */
-interface HeldMessage {
-  /** On the owner's device: what she wrote. */
-  text: string;
-  via: MessageVia;
-  /** Through the register: the fingerprint it holds for this sealed text. */
-  fingerprint?: Uint8Array;
-  sealedAt: number;
-  /** On the recipient's device: the sealed text and their half of the key. */
+/** One sealed text, under its own key, and where each part of it is. */
+interface HeldPart {
+  /** The whole sealed text. For words, the recipient holds it with their half of the key. */
   sealed: SealedMessage;
   /** On each guardian's device: their piece of the other half. */
   pieces: Map<number, KeyPiece>;
-  /** Pieces that have reached the recipient, and when. */
+  /** Through the register: the fingerprint it holds for this sealed text. */
+  fingerprint?: Uint8Array;
+}
+
+/** A sealed file. The recipient holds the pointer; the encrypted body is in the store. */
+interface HeldFile extends HeldPart {
+  /** On the owner's device: the file she chose, so it can be sealed again. */
+  plain: PlainFile;
+  pointer: SealedFilePointer;
+  opened?: { at: number; file: PlainFile; steps: string[] };
+}
+
+/** One sealed message: words, a file, or both, each under its own key. */
+interface HeldMessage {
+  /** On the owner's device: what she wrote. Empty when only a file was sealed. */
+  text: string;
+  via: MessageVia;
+  sealedAt: number;
+  /** The words, sealed. Absent when only a file was sealed. */
+  note?: HeldPart;
+  file?: HeldFile;
+  /** Guardians whose pieces (one per part) have reached the recipient by hand, and when. */
   handed: Map<number, number>;
   opened?: { at: number; text: string };
 }
+
+/** Every sealed part of a message: its words, its file, or both. */
+const partsOf = (m: HeldMessage): HeldPart[] => [m.note, m.file].filter((p): p is HeldPart => !!p);
+/** The guardians who hold a piece of a message's keys: the same for every part. */
+const holdersOf = (m: HeldMessage): number[] => [...partsOf(m)[0].pieces.keys()];
 
 interface World extends Keys {
   chain: DemoChain;
@@ -627,6 +679,10 @@ interface World extends Keys {
   messages: Map<MessageTo, HeldMessage>;
   register: { address: ContractAddress; lastAttempt?: RegisterAttempt; statement?: { text: string; at: number } };
   votedRound: Map<number, bigint>;
+  /** Where the encrypted bodies of sealed files are kept. In live mode, the test network's storage. */
+  blobs: DemoBlobStore;
+  /** Guardians whose app has already handed over by itself after the release. */
+  autoHanded: Set<number>;
 }
 
 class DemoStore {
@@ -764,7 +820,7 @@ class DemoStore {
     this.world = {
       ...k, chain, passkey, setup: { ...setup, attestor: false }, will, guardianSet, deployedAt: now, lastCheckIn: now,
       register: { address: register },
-      claimed: new Map(), votedRound: new Map(), held: new Map(), messages: new Map(),
+      claimed: new Map(), votedRound: new Map(), held: new Map(), messages: new Map(), blobs: demoBlobStore(), autoHanded: new Set(),
       // Each guardian's device gets the path to its leaf; nobody else does.
       guardianHeld: new Map(setup.guardians.map((id) => [id, guardianSecrets(guardianSet, k.guardianSecretsList[id])])),
       guardianCast: [...setup.guardians],
@@ -1255,30 +1311,43 @@ class DemoStore {
     return sealsModule.ledger(w.chain.ledgerOf(w.register.address));
   }
 
-  private async sealFor(w: World, text: string, via: MessageVia): Promise<HeldMessage> {
+  private async sealFor(w: World, text: string, file: PlainFile | undefined, via: MessageVia): Promise<HeldMessage> {
     const holders = w.setup.guardians;
-    const { sealed, pieces } = await sealForRecipient({ vault: w.chain.address, message: text, pieces: holders.length, needed: w.setup.threshold });
-    return {
-      text, via, sealedAt: w.chain.now, sealed, pieces: new Map(holders.map((id, i) => [id, pieces[i]])), handed: new Map(),
-      fingerprint: via === 'register' ? sealedFingerprint(sealed) : undefined,
-    };
+    const spread = (pieces: KeyPiece[]) => new Map(holders.map((id, i) => [id, pieces[i]]));
+    const opts = { vault: w.chain.address, pieces: holders.length, needed: w.setup.threshold };
+    let note: HeldPart | undefined;
+    if (text) {
+      const { sealed, pieces } = await sealForRecipient({ ...opts, message: text });
+      note = { sealed, pieces: spread(pieces), fingerprint: via === 'register' ? sealedFingerprint(sealed) : undefined };
+    }
+    let held: HeldFile | undefined;
+    if (file) {
+      // The file is sealed under its own key, and its encrypted body goes to the store.
+      const { pointer, pieces, sealed } = await sealFile({ ...opts, file, store: w.blobs });
+      held = { plain: file, pointer, sealed, pieces: spread(pieces), fingerprint: via === 'register' ? pointer.fingerprint : undefined };
+    }
+    return { text, via, sealedAt: w.chain.now, note, file: held, handed: new Map() };
   }
 
-  /** Records a sealed text on the register: its fingerprint and a commitment to each piece of its key. */
+  /** Records each sealed text of a message on the register: its fingerprint and a commitment to each piece of its key. */
   private async registerSeal(w: World, m: HeldMessage): Promise<void> {
-    await w.chain.callContract(
-      w.register.address, 'seal', { witnesses: sealsWitnesses(w.keeperSecret) }, ...sealArgs(m.sealed, [...m.pieces.values()], w.chain.now),
-    );
+    for (const part of partsOf(m)) {
+      await w.chain.callContract(
+        w.register.address, 'seal', { witnesses: sealsWitnesses(w.keeperSecret) }, ...sealArgs(part.sealed, [...part.pieces.values()], w.chain.now),
+      );
+    }
   }
 
   private async unregisterSeal(w: World, m: HeldMessage): Promise<void> {
-    if (m.fingerprint) await w.chain.callContract(w.register.address, 'unseal', { witnesses: sealsWitnesses(w.keeperSecret) }, m.fingerprint);
+    for (const part of partsOf(m)) {
+      if (part.fingerprint) await w.chain.callContract(w.register.address, 'unseal', { witnesses: sealsWitnesses(w.keeperSecret) }, part.fingerprint);
+    }
   }
 
   /** Seal every message again for the current guardians. Returns how many. */
   private async resealMessages(w: World): Promise<number> {
     for (const [to, m] of w.messages) {
-      const next = await this.sealFor(w, m.text, m.via);
+      const next = await this.sealFor(w, m.text, m.file?.plain, m.via);
       // The new seal goes on before the old one comes off, so a failure
       // between the two leaves the register holding what this device holds.
       if (m.via === 'register') {
@@ -1293,9 +1362,9 @@ class DemoStore {
   }
 
   /** Seals, records on the register when asked to, and notes it in the activity. Returns the words to show. */
-  private async placeSeal(w: World, to: MessageTo, body: string, via: MessageVia): Promise<string> {
+  private async placeSeal(w: World, to: MessageTo, body: string, file: PlainFile | undefined, via: MessageVia): Promise<string> {
     const old = w.messages.get(to);
-    const next = await this.sealFor(w, body, via);
+    const next = await this.sealFor(w, body, file, via);
     // New seal first, old seal off second: see resealMessages.
     if (via === 'register') await this.registerSeal(w, next);
     w.messages.set(to, next);
@@ -1303,53 +1372,66 @@ class DemoStore {
     const name = recipientName(to);
     const n = w.setup.guardians.length;
     const k = w.setup.threshold;
+    const both = !!body && !!file;
     const held = n === 1
-      ? `${guardianById(w.setup.guardians[0]).name} holds the guardians' half of the key.`
-      : `Each of your ${n} guardians holds a piece of the key. ${k} of them are needed.`;
+      ? `${guardianById(w.setup.guardians[0]).name} holds the guardians' half of ${both ? 'each key' : 'the key'}.`
+      : `Each of your ${n} guardians holds a piece of ${both ? 'each key' : 'the key'}. ${k} of them are needed.`;
+    const kept = file ? ` The encrypted file is kept in this page's store; ${to === 'everyone' ? 'everyone gets' : `${name} holds`} a pointer to it.` : '';
+    const thing = body ? 'message' : 'file';
     const what = to === 'everyone'
       ? (old ? 'Public disclosure replaced' : 'Public disclosure sealed')
-      : old ? `Sealed message for ${name} replaced` : `Message sealed for ${name}`;
+      : old ? `Sealed message for ${name} replaced` : `${body ? 'Message' : 'File'} sealed for ${name}`;
+    const fingerprints = [body && 'A fingerprint of the sealed text', file && 'A fingerprint of the sealed file'].filter((x): x is string => !!x);
     this.log(OWNER_NAME, what, 'plain', via === 'register' ? [
-      'A fingerprint of the sealed text', `Commitments to ${n} piece${n === 1 ? '' : 's'} of its key, and that ${k} ${k === 1 ? 'is' : 'are'} needed`,
+      ...fingerprints,
+      `Commitments to ${n} piece${n === 1 ? '' : 's'} of ${both ? 'each' : 'its'} key, and that ${k} ${k === 1 ? 'is' : 'are'} needed`,
       'That it was sealed before a time a few minutes from now',
-    ] : [], to === 'everyone' ? [
-      'What it says', 'The key and its pieces', 'Who your guardians are',
-    ] : [
-      'The message', via === 'register' ? 'Who it is for' : 'That a message exists, and who it is for',
-      `The key: half with ${name}, half cut into ${n} piece${n === 1 ? '' : 's'} for your guardians`,
+    ] : [], [
+      ...(to === 'everyone' ? ['What it says'] : [`The ${thing}`, via === 'register' ? 'Who it is for' : `That a ${thing} exists, and who it is for`]),
+      ...(file ? ['The file: its name, its type and what is in it'] : []),
+      ...(to === 'everyone' ? ['The key and its pieces', 'Who your guardians are']
+        : [`The key: half with ${name}, half cut into ${n} piece${n === 1 ? '' : 's'} for your guardians`]),
     ]);
-    if (via === 'hand') return held;
+    if (via === 'hand') return held + kept;
     return to === 'everyone'
-      ? `Sealed for everyone. The register now holds its fingerprint, which later shows it existed today. ${held}`
-      : `Sealed for ${name}. The register holds a fingerprint and nothing that says who it is for. ${held}`;
+      ? `Sealed for everyone. The register now holds its fingerprint, which later shows it existed today. ${held}${kept}`
+      : `Sealed for ${name}. The register holds a fingerprint and nothing that says who it is for. ${held}${kept}`;
   }
 
   /**
    * Seal a message for one person, or for everyone, replacing any earlier one.
-   * By hand, nothing is sent anywhere. Through the register it is a
-   * transaction, shown in the transaction sheet unless `quiet`.
-   * Returns what went wrong, in words to show, or nothing when it worked.
+   * It can be words, a file, or both. `file` left out keeps the file sealed
+   * before, if any; `null` drops it. By hand, nothing is sent anywhere.
+   * Through the register it is a transaction, shown in the transaction sheet
+   * unless `quiet`. Returns what went wrong, in words to show, or nothing
+   * when it worked.
    */
   async sealMessage(
-    to: MessageTo, text: string, via: MessageVia = to === 'everyone' ? 'register' : 'hand', opts: { quiet?: boolean } = {},
+    to: MessageTo, text: string, via: MessageVia = to === 'everyone' ? 'register' : 'hand', opts: { quiet?: boolean; file?: PlainFile | null } = {},
   ): Promise<string | undefined> {
     const w = this.world;
     if (!w) return 'There is no vault yet.';
     const body = text.trim();
-    if (!body) return 'Write the message first.';
+    const old = w.messages.get(to);
+    const file = opts.file === undefined ? old?.file?.plain : opts.file ?? undefined;
+    if (!body && !file) return 'Write the message or attach a file first.';
     if (body.length > MESSAGE_MAX) return `That is ${body.length.toLocaleString()} characters. The demo seals up to ${MESSAGE_MAX.toLocaleString()}.`;
+    if (file) {
+      const wrong = fileProblem({ size: file.bytes.length });
+      if (wrong) return wrong;
+    }
     if (w.chain.ledger.phase === Phase.released) return 'Your vault has released, so messages can no longer be sealed or changed.';
     if (to === 'everyone' && via !== 'register') return 'A public disclosure goes through the register, so that everyone can check it and open it.';
     const name = recipientName(to);
-    if (via === 'hand' && w.messages.get(to)?.via !== 'register') {
-      const held = await this.placeSeal(w, to, body, via);
+    if (via === 'hand' && old?.via !== 'register') {
+      const held = await this.placeSeal(w, to, body, file, via);
       this.toast = { id: Date.now(), title: `Sealed for ${name}`, body: held };
       this.emit();
       return undefined;
     }
     if (opts.quiet) {
       try {
-        await this.placeSeal(w, to, body, via);
+        await this.placeSeal(w, to, body, file, via);
       } catch (e) {
         return describeFailure(e);
       }
@@ -1359,10 +1441,15 @@ class DemoStore {
     const title = via === 'hand' ? `Taking the message for ${name} off the register` : to === 'everyone' ? 'Sealing a public disclosure' : `Sealing a message for ${name}`;
     const went = await this.run(title, ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
       await stage('circuit');
-      return this.placeSeal(w, to, body, via);
+      return this.placeSeal(w, to, body, file, via);
     }, {
       stages: {
-        prepare: { label: 'Sealing it on this device', detail: 'The message is encrypted here, and the guardians\' half of its key is cut into pieces. The plain text goes nowhere.' },
+        prepare: {
+          label: 'Sealing it on this device',
+          detail: file
+            ? 'The message and the file are encrypted here, each under its own key, and the guardians\' half of each key is cut into pieces. The encrypted file goes to the store. Nothing readable leaves this device.'
+            : 'The message is encrypted here, and the guardians\' half of its key is cut into pieces. The plain text goes nowhere.',
+        },
         circuit: via === 'hand' ? REGISTER_STAGES!.circuit : { label: 'Running the seal register, which calls the vault', detail: 'The register asks the vault that it has not released, then records a fingerprint of the sealed text and a commitment to each piece of its key.' },
         proof: REGISTER_STAGES!.proof,
       },
@@ -1397,26 +1484,44 @@ class DemoStore {
     return undefined;
   }
 
+  /** Messages delivered by hand for which this guardian still holds a piece. */
+  private leftByHand(w: World, id: number): HeldMessage[] {
+    return [...w.messages.values()].filter((m) => m.via === 'hand' && holdersOf(m).includes(id) && !m.handed.has(id));
+  }
+
+  /** Pieces this guardian holds for the register that are not on its ledger yet. */
+  private leftForRegister(w: World, id: number): { fingerprint: Uint8Array; piece: KeyPiece }[] {
+    const l = this.sealsLedger(w);
+    return [...w.messages.values()].filter((m) => m.via === 'register').flatMap(partsOf)
+      .filter((p) => p.fingerprint && p.pieces.has(id))
+      .map((p) => ({ fingerprint: p.fingerprint!, piece: p.pieces.get(id)! }))
+      .filter(({ fingerprint, piece }) => !l.handedOver.member(pieceCommitment(fingerprint, piece)));
+  }
+
   /**
    * A guardian hands over, by hand, every piece their device holds for a
    * message delivered that way. Their app reads the vault's state from the
    * chain first and keeps the pieces unless it says released.
    */
-  handOverPieces(id: number): string | undefined {
+  handOverPieces(id: number, opts: { auto?: boolean } = {}): string | undefined {
     const w = this.world;
     if (!w) return 'There is no vault yet.';
-    const mine = [...w.messages.values()].filter((m) => m.via === 'hand' && m.pieces.has(id) && !m.handed.has(id));
+    const mine = this.leftByHand(w, id);
     if (mine.length === 0) return 'This device holds no piece to hand over.';
+    const count = mine.reduce((n, m) => n + partsOf(m).length, 0);
     if (w.chain.ledger.phase !== Phase.released) {
-      return `The vault has not released, so your piece${mine.length === 1 ? ' stays' : 's stay'} on this device. Nothing was sent.`;
+      return `The vault has not released, so your piece${count === 1 ? ' stays' : 's stay'} on this device. Nothing was sent.`;
     }
     for (const m of mine) m.handed.set(id, w.chain.now);
-    this.log('A guardian', mine.length === 1 ? 'A guardian handed over a piece of a key' : `A guardian handed over ${mine.length} pieces of keys`, 'plain', [], [
+    this.log('A guardian', count === 1 ? 'A guardian handed over a piece of a key' : `A guardian handed over ${count} pieces of keys`, 'plain', [], [
       `That it was ${guardianById(id).name}`, 'The piece itself', 'Who it went to',
     ]);
-    this.toast = {
-      id: Date.now(), title: mine.length === 1 ? 'Your piece is handed over' : `Your ${mine.length} pieces are handed over`,
-      body: `${mine.length === 1 ? 'It' : 'Each'} went to the person the message is for, and to nobody else.`,
+    this.toast = opts.auto ? {
+      id: Date.now(), title: count === 1 ? 'Your app handed over your piece by itself' : `Your app handed over your ${count} pieces by itself`,
+      body: `It saw that the vault has released, so it sent ${count === 1 ? 'it' : 'each one'} to the person the message is for, and to nobody else. You did not have to do anything.`,
+    } : {
+      id: Date.now(), title: count === 1 ? 'Your piece is handed over' : `Your ${count} pieces are handed over`,
+      body: `${count === 1 ? 'It' : 'Each'} went to the person the message is for, and to nobody else.`,
     };
     this.emit();
     return undefined;
@@ -1428,33 +1533,55 @@ class DemoStore {
    * released; then it checks each piece and writes it to the public ledger.
    * The guardian never learns who a message is for.
    */
-  publishPieces(id: number): Promise<boolean> {
-    return this.run('Handing over a piece through the register', ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
+  publishPieces(id: number, opts: { auto?: boolean; alsoByHand?: number } = {}): Promise<boolean> {
+    const title = opts.auto ? 'Your app is handing over your pieces by itself' : 'Handing over a piece through the register';
+    return this.run(title, ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
       const w = this.world!;
-      const l = this.sealsLedger(w);
-      const mine = [...w.messages.values()].filter((m) => m.via === 'register' && m.pieces.has(id)
-        && !l.handedOver.member(pieceCommitment(m.fingerprint!, m.pieces.get(id)!)));
+      const mine = this.leftForRegister(w, id);
       if (mine.length === 0) throw new InputError('this device holds no piece that is still to be handed over');
       await stage('circuit');
       const attempt = { at: w.chain.now, by: guardianById(id).name };
       try {
         let calls: RegisterAttempt['calls'];
-        for (const m of mine) {
-          const out = await w.chain.callContract(w.register.address, 'handOver', { witnesses: sealsWitnesses() }, ...handOverArgs(m.fingerprint!, m.pieces.get(id)!));
+        for (const { fingerprint, piece } of mine) {
+          const out = await w.chain.callContract(w.register.address, 'handOver', { witnesses: sealsWitnesses() }, ...handOverArgs(fingerprint, piece));
           calls = out.trace.map((t) => ({ contract: t.address === w.chain.address ? 'vault' as const : 'register' as const, circuit: t.circuitId }));
         }
         w.register.lastAttempt = { ...attempt, ok: true, calls };
         this.log('A guardian', mine.length === 1 ? 'A piece of a key was handed over through the register' : `${mine.length} pieces of keys were handed over through the register`, 'released', [
           'That the register asked this vault whether it is released', 'The piece: its number and its value', 'Which sealed text it belongs to, by fingerprint',
         ], [`That it was ${guardianById(id).name}`, 'Who the message is for', 'The message']);
-        return mine.length === 1
+        const done = mine.length === 1
           ? 'The register checked your piece and published it. The vault confirmed the release in the same transaction.'
           : `The register checked your ${mine.length} pieces and published them, one transaction each. The vault confirmed the release every time.`;
+        if (!opts.auto) return done;
+        const hand = opts.alsoByHand ? ` It also sent ${opts.alsoByHand === 1 ? 'a piece' : `${opts.alsoByHand} pieces`} by hand to the person a message is for.` : '';
+        return `Your app saw that the vault has released and handed over by itself, without being asked. ${done}${hand}`;
       } catch (e) {
         w.register.lastAttempt = { ...attempt, ok: false, code: contractErrorCode(e) };
         throw e;
       }
     }, { stages: REGISTER_STAGES, explain: (code) => REGISTER_REFUSALS[code as RegisterRefusal] });
+  }
+
+  /**
+   * What a guardian's app does by itself when it is opened: once the vault
+   * has released, it hands over every piece it still holds, by hand or
+   * through the register, without being asked. It does this once per
+   * guardian, and nothing before the release. Returns whether it did anything.
+   */
+  async autoHandOver(id: number): Promise<boolean> {
+    const w = this.world;
+    // Another transaction is on screen: wait until it is closed, so its stages stay readable.
+    if (!w || w.chain.ledger.phase !== Phase.released || w.autoHanded.has(id) || this.tx) return false;
+    w.autoHanded.add(id);
+    const byHand = this.leftByHand(w, id);
+    const byRegister = this.leftForRegister(w, id);
+    if (byHand.length === 0 && byRegister.length === 0) return false;
+    const handCount = byHand.reduce((n, m) => n + partsOf(m).length, 0);
+    if (byHand.length) this.handOverPieces(id, { auto: true });
+    if (byRegister.length) await this.publishPieces(id, { auto: true, alsoByHand: handCount });
+    return true;
   }
 
   /**
@@ -1468,11 +1595,12 @@ class DemoStore {
     return this.run('Sending the register a made-up piece', ['prepare', 'circuit', 'proof', 'record'], async (stage) => {
       const w = this.world!;
       const m = w.messages.get(to);
-      if (!m?.fingerprint) throw new InputError('there is no sealed text on the register to try this on');
+      const fingerprint = m && partsOf(m).find((p) => p.fingerprint)?.fingerprint;
+      if (!fingerprint) throw new InputError('there is no sealed text on the register to try this on');
       await stage('circuit');
       const attempt = { at: w.chain.now, by };
       try {
-        await w.chain.callContract(w.register.address, 'handOver', { witnesses: sealsWitnesses() }, ...handOverArgs(m.fingerprint, { x: 1, y: randomBytes(32) }));
+        await w.chain.callContract(w.register.address, 'handOver', { witnesses: sealsWitnesses() }, ...handOverArgs(fingerprint, { x: 1, y: randomBytes(32) }));
       } catch (e) {
         w.register.lastAttempt = { ...attempt, ok: false, code: contractErrorCode(e) };
         throw e;
@@ -1482,38 +1610,106 @@ class DemoStore {
     }, { stages: REGISTER_STAGES, explain: (code) => REGISTER_REFUSALS[code as RegisterRefusal] });
   }
 
+  /** The pieces of one part's key that have reached its reader: from the register's ledger, or handed over by hand. */
+  private piecesFor(w: World, m: HeldMessage, part: HeldPart): KeyPiece[] {
+    return part.fingerprint
+      ? piecesHandedOver(this.sealsLedger(w), part.fingerprint)
+      : [...m.handed.keys()].map((id) => part.pieces.get(id)!);
+  }
+
+  private stillLocked(m: HeldMessage, have: number): string {
+    const needed = partsOf(m)[0].sealed.needed;
+    const count = have === 0 ? 'none' : have === 1 ? 'one' : String(have);
+    const verb = m.via === 'register' ? `${have > 1 ? 'are' : 'is'} on the register` : `${have > 1 ? 'have' : 'has'} arrived`;
+    return `It is still locked. It needs ${needed} guardian piece${needed === 1 ? '' : 's'} and ${count} ${verb}.`;
+  }
+
   /**
    * Open a message: with the pieces handed to the recipient, or, through the
    * register, with the pieces on its public ledger. A public disclosure can be
    * opened by anyone; a private one only on the device that holds its sealed
-   * text and the recipient's half of the key.
+   * text and the recipient's half of the key. A file sealed with it is opened
+   * too.
    */
   async openMessage(to: MessageTo): Promise<string | undefined> {
     const w = this.world;
     const m = w?.messages.get(to);
     if (!w || !m) return to === 'everyone' ? 'There is no public disclosure.' : 'This device holds no sealed message.';
+    if (!m.note) return this.openFile(to);
     if (m.opened) return undefined;
-    const given = m.fingerprint
-      ? piecesHandedOver(this.sealsLedger(w), m.fingerprint)
-      : [...m.handed.keys()].map((id) => m.pieces.get(id)!);
+    const given = this.piecesFor(w, m, m.note);
     let text: string;
     try {
-      text = await openMessageText(m.sealed, given);
+      text = await openMessageText(m.note.sealed, given);
     } catch (e) {
-      if (e instanceof SealedError && e.problem === 'not enough pieces') {
-        const have = given.length;
-        const count = have === 0 ? 'none' : have === 1 ? 'one' : String(have);
-        const verb = m.via === 'register' ? `${have > 1 ? 'are' : 'is'} on the register` : `${have > 1 ? 'have' : 'has'} arrived`;
-        return `It is still locked. It needs ${m.sealed.needed} guardian piece${m.sealed.needed === 1 ? '' : 's'} and ${count} ${verb}.`;
-      }
+      if (e instanceof SealedError && e.problem === 'not enough pieces') return this.stillLocked(m, given.length);
       if (e instanceof SealedError && e.problem === 'not a genuine piece') return 'One of the pieces is not a piece of this message’s key. Ask that guardian to send theirs again.';
       return 'The sealed text does not match its key, so it cannot be opened.';
     }
     m.opened = { at: w.chain.now, text };
     if (to === 'everyone') this.log('Someone', 'The public disclosure was opened', 'released', [], ['Who opened it: reading the ledger is not a transaction']);
     else this.log(recipientName(to), 'A sealed message was opened', 'released', [], ['The message', 'That it was opened, and by whom']);
+    if (m.file && !m.file.opened) await this.openFile(to);
     this.emit();
     return undefined;
+  }
+
+  /**
+   * Open a sealed file, doing every step on this device: collect the pieces
+   * (from the register's ledger, or the ones handed over by hand), fetch the
+   * encrypted body from the store, check it against the pointer, rebuild the
+   * key and decrypt. Returns what went wrong, in words, or nothing.
+   */
+  async openFile(to: MessageTo): Promise<string | undefined> {
+    const w = this.world;
+    const m = w?.messages.get(to);
+    const f = m?.file;
+    if (!w || !m || !f) return 'There is no sealed file here.';
+    if (f.opened) return undefined;
+    const given = this.piecesFor(w, m, f);
+    if (given.length < f.sealed.needed) {
+      return w.chain.ledger.phase === Phase.released
+        ? `${this.stillLocked(m, given.length)} The file opens as soon as enough are in.`
+        : 'It cannot be opened yet. The vault has not released, so the guardians still hold their pieces of its key, and without them the file is noise.';
+    }
+    let file: PlainFile;
+    try {
+      file = await openSealedFile(f.pointer, given, [w.blobs]);
+    } catch (e) {
+      if (e instanceof BlobError) {
+        return e.problem === 'changed'
+          ? 'The stored copy of the file is not the one that was sealed: it was changed or damaged. It was not opened.'
+          : 'The encrypted file could not be fetched from where it is kept. Try again later.';
+      }
+      if (e instanceof SealedError && e.problem === 'not a genuine piece') return 'One of the pieces is not a piece of this file’s key. Ask that guardian to send theirs again.';
+      return 'The stored file does not match its key, so it cannot be opened.';
+    }
+    const plural = given.length === 1 ? '' : 's';
+    f.opened = {
+      at: w.chain.now, file,
+      steps: [
+        m.via === 'register'
+          ? `Collected ${given.length} piece${plural} of its key from the register's public ledger`
+          : `Collected the ${given.length} piece${plural} of its key the guardians handed over`,
+        `Fetched the encrypted file, ${fmtBytes(f.pointer.body.length)}, from where it is kept`,
+        'Checked its size and fingerprint against the pointer: it is the file that was sealed',
+        `Rebuilt the key from ${to === 'everyone' ? 'the half posted with the pointer' : 'your half'} and the pieces`,
+        `Decrypted ${file.name}, ${fmtBytes(file.bytes.length)}`,
+      ],
+    };
+    if (!m.note) m.opened = { at: w.chain.now, text: '' };
+    if (to === 'everyone') this.log('Someone', 'The public file was opened', 'released', [], ['Who opened it: reading the ledger and the store is not a transaction']);
+    else this.log(recipientName(to), 'A sealed file was opened', 'released', [], ['The file', 'That it was opened, and by whom']);
+    this.emit();
+    return undefined;
+  }
+
+  /** For the demo and its tests: change one byte of a stored file, as a faulty or hostile store could. */
+  damageStoredFile(to: MessageTo): boolean {
+    const f = this.world?.messages.get(to)?.file;
+    if (!f) return false;
+    this.world!.blobs.damage(f.pointer.body.id);
+    return true;
   }
 
   /**
@@ -1935,15 +2131,32 @@ class DemoStore {
         const m = w.messages.get(to);
         if (!m) return [];
         const seals = this.sealsLedger(w);
-        const onLedger = m.fingerprint ? piecesHandedOver(seals, m.fingerprint).map((p) => p.x) : [];
+        const parts = partsOf(m);
+        const onLedger = new Map(parts.map((p) => [p, p.fingerprint ? piecesHandedOver(seals, p.fingerprint).map((x) => x.x) : []]));
+        const holders = holdersOf(m);
+        const recorded = parts.find((p) => p.fingerprint && seals.seals.member(p.fingerprint));
+        const note = m.note;
+        const f = m.file;
         return [{
-          to, via: m.via, sealedAt: m.sealedAt, text: m.text, bytes: m.sealed.ciphertext.length, sealedStart: hex(m.sealed.ciphertext.slice(0, 24)),
-          sealedText: sealedToText(m.sealed),
-          fingerprint: m.fingerprint && hex(m.fingerprint),
-          sealedBefore: m.fingerprint && seals.seals.member(m.fingerprint) ? Number(seals.seals.lookup(m.fingerprint).sealedBefore) : undefined,
-          needed: m.sealed.needed, holders: [...m.pieces.keys()],
-          handed: m.via === 'register' ? [...m.pieces].filter(([, p]) => onLedger.includes(p.x)).map(([id]) => id) : [...m.handed.keys()],
+          to, via: m.via, sealedAt: m.sealedAt, text: m.text,
+          bytes: note ? note.sealed.ciphertext.length : 0, sealedStart: note ? hex(note.sealed.ciphertext.slice(0, 24)) : '',
+          sealedText: note ? sealedToText(note.sealed) : '',
+          fingerprint: note?.fingerprint && hex(note.fingerprint),
+          sealedBefore: recorded ? Number(seals.seals.lookup(recorded.fingerprint!).sealedBefore) : undefined,
+          needed: parts[0].sealed.needed, holders,
+          // Through the register, a guardian's piece counts once every part of the message has it on the ledger.
+          handed: m.via === 'register'
+            ? holders.filter((id) => parts.every((p) => onLedger.get(p)!.includes(p.pieces.get(id)!.x)))
+            : [...m.handed.keys()],
           opened: m.opened,
+          file: f && {
+            name: f.plain.name, type: f.plain.type, size: f.plain.bytes.length,
+            store: w.blobs.name, lasts: w.blobs.lasts,
+            stored: { id: f.pointer.body.id, length: f.pointer.body.length, sha256: hex(f.pointer.body.sha256) },
+            fingerprint: f.fingerprint && hex(f.fingerprint),
+            pointerText: pointerToText(f.pointer),
+            opened: f.opened && { at: f.opened.at, name: f.opened.file.name, type: f.opened.file.type, bytes: f.opened.file.bytes, steps: f.opened.steps },
+          },
         }];
       }),
       leafHashes: leaves.map((leaf) => hex(pureCircuits.heirLeafHash(leaf))),
