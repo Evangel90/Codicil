@@ -112,16 +112,19 @@ three start with a vault already made and open on the screen the story is about 
 8. Open the **Messages** tab as the owner and seal a message for one person: a letter or a recovery
    phrase. It is encrypted in your browser, and half of its key is split among the guardians. Choose
    how the pieces travel. **By hand**: before the release a guardian's app keeps its piece; after,
-   two guardians hand theirs over and the recipient reads it. None of it is a transaction, and the
+   each guardian's app hands it over by itself when it is opened, and the recipient reads it. None of it is a transaction, and the
    Privacy Lens shows the chain has no record of it. **Through the register**: the pieces go through
    a third contract, the compiled `codicil_seals`, so the guardians never learn who the message is
    for, and the chain shows a fingerprint and nothing about the message.
 9. Seal a **public disclosure** (the **Everyone** row, or the "Seal a disclosure" story): a text for
    everyone, such as documents to publish. Sealing is a transaction that records a fingerprint and
    no words. As a guardian, **Hand over through the register** before the release: the register
-   asks the vault and refuses with its own error, `vault not released`. After the release two
-   guardians hand over, each in a transaction that also runs the vault's check, and then anyone,
-   with no key, can **Open the disclosure**. **Send the register a made-up piece** is refused.
+   asks the vault and refuses with its own error, `vault not released`. After the release, act as
+   two guardians: each one's app hands over by itself, in a transaction that also runs the vault's
+   check, and then anyone, with no key, can **Open the disclosure**. **Send the register a made-up
+   piece** is refused. **Attach a file** (a PDF, up to 25 MB) to seal a file instead of words, or
+   with them: before the release it says it cannot be opened yet; after, the app collects the
+   pieces, fetches and checks the encrypted copy, decrypts it and offers **Download**.
 10. Publish a **canary** (the "A public signal" card on the Messages tab, or the "Publish a canary"
    story): stand behind a statement, then **Act as Anyone**. The public page reads "Still checking
    in" beside the statement. Skip to the deadline and it reads "Gone silent", and says the statement
@@ -349,8 +352,8 @@ this call can be generated", not just "the JavaScript ran".
 | [`webauthn-real.test.ts`](contracts/test/webauthn-real.test.ts) | Real Touch ID assertions verified by the vault's own WebAuthn module |
 | [`errors.test.ts`](contracts/test/errors.test.ts) | Every contract error has a friendly UI message and is documented |
 | [`sdk/test`](sdk/test) | Passkey/wallet format conversion, will builder, witnesses, heir letter encoding and checking against the will root |
-| [`app/test`](app/test/demo.test.ts) | The whole demo story through the app's own store: wizard setup and preview, check-ins, veto, guardian rounds, release, claims, tranche, backup, retries; who acts next, the plain-words summary and its warnings, presets, letters held by heirs (stale after a will change, announced by the will-changed event), calendar reminders, the command palette; the savings contract that calls the vault (refused before the release, paid after); the grace period (late but fine, the switch held back, the full window kept); changing guardians and the attestor (new round, locked during a countdown); the recovery key (its text form, recover with a new passkey, cancelled and retired by any owner signature); sealed messages by hand; the seal register (a public disclosure refused before the release and opened by anyone after it, a private message through the register, the canary) |
-| [`app/e2e`](app/e2e/demo.spec.ts) | In Chrome: the setup wizard with a passkey (virtual authenticator), check-in through the real WebAuthn API, a refused and then a successful cross-contract withdrawal, will change and letter, guardian votes, release, loading and checking a letter, the command palette, claim, public inspector, privacy lens; a late check-in inside the grace period; a recovery the owner cancels; replacing a guardian; a lost passkey recovered with the saved key; a sealed message by hand; a public disclosure through the seal register; a canary. `npm run e2e` |
+| [`app/test`](app/test/demo.test.ts) | The whole demo story through the app's own store: wizard setup and preview, check-ins, veto, guardian rounds, release, claims, tranche, backup, retries; who acts next, the plain-words summary and its warnings, presets, letters held by heirs (stale after a will change, announced by the will-changed event), calendar reminders, the command palette; the savings contract that calls the vault (refused before the release, paid after); the grace period (late but fine, the switch held back, the full window kept); changing guardians and the attestor (new round, locked during a countdown); the recovery key (its text form, recover with a new passkey, cancelled and retired by any owner signature); sealed messages by hand; the seal register (a public disclosure refused before the release and opened by anyone after it, a private message through the register, the canary); sealed files (refused before the release, opened after it with the bytes intact, a damaged stored copy caught) and guardians' apps that hand over by themselves, once, only after the release |
+| [`app/e2e`](app/e2e/demo.spec.ts) | In Chrome: the setup wizard with a passkey (virtual authenticator), check-in through the real WebAuthn API, a refused and then a successful cross-contract withdrawal, will change and letter, guardian votes, release, loading and checking a letter, the command palette, claim, public inspector, privacy lens; a late check-in inside the grace period; a recovery the owner cancels; replacing a guardian; a lost passkey recovered with the saved key; a sealed message by hand; a public disclosure through the seal register; a sealed PDF downloaded unchanged after the release; a canary. `npm run e2e` |
 
 The property tests already found one design flaw, now fixed ([D9](docs/DECISIONS.md)). How to run each
 level, and the bugs the tests caught: [docs/TESTING.md](docs/TESTING.md).
@@ -391,7 +394,7 @@ Design decisions: [docs/DECISIONS.md](docs/DECISIONS.md). Error catalogue: [docs
    ([D18](docs/DECISIONS.md)).
 4. Sealed messages, public disclosures and the seal register in live mode: today they run in the
    guided demo ([D20, D21](docs/DECISIONS.md)).
-5. Stretch: unlinkable check-ins, sealed files stored off the chain, and executor disclosures for
+5. Stretch: unlinkable check-ins, sealed files on lasting storage (they run in the guided demo), and executor disclosures for
    courts and tax authorities.
 
 Milestones and status: [docs/ROADMAP.md](docs/ROADMAP.md). Customers, go-to-market and revenue:
