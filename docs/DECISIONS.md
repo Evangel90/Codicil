@@ -595,7 +595,9 @@ domain can ask those passkeys for signatures. Files (a PDF, a scan) could not be
    `put(bytes) → id` and `get(id) → bytes`, with three implementations: in memory (tests and the
    guided demo), the ar.io sandbox (live mode), and Arweave mainnet later, behind the same code.
    **Arweave mainnet is deferred.** The sandbox never posts to real Arweave and purges uploads after
-   about three days, and the app says so beside every upload.
+   about three days, and the app says so beside every upload. Its free tier takes items up to 5 MiB
+   (measured on 28 November 2026), so live mode seals files up to 5 MiB until paid storage is set
+   up; the guided demo keeps the 25 MiB limit.
 
 **Where pointers travel.** A private file's pointer is encrypted to its recipient and handed over
 with the invitation, so the chain does not show that a file exists. A public disclosure's pointer is
