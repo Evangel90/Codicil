@@ -6,24 +6,25 @@
 // demo stays at #/demo.
 
 import { useEffect, useRef, useState } from 'react';
-import { Brand, Icon, ICONS, ThemeToggle, Toast, TxSheet } from '../../components/ui.js';
-import { MIN_PASSPHRASE } from '../../live/records.js';
+import { Brand, FACE_ID, Icon, ICONS, ThemeToggle, Toast, TxSheet } from '../../components/ui.js';
+import { askPrf, createPasskeyWithPrf, NoPrf, passkeysHere } from '../../live/prf.js';
 import { live, session, useConnection, useLive, type Connection } from '../../live/session.js';
 import type { LiveSnapshot } from '../../live/store.js';
 import { FAUCETS, formatDust, formatNight, networkName } from '../../live/wallet.js';
 import { LiveDeploy, LiveOwner, Sealed } from './LiveOwner.js';
-import { LiveGuardian, LiveHeir } from './LivePeople.js';
+import { AccessGate, passkeyTrouble, sentence } from './LiveAccess.js';
+import { LiveGuardian, LiveHeir, LiveInvited } from './LivePeople.js';
 import { LiveWizard } from './LiveWizard.js';
 import { CopyLine, downloadText, NetworkLine, ProblemCard, shortAddress } from './parts.js';
 import '../../live.css';
 
-/** The invitation carried by a link like #/app/join/codicil:heir-kit:v1:… */
+/** What a link like #/app/join/codicil:invite:v1:… carries: an invitation, a sealed letter or a kit. */
 const kitFromHash = (): string | undefined => {
   const m = /^#\/app\/join\/(.+)$/.exec(window.location.hash);
   return m ? decodeURIComponent(m[1]) : undefined;
 };
 
-function Welcome({ c, hasInvitation, saved }: { c: Connection; hasInvitation: boolean; saved: number }) {
+function Welcome({ c, hasInvitation, saved }: { c: Connection; hasInvitation: boolean; saved: number | 'locked' }) {
   return (
     <main className="wrap page narrow stack-32" id="main">
       <div className="stack-18">
@@ -43,7 +44,7 @@ function Welcome({ c, hasInvitation, saved }: { c: Connection; hasInvitation: bo
           {c.status === 'connecting' ? 'Waiting for Lace' : 'Connect Lace'}
         </button>
         <span className="small muted">
-          {saved > 0 ? `${saved} ${saved === 1 ? 'vault is' : 'vaults are'} saved in this browser. ` : ''}
+          {saved === 'locked' ? 'Your vaults are saved in this browser, locked. ' : saved > 0 ? `${saved} ${saved === 1 ? 'vault is' : 'vaults are'} saved in this browser. ` : ''}
           Lace will ask whether this site may see your address and propose transactions. It cannot move anything without your approval each time.
         </span>
       </div>
@@ -80,8 +81,7 @@ function Start({ onCreate, onBackup, onBack, network, elsewhere }: {
       await live.join(text);
       setText('');
     } catch (e) {
-      const m = e instanceof Error ? e.message : String(e);
-      setError(m.charAt(0).toUpperCase() + m.slice(1) + '.');
+      setError(sentence(e));
     }
   };
   return (
@@ -103,9 +103,9 @@ function Start({ onCreate, onBackup, onBack, network, elsewhere }: {
       </section>
       <section className="card pad-24 stack-12">
         <h2 className="disp h-card">I was given an invitation</h2>
-        <p className="muted">An owner named you as an heir or a guardian and sent you a link or a line of text. Paste it here.</p>
+        <p className="muted">An owner asked you to be an heir or a guardian and sent you a link or a line of text. Paste it here. Paste the letter they send you later here too.</p>
         <label className="sr-only" htmlFor="kit">Your invitation</label>
-        <textarea id="kit" className="field mono letter-input" spellCheck={false} placeholder="codicil:heir-kit:v1:… or the link you were sent" value={text} onChange={(e) => setText(e.target.value)} />
+        <textarea id="kit" className="field mono letter-input" spellCheck={false} placeholder="codicil:invite:v1:… or the link you were sent" value={text} onChange={(e) => setText(e.target.value)} />
         {error && <p className="err-inline" role="alert">{error}</p>}
         <div><button type="button" className="btn btn-secondary" disabled={text.trim() === ''} onClick={() => void join()}>Open my invitation</button></div>
       </section>
@@ -118,13 +118,18 @@ function Start({ onCreate, onBackup, onBack, network, elsewhere }: {
   );
 }
 
+type Needs = ReturnType<typeof live.backupNeeds>;
+
 function BackupDialog({ s, onClose }: { s: LiveSnapshot; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
-  const [mode, setMode] = useState<'save' | 'restore'>(s.records.length > 0 ? 'save' : 'restore');
+  const open = s.access.state === 'open';
+  const [mode, setMode] = useState<'save' | 'restore'>(open && s.records.length > 0 ? 'save' : 'restore');
   const [pass, setPass] = useState('');
-  const [file, setFile] = useState<{ name: string; text: string }>();
+  const [code, setCode] = useState('');
+  const [file, setFile] = useState<{ name: string; text: string; needs?: Needs }>();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string }>();
+  const sign = session.walletSigner();
   useEffect(() => {
     const d = ref.current;
     if (d && !d.open) d.showModal();
@@ -132,61 +137,118 @@ function BackupDialog({ s, onClose }: { s: LiveSnapshot; onClose: () => void }) 
     return () => d?.removeEventListener('close', onClose);
   }, [onClose]);
 
-  const act = async () => {
+  const act = async (how: () => Promise<string>) => {
     setBusy(true);
     setNote(undefined);
     try {
-      if (mode === 'save') {
-        downloadText(`codicil-backup-${new Date().toISOString().slice(0, 10)}.json`, await live.exportBackup(pass), 'application/json');
-        setNote({ ok: true, text: 'Saved to your downloads. Keep the file and its passphrase in two different places. Save a new one after you create another vault or accept another invitation.' });
-      } else if (file) {
-        const r = await live.importBackup(file.text, pass);
-        setNote({ ok: true, text: r.added + r.updated === 0 ? 'Everything in that backup was already in this browser.' : `Restored ${r.added + r.updated} ${r.added + r.updated === 1 ? 'vault' : 'vaults'}.` });
-      }
+      setNote({ ok: true, text: await how() });
       setPass('');
+      setCode('');
     } catch (e) {
-      const m = e instanceof Error ? e.message : String(e);
-      setNote({ ok: false, text: m.charAt(0).toUpperCase() + m.slice(1) + '.' });
+      setNote({ ok: false, text: passkeyTrouble(e) });
     } finally {
       setBusy(false);
     }
   };
+  const save = () => act(async () => {
+    downloadText(`codicil-backup-${new Date().toISOString().slice(0, 10)}.json`, await live.exportBackup(), 'application/json');
+    return 'Saved to your downloads. Keep it somewhere other than your recovery code. Save a new one after you create another vault or accept another invitation.';
+  });
+  const restored = (r: { added: number; updated: number }) => (r.added + r.updated === 0
+    ? 'Everything in that backup was already in this browser.'
+    : `Restored ${r.added + r.updated} ${r.added + r.updated === 1 ? 'vault' : 'vaults'}.${live.getSnapshot().access.state === 'open' ? '' : ' Now lock them: set up this browser.'}`);
+  const restore = (key: Parameters<typeof live.importBackup>[1]) => act(async () => restored(await live.importBackup(file!.text, key)));
+  const pick = (f: File) => void f.text().then((text) => {
+    let needs: Needs | undefined;
+    try {
+      needs = live.backupNeeds(text);
+      setNote(undefined);
+    } catch (e) {
+      setNote({ ok: false, text: sentence(e) });
+    }
+    setFile({ name: f.name, text, needs });
+  });
+  const needs = file?.needs;
 
   return (
     <dialog ref={ref} className="dialog live-dialog" aria-labelledby="bk-h">
       <h2 id="bk-h">{mode === 'save' ? 'Save a backup file' : 'Restore from a backup file'}</h2>
       {mode === 'save' ? (
-        <p className="muted">
-          Everything that makes your vaults usable is kept only in this browser: your will, your heirs' keys, the invitations, the
-          key that maintains the vault. If this browser's data is cleared, a backup file is the only way to get them back. The
-          file is locked with a passphrase you choose. Codicil cannot recover either for you. A passkey is never in the file: it
-          stays in your device.
-        </p>
+        <>
+          <p className="muted">
+            Everything that makes your vaults usable is kept only in this browser: your will, the invitations, the key that
+            maintains the vault. If this browser's data is cleared, a backup file brings them back. The file is locked the same
+            way as this browser: your passkey or your printed recovery code opens it, in any browser. Codicil cannot open it
+            for you.
+          </p>
+          <p className="small muted">
+            Opens with: {[s.access.passkeys.length > 0 && 'Face ID', s.access.code && 'your printed recovery code', s.access.wallet && 'your wallet'].filter(Boolean).join(', ')}.
+          </p>
+          {!s.access.wallet && sign && (
+            <div className="btn-row">
+              <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void act(async () => {
+                await live.addWalletSlot(sign, session.getSnapshot().address?.bech32 ?? '');
+                return `${session.getSnapshot().walletName ?? 'Your wallet'} can now open this too.`;
+              })}>Let my wallet open this too</button>
+              <span className="small muted">Your wallet signs a fixed sentence twice. It only works with a wallet that signs it the same way each time.</span>
+            </div>
+          )}
+          {s.access.passkeys.length === 0 && passkeysHere() && (
+            <div className="btn-row">
+              <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void act(async () => {
+                const made = await createPasskeyWithPrf();
+                if (!made.prf) throw new NoPrf();
+                await live.addPasskeySlot(made.prf);
+                return 'Face ID now opens this too.';
+              })}>Let Face ID open this too</button>
+            </div>
+          )}
+        </>
       ) : (
-        <p className="muted">Choose the file you saved and enter its passphrase. Vaults already in this browser are kept.</p>
+        <p className="muted">Choose the file you saved. Vaults already in this browser are kept.</p>
       )}
       {mode === 'restore' && (
         <label className="field-label">
           Backup file
-          <input
-            type="file" className="field" accept=".json,application/json"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) void f.text().then((text) => setFile({ name: f.name, text })); }}
-          />
+          <input type="file" className="field" accept=".json,application/json" onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f); }} />
         </label>
       )}
-      <label className="field-label">
-        {mode === 'save' ? `Passphrase, at least ${MIN_PASSPHRASE} characters` : 'Passphrase'}
-        <input type="password" className="field" value={pass} autoComplete={mode === 'save' ? 'new-password' : 'current-password'} onChange={(e) => setPass(e.target.value)} />
-      </label>
+      {mode === 'restore' && needs?.kind === 'passphrase' && (
+        <label className="field-label">
+          This older backup is locked with a passphrase
+          <input type="password" className="field" value={pass} autoComplete="current-password" onChange={(e) => setPass(e.target.value)} />
+        </label>
+      )}
+      {mode === 'restore' && needs?.kind === 'keyring' && (
+        <>
+          {needs.passkeys.length > 0 && (
+            <div><button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void act(async () => restored(await live.importBackup(file!.text, { kind: 'passkey', secret: await askPrf(needs.passkeys) })))}>
+              <Icon d={FACE_ID} size={18} stroke={1.6} />Open it with Face ID
+            </button></div>
+          )}
+          <label className="field-label">
+            Or your printed recovery code
+            <input className="field mono" autoComplete="off" spellCheck={false} value={code} onChange={(e) => setCode(e.target.value)} />
+          </label>
+        </>
+      )}
       {note && <p className={note.ok ? 'small' : 'err-inline'} role="status">{note.text}</p>}
       <div className="dialog-actions">
-        <button type="button" className="btn btn-ghost" onClick={() => { setMode(mode === 'save' ? 'restore' : 'save'); setNote(undefined); }} disabled={mode === 'restore' && s.records.length === 0}>
+        <button type="button" className="btn btn-ghost" onClick={() => { setMode(mode === 'save' ? 'restore' : 'save'); setNote(undefined); }} disabled={mode === 'restore' && (!open || s.records.length === 0)}>
           {mode === 'save' ? 'Restore instead' : 'Save instead'}
         </button>
         <button type="button" className="btn btn-ghost" onClick={() => ref.current?.close()}>Close</button>
-        <button type="button" className="btn btn-primary" disabled={busy || pass.length < (mode === 'save' ? MIN_PASSPHRASE : 1) || (mode === 'restore' && !file)} onClick={() => void act()}>
-          {mode === 'save' ? 'Save the backup file' : 'Restore these vaults'}
-        </button>
+        {mode === 'save' ? (
+          <button type="button" className="btn btn-primary" disabled={busy || s.records.length === 0} onClick={() => void save()}>Save the backup file</button>
+        ) : (
+          <button
+            type="button" className="btn btn-primary"
+            disabled={busy || !needs || (needs.kind === 'passphrase' ? pass.length < 1 : code.trim().length < 20)}
+            onClick={() => void restore(needs?.kind === 'passphrase' ? { passphrase: pass } : { kind: 'recovery-code', secret: code })}
+          >
+            Restore these vaults
+          </button>
+        )}
       </div>
     </dialog>
   );
@@ -239,16 +301,14 @@ export function LiveApp() {
     return () => live.stopClock();
   }, []);
 
-  // An invitation link: keep the invitation, drop it from the address bar, and open it once a wallet is connected.
+  // An invitation link: keep the invitation, drop it from the address bar, and open it once a wallet is connected and the records are open.
+  const isOpen = s.access.state === 'open';
   useEffect(() => {
     if (pendingKit) window.history.replaceState(null, '', '#/app');
-    if (!pendingKit || c.status !== 'connected') return;
+    if (!pendingKit || c.status !== 'connected' || !isOpen) return;
     setPendingKit(undefined);
-    live.join(pendingKit).then(() => setAdding(undefined), (e: unknown) => {
-      const m = e instanceof Error ? e.message : String(e);
-      setKitError(m.charAt(0).toUpperCase() + m.slice(1) + '.');
-    });
-  }, [pendingKit, c.status]);
+    live.join(pendingKit).then(() => setAdding(undefined), (e: unknown) => setKitError(sentence(e)));
+  }, [pendingKit, c.status, isOpen]);
 
   // Leave the wizard as soon as the vault it made exists as a record.
   const active = s.active;
@@ -266,7 +326,8 @@ export function LiveApp() {
   const justSealed = active?.role === 'owner' && active.status === 'ready' && wasCreating.current === active.id && sealedSeen !== active.id;
 
   let body;
-  if (!connected) body = <Welcome c={c} hasInvitation={!!pendingKit} saved={s.records.length} />;
+  if (!connected) body = <Welcome c={c} hasInvitation={!!pendingKit} saved={s.access.state === 'locked' ? 'locked' : s.records.length + s.access.legacy} />;
+  else if (!isOpen) body = <AccessGate access={s.access} onRestore={() => setBackup(true)} />;
   else if (adding === 'wizard') body = <LiveWizard connection={c} onCancel={() => setAdding(undefined)} />;
   else if (adding === 'menu' || here.length === 0 || !active) {
     body = (
@@ -278,6 +339,7 @@ export function LiveApp() {
   }
   else if (active.role === 'owner' && active.status !== 'ready') body = <LiveDeploy me={active} deploy={s.deploy} connection={c} />;
   else if (justSealed && active.role === 'owner') body = <Sealed deadline={active.vault?.deadline ?? active.firstDeadline ?? 0} onDone={() => setSealedSeen(active.id)} />;
+  else if (active.role === 'invited') body = <LiveInvited me={active} />;
   else if (!active.vault) {
     body = (
       <main className="wrap page narrow stack-18" id="main">
@@ -302,7 +364,7 @@ export function LiveApp() {
           <ThemeToggle />
         </div>
       </header>
-      {connected && <WalletBar c={c} s={s} onBackup={() => setBackup(true)} onNew={() => setAdding('menu')} />}
+      {connected && isOpen && <WalletBar c={c} s={s} onBackup={() => setBackup(true)} onNew={() => setAdding('menu')} />}
       {kitError && (
         <div className="wrap live-top-note">
           <ProblemCard problem={{ kind: 'input', title: 'That invitation could not be opened', body: kitError, retry: false }}>
@@ -311,11 +373,11 @@ export function LiveApp() {
         </div>
       )}
       {body}
-      {connected && here.length > 0 && !adding && (
+      {connected && isOpen && here.length > 0 && !adding && (
         <footer className="wrap appfoot">
           <Icon d={ICONS.lens} size={14} stroke={1.6} />
           <span>
-            Your vaults' secrets are kept only in this browser. <button type="button" className="linkish" onClick={() => setBackup(true)}>Save a backup file</button> so
+            Your vaults' secrets are kept only in this browser, encrypted. <button type="button" className="linkish" onClick={() => setBackup(true)}>Save a backup file</button> so
             a cleared browser is not a lost vault. This is a test network: tokens have no value and the network can be reset.
             {active && <> <button type="button" className="linkish" onClick={() => { if (window.confirm('Remove this vault from this browser? The vault itself stays on the network, but without a backup file or the invitation this browser can no longer use it.')) live.forget(active.id); }}>Remove this vault from this browser</button></>}
           </span>

@@ -9,9 +9,62 @@ import { Phase } from '@codicil/contracts/vault';
 import { HashChip, Icon, ICONS, Logo } from '../../components/ui.js';
 import { walletReadiness } from '../../live/problems.js';
 import { live, session, type Connection } from '../../live/session.js';
-import { fmtWhen, span, type GuardianView, type HeirView } from '../../live/store.js';
+import { fmtWhen, span, type GuardianView, type HeirView, type InvitedView } from '../../live/store.js';
 import { formatNight, networkName } from '../../live/wallet.js';
-import { AnyoneCan, PhaseLine, ProblemCard, ProofServerNote, shortAddress } from './parts.js';
+import { AnyoneCan, CopyLine, PhaseLine, ProblemCard, ProofServerNote, shortAddress } from './parts.js';
+
+/**
+ * Someone answered an invitation: their keys are made, here, from their own
+ * root. What is left is to send the reply and wait for the owner's letter.
+ */
+export function LiveInvited({ me }: { me: InvitedView }) {
+  const [letter, setLetter] = useState('');
+  const [error, setError] = useState<string>();
+  const owner = me.ownerName;
+  const what = me.invitedAs === 'guardian' ? 'a guardian of their vault' : me.backup ? 'a backup heir in their will' : 'an heir in their will';
+  const open = async () => {
+    setError(undefined);
+    try {
+      await live.join(letter);
+      setLetter('');
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      setError(m.charAt(0).toUpperCase() + m.slice(1) + '.');
+    }
+  };
+  return (
+    <main className="wrap page narrow stack-32" id="main">
+      <div className="stack-18">
+        <span className="eyebrow">For {me.name} · from {owner}</span>
+        <h1 className="disp h-sm">{owner} asked you to be {what}.</h1>
+        <p className="lede">
+          Your browser has made your own {me.invitedAs === 'guardian' ? 'guardian secret' : 'key'} for this, from your records. It
+          stays with you: {owner} never sees it. Send {owner} the reply below. It holds only a fingerprint of your key and a public
+          key {owner} can lock letters to you with, so you can send it any way you like.
+        </p>
+      </div>
+      <section className="card pad-24 stack-12" aria-labelledby="reply-h">
+        <h2 id="reply-h" className="disp h-card">1. Send this reply to {owner}</h2>
+        <CopyLine text={me.reply} label="Copy the reply" />
+      </section>
+      <section className="card pad-24 stack-12" aria-labelledby="letter-h">
+        <h2 id="letter-h" className="disp h-card">2. Paste the letter {owner} sends back</h2>
+        <p className="muted">
+          Once the vault is created, {owner} sends you a letter that only your browser can open. It
+          {me.invitedAs === 'guardian' ? ' proves you are one of the guardians.' : ' says what your share is and lets you claim it when the time comes.'}
+        </p>
+        <label className="sr-only" htmlFor="letter">The letter from {owner}</label>
+        <textarea id="letter" className="field mono letter-input" spellCheck={false} placeholder="codicil:letter:v1:… or the link you were sent" value={letter} onChange={(e) => setLetter(e.target.value)} />
+        {error && <p className="err-inline" role="alert">{error}</p>}
+        <div><button type="button" className="btn btn-primary" disabled={letter.trim() === ''} onClick={() => void open()}>Open the letter</button></div>
+      </section>
+      <p className="small muted">
+        Your key is rebuilt from your records whenever it is needed, so a backup file or your printed recovery code is all it takes
+        to have it again on another device.
+      </p>
+    </main>
+  );
+}
 
 export function LiveHeir({ me, now, busy, connection }: { me: HeirView; now: number; busy: boolean; connection: Connection }) {
   const v = me.vault!;
@@ -111,8 +164,8 @@ export function LiveHeir({ me, now, busy, connection }: { me: HeirView; now: num
 
         <p className="small muted heir-foot">
           <Icon d={ICONS.letter} size={14} />
-          Your invitation is saved in this browser. Keep the copy {owner} sent you as well: if this browser's data is cleared, you
-          will need it again, or a backup file.
+          What you need to claim is saved in this browser, encrypted. Save a backup file as well: if this browser's data is
+          cleared, the file and your printed recovery code bring it back.
         </p>
       </div>
     </main>
